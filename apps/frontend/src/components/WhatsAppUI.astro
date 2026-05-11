@@ -1,0 +1,61 @@
+---
+---
+<div class="whatsapp-app">
+  <header class="whatsapp-header">
+    <h2>WhatsApp Web</h2>
+  </header>
+  <main class="whatsapp-main">
+    <section class="qr-section" id="qr-section">
+      <h3>Escanea el código QR para enlazar tu cuenta</h3>
+      <img src="http://localhost:8000/api/v1/whatsapp/qr" alt="Código QR de WhatsApp" class="qr-image" />
+    </section>
+    <section class="chat-section" id="chat-section" style="display:none;">
+      <div class="messages" id="messages">
+        <div class="message incoming">Hola, ¿en qué puedo ayudarte?</div>
+        <div class="message outgoing">Quiero saber el precio del producto X.</div>
+      </div>
+      <div class="input-area">
+        <input type="text" placeholder="Escribe un mensaje..." class="message-input" />
+        <button class="send-btn">Enviar</button>
+      </div>
+    </section>
+  </main>
+</div>
+<script>
+  const qrImg = document.querySelector('.qr-image');
+  if (qrImg) {
+    qrImg.addEventListener('load', () => {
+      document.getElementById('qr-section').style.display = 'none';
+      document.getElementById('chat-section').style.display = 'block';
+    });
+  }
+</script>
+<style>
+  .whatsapp-app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background-color: var(--color-bg-main);
+    color: var(--color-text-main);
+    font-family: var(--font-sans);
+  }
+  .whatsapp-header {
+    padding: 0.75rem 1rem;
+    background-color: var(--color-bg-card);
+    border-bottom: 1px solid var(--color-border);
+    text-align: center;
+    font-weight: 600;
+  }
+  .whatsapp-main { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+  .qr-section { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .qr-image { max-width: 250px; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+  .chat-section { flex: 1; display: flex; flex-direction: column; }
+  .messages { flex: 1; padding: 1rem; overflow-y: auto; }
+  .message { margin: 0.5rem 0; padding: 0.5rem 0.75rem; border-radius: var(--radius-md); max-width: 70%; }
+  .incoming { background-color: var(--color-bg-card); align-self: flex-start; }
+  .outgoing { background-color: var(--color-accent); color: var(--color-accent-text); align-self: flex-end; }
+  .input-area { display: flex; padding: 0.5rem; border-top: 1px solid var(--color-border); }
+  .message-input { flex: 1; padding: 0.5rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background-color: var(--color-bg-cardb); color: var(--color-text-main); }
+  .send-btn { margin-left: 0.5rem; background-color: var(--color-accent); color: var(--color-accent-text); border: none; border-radius: var(--radius-md); padding: 0.5rem 1rem; cursor: pointer; }
+  .send-btn:hover { background-color: var(--color-accent-hover); }
+</style>

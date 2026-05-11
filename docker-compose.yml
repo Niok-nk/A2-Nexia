@@ -1,0 +1,29 @@
+version: '3.9'
+
+services:
+  backend:
+    build: ./apps/backend
+    ports:
+      - '8000:8000'
+      - '8001:8001'
+    volumes:
+      - ./apps/backend:/app
+      - wa_session:/app/wa_session
+    env_file: ./apps/backend/.env
+    depends_on:
+      - redis
+
+  frontend:
+    build: ./apps/frontend
+    ports:
+      - '4321:4321'
+    volumes:
+      - ./apps/frontend:/app
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+
+volumes:
+  wa_session:

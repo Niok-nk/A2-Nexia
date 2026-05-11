@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Contact {
+  id        String    @id @default(cuid())
+  phone     String    @unique
+  name      String?
+  email     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  leads     Lead[]
+  messages  Message[]
+}
+
+model Lead {
+  id         String  @id @default(cuid())
+  contactId  String
+  contact    Contact @relation(fields: [contactId], references: [id])
+  stage      String  @default("INITIAL")
+  type       String  @default("CONSULTA")
+  module     String  @default("VENTAS")
+  assignedTo String?
+  notes      Note[]
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+model Message {
+  id        String  @id @default(cuid())
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id])
+  direction String  @default("INBOUND")
+  body      String
+  sentAt    DateTime @default(now())
+  agentType String?
+}
+
+model Note {
+  id        String @id @default(cuid())
+  leadId    String
+  lead      Lead   @relation(fields: [leadId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+}
