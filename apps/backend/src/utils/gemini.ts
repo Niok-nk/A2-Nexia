@@ -4,7 +4,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-const MODEL_NAME = 'gemini-1.5-flash-8k';
+const MODEL_NAME = 'gemma-4-31b-it';
 
 export const getGeminiModel = (systemInstruction?: string) => {
 	const model = genAI.getGenerativeModel({
