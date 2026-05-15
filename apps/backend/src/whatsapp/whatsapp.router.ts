@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import qrcode from 'qrcode';
 import { z } from 'zod';
-import { getStatus, getCurrentQR, sendMessage } from './whatsapp.js';
+import { getStatus, getCurrentQR, sendMessage, reconnectWhatsApp } from './whatsapp.js';
 import { requireAuth } from '../middleware/auth.middleware.js';
 import prisma from '../db/index.js';
 import { orchestrator } from '../agents/orchestrator.js';
@@ -13,6 +13,20 @@ const router: Router = Router();
 router.get('/status', requireAuth, (_req: Request, res: Response) => {
 	res.set('Cache-Control', 'no-store');
 	res.json({ status: getStatus() });
+});
+
+// POST /api/v1/whatsapp/reconnect — Fuerza reconexión y genera nuevo QR
+router.post('/reconnect', requireAuth, async (_req: Request, res: Response) => {
+	try {
+		const success = await reconnectWhatsApp();
+		if (success) {
+			res.json({ success: true, message: 'Reconnecting... Wait for new QR' });
+		} else {
+			res.status(500).json({ success: false, error: 'Failed to reconnect' });
+		}
+	} catch (error) {
+		res.status(500).json({ error: 'Error reconnecting', details: String(error) });
+	}
 });
 
 // GET /api/v1/whatsapp/qr — Retorna QR como imagen base64

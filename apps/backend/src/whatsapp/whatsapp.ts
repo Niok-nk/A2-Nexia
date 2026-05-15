@@ -3,6 +3,8 @@ const require = createRequire(import.meta.url);
 const { Client: WAClient, LocalAuth } = require('whatsapp-web.js');
 import type { Client } from 'whatsapp-web.js';
 import qrcode from 'qrcode';
+import fs from 'fs/promises';
+import path from 'path';
 import logger from '../utils/logger.js';
 import { handleIncomingMessage } from './message.handler.js';
 
@@ -20,7 +22,27 @@ export const getStatus = (): WAStatus => {
 
 export const getCurrentQR = (): string | null => currentQR;
 
-export const initWhatsApp = async (): Promise<Client | null> => {
+const clearSession = async (): Promise<void> => {
+	try {
+		const sessionPath = path.join(process.cwd(), 'wa_session', 'session-nexia-crm-client');
+		await fs.rm(sessionPath, { recursive: true, force: true });
+		logger.info('WhatsApp session cleared');
+	} catch (error) {
+		logger.warn({ error }, 'Failed to clear session folder');
+	}
+};
+
+let isReconnecting = false;
+
+export const initWhatsApp = async (forceNewSession = false): Promise<Client | null> => {
+	if (isReconnecting) {
+		logger.info('Reconnection already in progress, skipping...');
+		return null;
+	}
+
+	if (forceNewSession) {
+		await clearSession();
+	}
 	try {
 		const chromePath =
 			process.env.CHROME_PATH ||
@@ -78,10 +100,18 @@ export const initWhatsApp = async (): Promise<Client | null> => {
 			isReady = false;
 		});
 
-		client.on('disconnected', (reason: any) => {
-			logger.warn({ reason }, 'WhatsApp disconnected');
+		client.on('disconnected', async (reason: any) => {
+			logger.warn({ reason }, 'WhatsApp disconnected. Reinitializing...');
 			isReady = false;
 			currentQR = null;
+			whatsappClient = null;
+			isReconnecting = true;
+
+			setTimeout(async () => {
+				logger.info('Attempting to reconnect WhatsApp...');
+				await initWhatsApp(true);
+				isReconnecting = false;
+			}, 2000);
 		});
 
 		// Conectar mensajes entrantes al handler
@@ -105,4 +135,29 @@ export const sendMessage = async (to: string, message: string): Promise<void> =>
 	}
 	const chatId = to.includes('@c.us') ? to : `${to}@c.us`;
 	await whatsappClient.sendMessage(chatId, message);
+};
+
+export const reconnectWhatsApp = async (): Promise<boolean> => {
+	try {
+		if (whatsappClient) {
+			await whatsappClient.destroy();
+		}
+		whatsappClient = null;
+		isReady = false;
+		currentQR = null;
+		isReconnecting = true;
+
+		await clearSession();
+		await initWhatsApp();
+
+		setTimeout(() => {
+			isReconnecting = false;
+		}, 5000);
+
+		return true;
+	} catch (error) {
+		logger.error({ error }, 'Failed to reconnect WhatsApp');
+		isReconnecting = false;
+		return false;
+	}
 };
