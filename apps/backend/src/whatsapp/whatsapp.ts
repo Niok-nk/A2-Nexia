@@ -56,6 +56,7 @@ export const initWhatsApp = async (forceNewSession = false): Promise<Client | nu
 				dataPath: './wa_session',
 				clientId: 'nexia-crm-client',
 			}),
+			takeOver: true,
 			webVersionCache: {
 				type: 'remote',
 				remotePath:
@@ -119,6 +120,18 @@ export const initWhatsApp = async (forceNewSession = false): Promise<Client | nu
 		client.on('change_state', (state: string) => {
 			logger.info({ state }, 'WhatsApp state changed');
 		});
+
+		// Keep-alive: enviar ping cada 30 segundos para mantener la conexión
+		setInterval(async () => {
+			if (client.info?.wid) {
+				try {
+					await client.pupPage.evaluate(() => {
+						return window.Store?.Msg?.collection?.length;
+					});
+					logger.debug('Keep-alive ping sent');
+				} catch {}
+			}
+		}, 30000);
 
 		// Conectar mensajes entrantes al handler
 		client.on('message', async (msg) => {
