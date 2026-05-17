@@ -152,7 +152,7 @@ const { id } = Astro.params;
   }
 
   async function sendManualMsg() {
-    const input = document.getElementById('manual-msg-input') as HTMLInputElement;
+    const input = document.getElementById('manual-msg-input');
     const msg = input?.value?.trim();
     if (!msg) return;
 
