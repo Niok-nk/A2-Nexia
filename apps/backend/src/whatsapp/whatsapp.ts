@@ -159,7 +159,22 @@ export const sendMessage = async (to: string, message: string): Promise<void> =>
 	if (!whatsappClient) {
 		throw new Error('WhatsApp client not initialized');
 	}
-	const chatId = to.includes('@c.us') ? to : `${to}@c.us`;
+
+	// Normalizar el número de teléfono (eliminar cualquier formato anterior)
+	let phone = to;
+	if (phone.includes('@lid')) {
+		phone = phone.replace('@lid', '');
+	} else if (phone.includes('@c.us')) {
+		phone = phone.replace('@c.us', '');
+	}
+
+	// Solo números, agregar código de país si falta
+	if (phone.length === 10) {
+		phone = '57' + phone;
+	}
+
+	logger.info({ originalTo: to, normalizedPhone: phone, chatId }, 'Sending WhatsApp message');
+	const chatId = `${phone}@c.us`;
 	await whatsappClient.sendMessage(chatId, message);
 };
 
