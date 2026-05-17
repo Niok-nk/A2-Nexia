@@ -25,22 +25,65 @@ function formatHistory(history: Array<{ direction: string; body: string }>): str
 
 // ─── Helper para limpiar respuesta de razonamiento interno ─────────────────
 function cleanResponse(response: string): string {
-	// Eliminar patrones de pensamiento como: * texto * , ** texto ** , _texto_
+	// Si la respuesta contiene patrones de razonamiento interno, extraer solo la parte útil
+	const reasonPatterns = [
+		/Role:/i,
+		/Catalog:/i,
+		/Workflow:/i,
+		/Customer Input:/i,
+		/Context\/History:/i,
+		/Constraint Check:/i,
+		/Self-Correction:/i,
+		/Professional \?/i,
+		/Spanish \?/i,
+		/Clear CTA \?/i,
+		/\* [A-Z]/,
+	];
+
+	const hasReasoning = reasonPatterns.some(p => p.test(response));
+
+	if (hasReasoning) {
+		// Buscar la última línea que parece ser respuesta real (contiene emojis o texto normal)
+		const lines = response.split('\n');
+		const usefulLines: string[] = [];
+
+		for (const line of lines) {
+			// Ignorar líneas que son puro razonamiento
+			const isReasoning = reasonPatterns.some(p => p.test(line)) && !line.match(/^[¡¿¡?]/);
+			// Ignorar líneas que son solo una palabra o muy cortas
+			const isShort = line.trim().length < 15;
+			// Ignorar líneas con muchos $
+			const isPrice = line.match(/^\s*\$?\d+[\d.,]*\s*$/);
+
+			if (!isReasoning && !isShort && !isPrice) {
+				usefulLines.push(line);
+			}
+		}
+
+		if (usefulLines.length > 0) {
+			const cleaned = usefulLines.join(' ').replace(/\s+/g, ' ').trim();
+			if (cleaned.length > 20) return cleaned;
+		}
+
+		// Si no se pudo limpiar, buscar después del último patrón de razonamiento
+		const lastReasonIndex = response.search(/Professional \?.*Spanish \?.*Clear CTA \?/i);
+		if (lastReasonIndex !== -1) {
+			const after = response.slice(lastReasonIndex + 50);
+			// Buscar el inicio de la respuesta real
+			const match = after.match(/[*$]?\s*([¡¿A-Z].+)/);
+			if (match) {
+				return match[1].trim();
+			}
+		}
+	}
+
+	// Limpieza básica
 	let cleaned = response
-		.replace(/\*[^*]+\*/g, '') // elimina *pensamiento*
-		.replace(/\*\*[^*]+\*\*/g, '') // elimina **pensamiento**
-		.replace(/_[^_]+_/g, '') // elimina _texto_
-		.replace(/^\s*[-•]\s*/gm, '') // elimina listas de pensamiento
-		.replace(/^Customer Input:.*$/gm, '')
-		.replace(/^Context\/History:.*$/gm, '')
-		.replace(/^Role:.*$/gm, '')
-		.replace(/^Constraint Check:.*$/gm, '')
-		.replace(/^Self-Correction:.*$/gm, '')
-		.replace(/^Wait.*$/gm, '')
+		.replace(/\*[^*]+\*/g, '')
+		.replace(/\*\*[^*]+\*\*/g, '')
+		.replace(/_[^_]+_/g, '')
 		.trim();
 
-	// Si después de limpiar quedó vacío o muy corto, devolver el original
-	if (cleaned.length < 10) return response;
 	return cleaned;
 }
 
