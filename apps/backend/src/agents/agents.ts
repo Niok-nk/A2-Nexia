@@ -234,11 +234,7 @@ ${productList || 'Sin coincidencias.'}`,
 					asistente:
 						'¡Genial! Confírmame el modelo exacto que te interesa y tu ciudad, y te paso precio y disponibilidad. Después te conecto con Cristina (+57 318 740 8190) para finalizar la compra.',
 				},
-				{
-					cliente: 'Soy de Mocoa, Putumayo',
-					asistente:
-						'¡Bienvenido! Para Putumayo tenemos asesor dedicado. Cuéntame qué producto buscas y te paso el contacto directo del asesor de tu zona.',
-				},
+
 			],
 			historial: formatHistory(context?.history),
 			mensajeCliente: message,

@@ -113,7 +113,7 @@ export const wooCommerceService = {
 		}
 		try {
 			logger.info('Fetching products from WooCommerce...');
-			const { data } = await wcApi.get('/wp-json/wc/v3/products', {
+			const { data } = await wcApi.get('wp-json/wc/v3/products', {
 				params: { per_page: limit, status: 'publish' },
 			});
 			logger.info({ count: data.length }, 'WooCommerce products fetched successfully');
@@ -137,7 +137,7 @@ export const wooCommerceService = {
 		}
 		try {
 			logger.info({ query }, 'Searching products in WooCommerce...');
-			const { data } = await wcApi.get('/wp-json/wc/v3/products', {
+			const { data } = await wcApi.get('wp-json/wc/v3/products', {
 				params: { search: query, per_page: limit },
 			});
 			logger.info({ query, count: data.length }, 'WooCommerce search results');
