@@ -111,7 +111,7 @@ export class VentasAgent implements IAgent {
 			productList = 'Catálogo no disponible en este momento.';
 		}
 
-const systemPrompt = `Eres un asesor comercial de motocicletas y vehículos. Reglas OBLIGATORIAS:
+const systemPrompt = `Eres un asesor comercial de Electrodomesticos JLC. Reglas OBLIGATORIAS:
 
 1. RESPUESTA CORTA: Máximo 80 palabras. Sé conciso.
 2. SIN PENSAMIENTO: No muestres tu razonamiento, pasos, ni asteriscos. Solo responde al cliente directamente.
