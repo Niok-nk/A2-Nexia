@@ -10,7 +10,6 @@ import {
 	PagosAgent,
 } from './agents.js';
 import { generateResponse } from '../utils/gemini.js';
-import logger from '../utils/logger.js';
 
 type IntentKey =
 	| 'bienvenida'
@@ -151,7 +150,7 @@ Categoría: ventas
 Mensaje: "Mi lavadora no centrifuga"
 Categoría: servicio_tecnico
 
-Mensaje: "Necesito el filtro de mi nevera marca JLC"
+Mensaje: "Necesito el filtro de mi nevera marca jlc"
 Categoría: repuestos
 
 Mensaje: "¿Cuánto debo de mi crédito?"
@@ -160,7 +159,7 @@ Categoría: cartera
 Mensaje: "¿Tienen vacantes?"
 Categoría: vacantes
 
-Mensaje: "Quiero ser distribuidor en Cali"
+Mensaje: "Quiero ser distribuidor"
 Categoría: distribuidores
 
 Mensaje: "¿Puedo pagar con tarjeta?"
@@ -207,25 +206,16 @@ Categoría:`;
 		message: string,
 		context: any
 	): Promise<{ agentType: string; response: string }> {
-		try {
-			const hasHistory = Array.isArray(context?.history) && context.history.length > 0;
-			const intent = await this.classifyIntent(message, hasHistory);
-			logger.info({ intent, message: message.slice(0, 50) }, 'Orchestrator route');
-			const agent = this.agents[intent] || this.agents.ventas;
+		const hasHistory = Array.isArray(context?.history) && context.history.length > 0;
+		const intent = await this.classifyIntent(message, hasHistory);
+		const agent = this.agents[intent] || this.agents.ventas;
 
 		const result = await agent.handle(message, context);
 
-			return {
-				agentType: intent,
-				response: result.response,
-			};
-		} catch (error: any) {
-			logger.error({ error: error.message, message }, 'Orchestrator route error');
-			return {
-				agentType: 'ventas',
-				response: 'Disculpa, tuve un problema al procesar tu mensaje. Por favor intenta de nuevo.',
-			};
-		}
+		return {
+			agentType: intent,
+			response: result.response,
+		};
 	}
 }
 

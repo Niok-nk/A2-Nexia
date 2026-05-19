@@ -16,114 +16,262 @@ export interface IAgent {
 // ─── Helper: formatear historial ─────────────────────────────────────────────
 
 function formatHistory(history: Array<{ direction: string; body: string }>): string {
-	if (!history || history.length === 0) return '(primer mensaje del cliente)';
+	if (!history || history.length === 0) return '';
 	return history
 		.slice(-6)
 		.map((m) => `${m.direction === 'INBOUND' ? 'Cliente' : 'Asistente'}: ${m.body}`)
 		.join('\n');
 }
 
-// ─── Helper: limpiar respuesta de Gemma ──────────────────────────────────────
+// ─── Limpiador de respuestas de Gemma ────────────────────────────────────────
 //
-// Gemma muestra TODO su razonamiento ("Role:", "Task:", "Draft 1:",
-// "Check constraints:", asteriscos, etc.). Este filtro es agresivo.
+// Gemma escribe TODO su razonamiento en una sola secuencia continua, sin
+// saltos de línea claros. Patrones típicos a eliminar:
+//   "User Role: ... Draft 1: ... Draft 2: ... Yes. Yes. Yes. <RESPUESTA>"
+//   "<RESPUESTA><RESPUESTA>" (duplicación al final)
+//
+// Estrategia:
+//   1. Detectar marcadores de "respuesta final" y quedarse solo con lo
+//      posterior al ÚLTIMO marcador.
+//   2. Si hay "Draft N:" en el texto, quedarse con lo posterior al ÚLTIMO
+//      "Draft N:" detectado.
+//   3. Eliminar duplicación al final (cuando el texto se repite consigo mismo).
+//   4. Limpiar asteriscos, encabezados y prefijos residuales.
 
 function cleanResponse(raw: string): string {
 	if (!raw) return '';
 	let text = raw.trim();
 
-	// 1. Eliminar bloques de pensamiento estilo Gemma/DeepSeek
-	text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
-	text = text.replace(/```[\s\S]*?```/g, '');
+	// 1) Quitar bloques de pensamiento explícitos
+	text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+	text = text.replace(/```[\s\S]*?```/g, '').trim();
 
-	// 2. Si hay un marcador de "borrador final" / "respuesta", quedarse SOLO
-	//    con lo que viene después de la última ocurrencia
-	const finalMarkers = [
-		/(?:^|\n)\s*\**\s*(?:draft\s*\d*\s*final|final\s*draft|borrador final|respuesta final|respuesta al cliente|mensaje al cliente|respuesta|asistente|assistant|output|final answer|final)\s*:?\s*\**\s*\n/gi,
-	];
-	for (const re of finalMarkers) {
-		let lastMatch: RegExpExecArray | null = null;
-		let m: RegExpExecArray | null;
-		while ((m = re.exec(text)) !== null) lastMatch = m;
-		if (lastMatch && typeof lastMatch.index === 'number') {
-			text = text.slice(lastMatch.index + lastMatch[0].length);
+	// 2) Cortar después del último marcador de "Draft N:"
+	//    Esto deja TODO lo que vino después del último borrador, que suele
+	//    ser la respuesta final (a veces duplicada).
+	const draftMatches = [...text.matchAll(/draft\s*\d+\s*:?\s*/gi)];
+	if (draftMatches.length > 0) {
+		const last = draftMatches[draftMatches.length - 1];
+		text = text.slice(last.index! + last[0].length).trim();
+	}
+
+	// 3) Cortar después del último marcador estilo "Respuesta final:",
+	//    "Final answer:", "Asistente:", "Output:", "Mensaje al cliente:"
+	const finalMarkerRe = /(?:respuesta\s*final|final\s*answer|final\s*draft|borrador\s*final|mensaje\s*al\s*cliente|respuesta\s*al\s*cliente|asistente|assistant|output)\s*:\s*/gi;
+	const finalMatches = [...text.matchAll(finalMarkerRe)];
+	if (finalMatches.length > 0) {
+		const last = finalMatches[finalMatches.length - 1];
+		text = text.slice(last.index! + last[0].length).trim();
+	}
+
+	// 4) Cortar checklists tipo "Brief? Yes. Direct? Yes. Colombian Spanish? Yes."
+	//    Hacemos dos pasadas: primero la lista completa, luego fragmentos sueltos
+	//    como `"? Yes.` o `Asistente"? Yes.` que quedan al inicio.
+	text = text.replace(
+		/((?:[A-ZÁÉÍÓÚÑa-záéíóúñ"][\wáéíóúñÁÉÍÓÚÑ "]*\?\s*(?:Yes|No|Sí|Si)\.?\s*){2,})/gi,
+		''
+	);
+	// Pasada 2: fragmento residual al inicio del texto
+	text = text.replace(
+		/^[\s"']*[\wáéíóúñÁÉÍÓÚÑ "':]*\?\s*(?:Yes|No|Sí|Si)\.?\s*/i,
+		''
+	).trim();
+
+	// 5) Cortar listas de "User Role:", "Client Goal:", "Reference Info:",
+	//    "Context:", "Style:", "Customer's current request:", etc.
+	//    Buscamos el ÚLTIMO punto que termina una de estas etiquetas y
+	//    cortamos todo lo anterior.
+	const labelRe = /(?:^|[\s.])(?:user role|client goal|customer goal|customer's current request|customer current request|context(?:\s+from\s+previous\s+examples)?|reference info|style|i need to know|the customer is interested|the draft|following the examples)\s*:?/gi;
+	const labelMatches = [...text.matchAll(labelRe)];
+	if (labelMatches.length > 0) {
+		// Buscar el último "." que viene DESPUÉS del último label
+		const lastLabel = labelMatches[labelMatches.length - 1];
+		const afterLabel = text.slice(lastLabel.index! + lastLabel[0].length);
+		// El primer punto+espacio+mayúscula después indica fin de esa sección
+		const endOfLabel = afterLabel.search(/[.!?]\s+[¡¿"]?[A-ZÁÉÍÓÚÑ]/);
+		if (endOfLabel >= 0) {
+			text = afterLabel.slice(endOfLabel + 1).trim();
 		}
 	}
 
-	// 3. Si Gemma puso un "Draft 1:" tipo borrador, queremos lo que sigue
-	const draftRe = /(?:^|\n)\s*\**\s*draft\s*\d+\s*\**\s*:?\s*\**\s*\n?/gi;
-	let lastDraft: RegExpExecArray | null = null;
-	let dm: RegExpExecArray | null;
-	while ((dm = draftRe.exec(text)) !== null) lastDraft = dm;
-	if (lastDraft && typeof lastDraft.index === 'number') {
-		text = text.slice(lastDraft.index + lastDraft[0].length);
-	}
+	// 6) Quitar prefijos comunes al inicio
+	text = text.replace(
+		/^\s*(?:asistente|assistant|respuesta|response|output|mensaje al cliente)\s*:\s*/i,
+		''
+	).trim();
 
-	// 4. Eliminar líneas que son razonamiento (encabezados conocidos)
-	const skipPatterns = [
-		/^\**\s*(role|rol|task|tarea|company data|company|datos de la empresa|empresa)\s*:/i,
-		/^\**\s*(interaction protocol|protocol|protocolo|flujo|workflow|catalog|catálogo)\s*:/i,
-		/^\**\s*(constraints|restricciones|reglas|rules|format|formato|output)\s*:/i,
-		/^\**\s*(customer|cliente|customer input|customer message|user message|mensaje del cliente|mensaje)\s*:/i,
-		/^\**\s*(status|estado|context|contexto|history|historial)\s*:/i,
-		/^\**\s*(goal|objetivo|tone|tono|reasoning|razonamiento|analysis|análisis|self[- ]correction|check|constraint check)\s*:/i,
-		/^\**\s*(greet|saludar|introduce|presentar|ask|preguntar|provide|recommend|recomendar)\b/i,
-		/^\**\s*(first contact|no data provided|primer contacto)/i,
-		/^\**\s*(paso \d+|step \d+)\b/i,
-		/^\s*(yes|no|sí|si)\s*\.?\s*$/i,
-		/^\s*[*\-_=#]{2,}\s*$/, // líneas decorativas
-		/^\s*[•\-*]\s*(friendly|professional|emojis|spanish|max\s*\d+\s*words)/i,
+	// 7) Quitar todos los asteriscos
+	text = text.replace(/\*+/g, '').trim();
+
+	// 8) Quitar líneas que sean solo encabezados (por si quedaron)
+	const skipLine = [
+		/^\s*(user role|client goal|customer goal|reference info|context|style|status|task|role|company data|protocol|constraints|output|customer|cliente|user|asistente|assistant|goal|tone|workflow|catalog|format)\s*:/i,
+		/^\s*paso\s*\d+\s*:/i,
+		/^\s*step\s*\d+\s*:/i,
+		/^\s*[•\-]\s*(friendly|professional|emojis|spanish|max\s*\d+\s*words)/i,
 		/^\s*max\s*\d+\s*(words|palabras)/i,
-		/^\s*\?+\s*$/,
+		/^\s*(yes|no|sí|si)\s*\.?\s*$/i,
+		/^[\s_=#]{2,}$/,
 	];
+	text = text
+		.split('\n')
+		.filter((l) => {
+			const t = l.trim();
+			if (!t) return true;
+			return !skipLine.some((p) => p.test(t));
+		})
+		.join('\n')
+		.trim();
 
-	const lines = text.split('\n');
-	const kept: string[] = [];
-	for (const line of lines) {
-		const t = line.trim();
-		if (!t) {
-			kept.push('');
-			continue;
-		}
-		// Línea que SOLO contiene viñetas/asteriscos sin texto real
-		if (/^[\s*•\-#=_]+$/.test(t)) continue;
-		// Línea que parece un encabezado de razonamiento
-		if (skipPatterns.some((p) => p.test(t))) continue;
-		// Quitar viñetas iniciales (* - •) pero mantener el contenido
-		const stripped = line.replace(/^\s*[*•\-]\s+/, '');
-		kept.push(stripped);
+	// 9) Quitar duplicación al final.
+	//    Caso A: "TEXTO TEXTO" (mismo string duplicado exacto)
+	const fullDup = text.match(/^([\s\S]+?)\s*\1\s*$/);
+	if (fullDup && fullDup[1].length > 30) {
+		text = fullDup[1].trim();
+	} else {
+		// Caso B: las dos mitades son casi iguales (con leves diferencias
+		// de puntuación). Usamos dedupeTail.
+		text = dedupeTail(text);
 	}
 
-	let cleaned = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+	// 9b) Deduplicación por oraciones: si el texto se puede partir por
+	//     "¡" o ". " y la primera mitad es muy parecida a la segunda,
+	//     quedarse con una. Esto atrapa casos donde Gemma escribe la
+	//     respuesta dos veces seguidas con ligeras variaciones.
+	text = dedupeBySentence(text);
 
-	// 5. Eliminar TODO asterisco residual (Gemma los usa para *énfasis* y como bullets)
-	cleaned = cleaned.replace(/\*+/g, '').trim();
+	// 10) Compactar espacios
+	text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 
-	// 6. Si la respuesta aparece duplicada al final (problema observado),
-	//    tomar solo la primera versión.
-	//    Detecta: "TEXTOTEXTO" donde TEXTO termina con signo de puntuación.
-	const dupMatch = cleaned.match(/^(.+?[.!?])\s*\1\s*$/s);
-	if (dupMatch) cleaned = dupMatch[1].trim();
-
-	// 7. Si quedó vacío, último recurso: el texto original sin asteriscos ni
-	//    líneas con ":"  al inicio.
-	if (cleaned.length < 15) {
-		cleaned = raw
-			.split('\n')
-			.filter((l) => !/^\s*\**\s*[A-Za-zÁÉÍÓÚáéíóúñÑ ]{2,30}\s*:/.test(l))
-			.join('\n')
-			.replace(/\*+/g, '')
-			.trim();
-	}
-
-	return cleaned;
+	return text;
 }
 
-// ─── Constructor de prompt few-shot (Gemma-friendly) ─────────────────────────
+// Detecta duplicación al final.
+// Estrategia: busca la posición P tal que text[0..P] y text[P..end] son casi
+// iguales (tolerando pequeñas variaciones de puntuación / espacios).
+// Si la encuentra, devuelve text[0..P].
+function dedupeTail(text: string): string {
+	const len = text.length;
+	if (len < 60) return text;
+
+	// Buscar el inicio de una posible repetición.
+	// La señal más clara: "¡" o letra mayúscula tras un signo de cierre (.!?)
+	// o pegada a una letra minúscula seguida de mayúscula sin espacio.
+	const candidatePositions: number[] = [];
+	for (let i = Math.floor(len * 0.3); i < len * 0.7; i++) {
+		const ch = text[i];
+		const prev = text[i - 1];
+		// "¡" o "¿" interior (señal fuerte de inicio de oración)
+		if ((ch === '¡' || ch === '¿') && i > 30) {
+			candidatePositions.push(i);
+		}
+		// Mayúscula precedida por puntuación de cierre sin espacio
+		else if (
+			/[A-ZÁÉÍÓÚÑ]/.test(ch) &&
+			/[.!?]/.test(prev || '')
+		) {
+			candidatePositions.push(i);
+		}
+	}
+
+	for (const p of candidatePositions) {
+		const first = text.slice(0, p).trim();
+		const second = text.slice(p).trim();
+		if (first.length < 30 || second.length < 30) continue;
+
+		const a = normalizeForCompare(first);
+		const b = normalizeForCompare(second);
+		const minLen = Math.min(a.length, b.length);
+		const maxLen = Math.max(a.length, b.length);
+		if (maxLen === 0) continue;
+
+		// Casi iguales (≥90% del más largo coincide)
+		if (minLen / maxLen > 0.9) {
+			let diff = maxLen - minLen;
+			for (let i = 0; i < minLen; i++) {
+				if (a[i] !== b[i]) diff++;
+				if (diff / maxLen > 0.1) break;
+			}
+			if (diff / maxLen <= 0.1) {
+				return first;
+			}
+		}
+	}
+
+	return text;
+}
+
+function normalizeForCompare(s: string): string {
+	return s
+		.toLowerCase()
+		.replace(/[¡¿!?,.;:"'()\s]+/g, ' ')
+		.trim();
+}
+
+// Detecta cuando el texto contiene dos versiones casi idénticas de la misma
+// respuesta (típico de Gemma: escribe el "Draft 2" y luego repite la versión
+// "final" con cambios mínimos). Parte por "¡" o por oración completa y compara.
+function dedupeBySentence(text: string): string {
+	if (text.length < 60) return text;
+
+	// Partir por marcadores de inicio de oración: ¡, ¿, o ". A" (mayúscula tras punto)
+	const parts = text.split(/(?=¡[A-ZÁÉÍÓÚÑ])|(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ¿¡])/);
+	if (parts.length < 2) return text;
+
+	// Si la primera mitad de partes es muy parecida a la segunda, quedarse con
+	// la primera mitad.
+	const mid = Math.floor(parts.length / 2);
+	const firstHalf = parts.slice(0, mid).join(' ').trim();
+	const secondHalf = parts.slice(mid).join(' ').trim();
+
+	if (firstHalf.length > 30 && secondHalf.length > 30) {
+		const a = normalizeForCompare(firstHalf);
+		const b = normalizeForCompare(secondHalf);
+		const minLen = Math.min(a.length, b.length);
+		const maxLen = Math.max(a.length, b.length);
+		if (maxLen > 0 && minLen / maxLen > 0.85) {
+			// Calcular diferencias carácter por carácter
+			let diff = 0;
+			for (let i = 0; i < minLen; i++) {
+				if (a[i] !== b[i]) diff++;
+			}
+			diff += maxLen - minLen;
+			if (diff / maxLen < 0.1) {
+				return firstHalf;
+			}
+		}
+	}
+
+	// También: dos oraciones consecutivas casi idénticas
+	for (let i = 0; i < parts.length - 1; i++) {
+		const a = normalizeForCompare(parts[i]);
+		const b = normalizeForCompare(parts[i + 1]);
+		if (a.length > 30 && b.length > 30) {
+			const minLen = Math.min(a.length, b.length);
+			const maxLen = Math.max(a.length, b.length);
+			if (minLen / maxLen > 0.85) {
+				let diff = Math.abs(a.length - b.length);
+				for (let j = 0; j < minLen; j++) {
+					if (a[j] !== b[j]) diff++;
+				}
+				if (diff / maxLen < 0.1) {
+					// Quitar la copia (i+1)
+					const newParts = [...parts.slice(0, i + 1), ...parts.slice(i + 2)];
+					return newParts.join(' ').trim();
+				}
+			}
+		}
+	}
+
+	return text;
+}
+
+// ─── Constructor de prompt estilo "conversación continua" ────────────────────
 //
-// Clave: en lugar de listar "reglas" (que Gemma trata como instrucciones a
-// procesar y razonar), mostramos EJEMPLOS de mensaje del cliente → respuesta
-// del asistente. Gemma imita ejemplos mucho mejor que sigue reglas.
+// CLAVE: en vez de un system prompt con secciones (que Gemma reescribe), le
+// damos UN ÚNICO bloque tipo conversación que termina en "Asistente:" — esto
+// hace que Gemma simplemente continúe el último turno del asistente, sin
+// razonar en voz alta.
 
 interface FewShotExample {
 	cliente: string;
@@ -131,42 +279,32 @@ interface FewShotExample {
 }
 
 function buildGemmaPrompt(opts: {
-	rol: string;
-	datos?: string;
+	instruccion: string;
 	ejemplos: FewShotExample[];
 	historial: string;
 	mensajeCliente: string;
 }): { system: string; user: string } {
+	// system: rol mínimo + nota de formato
+	const system = `${opts.instruccion} Responde en español natural, en una o dos frases breves, sin asteriscos, sin encabezados, sin etiquetas, sin explicar tu razonamiento. IMPORTANTE: Responde SOLO el mensaje al cliente.`;
+
+	// user: conversación continua con ejemplos + historial + mensaje actual
 	const ejemplosTexto = opts.ejemplos
-		.map(
-			(e) =>
-				`Cliente: ${e.cliente}\nAsistente: ${e.asistente}`
-		)
+		.map((e) => `Cliente: ${e.cliente}\nAsistente: ${e.asistente}`)
 		.join('\n\n');
 
-	const system = `${opts.rol}
+	const historialTexto = opts.historial ? `${opts.historial}\n` : '';
 
-${opts.datos ? `INFORMACIÓN DE REFERENCIA:\n${opts.datos}\n\n` : ''}A continuación verás ejemplos de cómo respondes. Tu respuesta debe imitar EXACTAMENTE este estilo: directa, breve, en español, sin asteriscos, sin encabezados, sin explicar tu razonamiento, sin escribir "Asistente:" ni "Respuesta:".
-
-${ejemplosTexto}`;
-
-	const user = `${opts.historial !== '(primer mensaje del cliente)' ? `Historial:\n${opts.historial}\n\n` : ''}Cliente: ${opts.mensajeCliente}
-Asistente:`;
+	const user = `${ejemplosTexto}\n\n---\n\n${historialTexto}Cliente: ${opts.mensajeCliente}\nAsistente:`;
 
 	return { system, user };
 }
 
-// ─── AGENTE BIENVENIDA ───────────────────────────────────────────────────────
-//
-// Maneja saludos, mensajes vagos, "hola", "buenos días", "info", etc.
-// NO usa el modelo — responde con plantillas determinísticas, porque para
-// un saludo no hay razón de gastar un LLM y queremos respuesta instantánea
-// y predecible.
+// ─── AGENTE BIENVENIDA (sin LLM) ─────────────────────────────────────────────
 
 export class BienvenidaAgent implements IAgent {
 	name = 'Bienvenida';
 
-	async handle(message: string, _context: any): Promise<AgentResponse> {
+	async handle(_message: string, _context: any): Promise<AgentResponse> {
 		const hora = new Date().getHours();
 		let saludo = 'Hola';
 		if (hora >= 5 && hora < 12) saludo = 'Buenos días';
@@ -200,29 +338,28 @@ export class VentasAgent implements IAgent {
 			const products = await wooCommerceService.searchProducts(message, 4);
 			productList = wooCommerceService.formatProductList(products);
 		} catch {
-			productList = 'Catálogo no disponible en este momento.';
+			productList = '';
 		}
 
-		const { system, user } = buildGemmaPrompt({
-			rol: 'Eres asesor comercial de Electrodomésticos JLC. Atiendes clientes que quieren comprar o cotizar electrodomésticos. Hablas en español de Colombia, eres cordial, breve y directo.',
-			datos: `Cierre de ventas: Cristina, WhatsApp +57 318 740 8190.
-Compra al detal: contado o crédito.
-Compra al por mayor: se atiende por el área de distribuidores.
-Zona Putumayo tiene asesor dedicado.
-Sitio web: https://jlc-electronics.com/
+		const datos = `Cierre de ventas: Cristina, WhatsApp +57 318 740 8190. Compra al detal: contado o crédito. Compra al por mayor: área de distribuidores. Zona Putumayo tiene asesor dedicado. Sitio web: https://jlc-electronics.com/.${productList ? ` Productos relacionados: ${productList}` : ''}`;
 
-Productos relacionados con la consulta:
-${productList || 'Sin coincidencias.'}`,
+		const { system, user } = buildGemmaPrompt({
+			instruccion: `Eres asesor comercial de Electrodomésticos JLC, cordial y breve, hablas español de Colombia. Datos que puedes usar: ${datos}`,
 			ejemplos: [
 				{
 					cliente: 'Quiero saber el precio de una nevera',
 					asistente:
-						'¡Con gusto! Para darte el precio exacto, ¿desde qué ciudad escribes y qué tipo de nevera buscas (capacidad o marca)? También, ¿la compra sería al contado o a crédito?',
+						'¡Con gusto! Para darte el precio exacto, ¿desde qué ciudad escribes y qué tipo de nevera buscas (capacidad o marca)? ¿La compra sería al contado o a crédito?',
 				},
 				{
-					cliente: 'Me interesa una lavadora LG de 18 kilos',
+					cliente: 'que productos tienen disponibles',
 					asistente:
-						'¡Excelente elección! ¿La compra sería al contado o a crédito? Y cuéntame desde qué ciudad escribes para confirmar disponibilidad.',
+						'Manejamos neveras, congeladores, lavadoras, televisores, y más. Puedes ver el catálogo en https://jlc-electronics.com/. ¿Buscas algo en particular para confirmarte disponibilidad?',
+				},
+				{
+					cliente: 'congeladores',
+					asistente:
+						'¡Sí, tenemos congeladores! ¿Desde qué ciudad escribes y qué capacidad necesitas (en litros)? ¿Lo pagarías de contado o a crédito?',
 				},
 				{
 					cliente: 'A crédito por favor',
@@ -232,9 +369,13 @@ ${productList || 'Sin coincidencias.'}`,
 				{
 					cliente: 'Al contado',
 					asistente:
-						'¡Genial! Confírmame el modelo exacto que te interesa y tu ciudad, y te paso precio y disponibilidad. Después te conecto con Cristina (+57 318 740 8190) para finalizar la compra.',
+						'¡Genial! Confírmame el modelo exacto y tu ciudad, y te paso precio y disponibilidad. Después te conecto con Cristina (+57 318 740 8190) para finalizar la compra.',
 				},
-
+				{
+					cliente: 'Soy de Mocoa, Putumayo',
+					asistente:
+						'¡Bienvenido! Para Putumayo tenemos asesor dedicado. Cuéntame qué producto buscas y te paso el contacto directo del asesor de tu zona.',
+				},
 			],
 			historial: formatHistory(context?.history),
 			mensajeCliente: message,
@@ -257,16 +398,15 @@ export class CarteraAgent implements IAgent {
 	name = 'Cartera';
 
 	async handle(message: string, context: any): Promise<AgentResponse> {
+		const datos = `Desde este chat no se accede a información personal del cliente. Canales oficiales: WhatsApp cartera +57 314 422 9949 y +57 315 721 2367. Línea telefónica +57 320 788 1108 (horario 12:30 p.m. a 2:30 p.m.). Correo para peticiones con soportes: callcenter5@electromillonaria.co.`;
+
 		const { system, user } = buildGemmaPrompt({
-			rol: 'Eres asistente de cartera de Electrodomésticos JLC. Desde este chat no se accede a información personal de cartera, por lo que tu trabajo es redirigir amablemente al cliente a los canales oficiales.',
-			datos: `WhatsApp cartera: +57 314 422 9949 y +57 315 721 2367
-Línea telefónica: +57 320 788 1108 (horario 12:30 p.m. a 2:30 p.m.)
-Correo para peticiones: callcenter5@electromillonaria.co`,
+			instruccion: `Eres asistente de cartera de Electrodomésticos JLC. Tu rol es redirigir amablemente al cliente a los canales oficiales. Datos: ${datos}`,
 			ejemplos: [
 				{
 					cliente: '¿Cuánto debo de mi crédito?',
 					asistente:
-						'Desde esta línea no puedo acceder a tu información personal. Por favor comunícate con nuestra área de cartera al WhatsApp +57 314 422 9949 o +57 315 721 2367 y con gusto te dan el detalle.',
+						'Desde esta línea no puedo acceder a tu información personal. Comunícate con cartera al WhatsApp +57 314 422 9949 o +57 315 721 2367 y con gusto te dan el detalle.',
 				},
 				{
 					cliente: 'Ya pagué la cuota, ¿dónde envío el soporte?',
@@ -276,7 +416,7 @@ Correo para peticiones: callcenter5@electromillonaria.co`,
 				{
 					cliente: 'Estoy atrasado, no puedo pagar este mes',
 					asistente:
-						'Entiendo tu situación. Te invito a comunicarte con cartera al +57 314 422 9949 para revisar opciones de reestructuración. También puedes llamar al +57 320 788 1108 entre 12:30 y 2:30 p.m.',
+						'Entiendo. Te invito a comunicarte con cartera al +57 314 422 9949 para revisar opciones de reestructuración. También puedes llamar al +57 320 788 1108 entre 12:30 y 2:30 p.m.',
 				},
 			],
 			historial: formatHistory(context?.history),
@@ -299,27 +439,25 @@ export class ServicioTecnicoAgent implements IAgent {
 	name = 'Servicio Técnico';
 
 	async handle(message: string, context: any): Promise<AgentResponse> {
+		const datos = `Servicio Técnico JLC: +57 320 788 1151. Servicio Técnico JLC (Diego): +57 320 788 1110. Web: https://jlc-electronics.com/servicio-tecnico/. Horario: lunes a sábado, 8:00 a.m. a 5:00 p.m.`;
+
 		const { system, user } = buildGemmaPrompt({
-			rol: 'Eres asistente de servicio técnico de Electrodomésticos JLC. Atiendes clientes con electrodomésticos dañados, mantenimiento o fallas.',
-			datos: `Servicio Técnico JLC: +57 320 788 1151
-Servicio Técnico JLC (Diego): +57 320 788 1110
-Sitio web: https://jlc-electronics.com/servicio-tecnico/
-Horario: lunes a sábado, 8:00 a.m. a 5:00 p.m.`,
+			instruccion: `Eres asistente de servicio técnico de Electrodomésticos JLC para clientes con electrodomésticos dañados o que necesitan mantenimiento. Datos: ${datos}`,
 			ejemplos: [
 				{
 					cliente: 'Mi lavadora no centrifuga',
 					asistente:
-						'Lamento la falla. ¿Me indicas la marca, modelo y, si lo sabes, el año de tu lavadora? Con esos datos te orientamos mejor o agendamos la revisión.',
+						'Lamento la falla. ¿Me indicas la marca, modelo y, si lo sabes, el año de tu lavadora? Con esos datos te orientamos o agendamos la revisión.',
 				},
 				{
 					cliente: 'Necesito mantenimiento para mi nevera Mabe',
 					asistente:
-						'¡Con gusto! ¿Me confirmas el modelo y el año aproximado de la nevera? Luego puedes escribir directamente al técnico al +57 320 788 1151 para agendar (lunes a sábado, 8 a.m. a 5 p.m.).',
+						'¡Con gusto! ¿Me confirmas el modelo y el año aproximado? Luego puedes escribir al técnico al +57 320 788 1151 para agendar (lunes a sábado, 8 a.m. a 5 p.m.).',
 				},
 				{
 					cliente: 'Es una nevera LG modelo GT44, no enfría',
 					asistente:
-						'Gracias por los datos. Por favor escribe al WhatsApp de servicio técnico +57 320 788 1151 o +57 320 788 1110 (Diego) para agendar la visita. Atienden lunes a sábado de 8 a.m. a 5 p.m.',
+						'Gracias por los datos. Escribe al WhatsApp +57 320 788 1151 o +57 320 788 1110 (Diego) para agendar la visita. Atienden lunes a sábado de 8 a.m. a 5 p.m.',
 				},
 			],
 			historial: formatHistory(context?.history),
@@ -336,7 +474,7 @@ Horario: lunes a sábado, 8:00 a.m. a 5:00 p.m.`,
 	}
 }
 
-// ─── AGENTE REPUESTOS ────────────────────────────────────────────────────────
+// ─── AGENTE REPUESTOS (corregir)────────────────────────────────────────────────────────
 
 export class RepuestosAgent implements IAgent {
 	name = 'Repuestos';
@@ -352,13 +490,10 @@ export class RepuestosAgent implements IAgent {
 			// continuar sin catálogo
 		}
 
-		const { system, user } = buildGemmaPrompt({
-			rol: 'Eres asistente de repuestos de Electrodomésticos JLC. Ayudas al cliente a encontrar el repuesto, precio y disponibilidad.',
-			datos: `Si no hay stock, el tiempo de pedido es 3 a 5 días hábiles.
-Sitio web: https://jlc-electronics.com/
+		const datos = `Sin stock: tiempo de pedido 3 a 5 días hábiles. Web: https://jlc-electronics.com/.${productInfo ? ` Repuestos relacionados: ${productInfo}` : ''}`;
 
-Repuestos relacionados:
-${productInfo || 'Sin coincidencias.'}`,
+		const { system, user } = buildGemmaPrompt({
+			instruccion: `Eres asistente de repuestos de Electrodomésticos JLC. Ayudas a encontrar repuestos, precio y disponibilidad. Datos: ${datos}`,
 			ejemplos: [
 				{
 					cliente: 'Necesito un filtro para nevera',
@@ -368,7 +503,7 @@ ${productInfo || 'Sin coincidencias.'}`,
 				{
 					cliente: 'Es una nevera Mabe modelo RMA250',
 					asistente:
-						'Gracias. Voy a revisar disponibilidad del filtro para Mabe RMA250. Si tenemos stock te paso el precio; si no, el pedido tarda entre 3 y 5 días hábiles. ¿Te lo reservo?',
+						'Gracias. Voy a revisar disponibilidad del filtro para Mabe RMA250. Si hay stock te paso el precio; si no, el pedido tarda entre 3 y 5 días hábiles. ¿Te lo reservo?',
 				},
 			],
 			historial: formatHistory(context?.history),
@@ -391,21 +526,20 @@ export class VacantesAgent implements IAgent {
 	name = 'Vacantes';
 
 	async handle(message: string, context: any): Promise<AgentResponse> {
+		const datos = `No hay listado de vacantes cargado actualmente. El interesado deja sus datos para quedar en base de datos: nombre completo, cargo de interés, ciudad. Puede enviar hoja de vida.`;
+
 		const { system, user } = buildGemmaPrompt({
-			rol: 'Eres asistente de recursos humanos de Electrodomésticos JLC. Atiendes a personas interesadas en trabajar en la empresa.',
-			datos: `Actualmente no hay listado de vacantes cargado en el sistema.
-El interesado puede dejar sus datos para quedar en base de datos.
-Datos a recolectar: nombre completo, cargo de interés, ciudad.`,
+			instruccion: `Eres asistente de recursos humanos de Electrodomésticos JLC. Atiendes a personas interesadas en trabajar en la empresa. Datos: ${datos}`,
 			ejemplos: [
 				{
 					cliente: '¿Tienen vacantes?',
 					asistente:
-						'¡Gracias por tu interés en trabajar con nosotros! En este momento no tengo el listado de vacantes vigentes a la mano, pero puedo registrar tu interés. ¿Me compartes tu nombre completo, cargo de interés y ciudad?',
+						'¡Gracias por tu interés en trabajar con nosotros! En este momento no tengo el listado de vacantes a la mano, pero puedo registrar tu interés. ¿Me compartes tu nombre completo, cargo de interés y ciudad?',
 				},
 				{
 					cliente: 'Soy Carlos Pérez, busco asesor comercial en Cali',
 					asistente:
-						'¡Excelente, Carlos! Quedas registrado en nuestra base. Si quieres, envía tu hoja de vida para adjuntarla a tu perfil y que el área de RRHH te contacte cuando haya una vacante de asesor comercial en Cali.',
+						'¡Excelente, Carlos! Quedas registrado. Si quieres, envía tu hoja de vida para adjuntarla a tu perfil y que RRHH te contacte cuando haya una vacante de asesor comercial en Cali.',
 				},
 			],
 			historial: formatHistory(context?.history),
@@ -428,16 +562,10 @@ export class DistribuidoresAgent implements IAgent {
 	name = 'Distribuidores';
 
 	async handle(message: string, context: any): Promise<AgentResponse> {
+		const datos = `Datos a recolectar paso a paso: 1. NIT, 2. Nombre o razón social, 3. Teléfono, 4. Correo, 5. Rango de ventas estimado, 6. Departamento, 7. Ciudad. Pedir uno o dos por mensaje, no todos de golpe.`;
+
 		const { system, user } = buildGemmaPrompt({
-			rol: 'Eres asistente del programa de distribuidores de Electrodomésticos JLC. Atiendes a personas o empresas que quieren ser distribuidores autorizados o comprar al por mayor.',
-			datos: `Datos a recolectar (uno o dos por mensaje, no todos de golpe):
-1. NIT
-2. Nombre o razón social
-3. Teléfono
-4. Correo electrónico
-5. Rango de ventas estimado
-6. Departamento
-7. Ciudad`,
+			instruccion: `Eres asistente del programa de distribuidores de Electrodomésticos JLC. Atiendes a interesados en ser distribuidores autorizados. Datos: ${datos}`,
 			ejemplos: [
 				{
 					cliente: 'Quiero ser distribuidor',
@@ -447,12 +575,12 @@ export class DistribuidoresAgent implements IAgent {
 				{
 					cliente: 'Soy Comercial XYZ SAS, en Medellín',
 					asistente:
-						'¡Excelente! Ahora, ¿me indicas tu NIT y un número de contacto para que el equipo de distribuidores te ubique?',
+						'¡Excelente! Ahora, ¿me indicas tu NIT y un número de contacto?',
 				},
 				{
 					cliente: 'NIT 901234567, teléfono 3001234567',
 					asistente:
-						'¡Perfecto! Por último, ¿cuál es tu correo electrónico y un rango aproximado de ventas mensuales estimado? Con esto completamos tu solicitud.',
+						'¡Perfecto! Por último, ¿cuál es tu correo electrónico y un rango aproximado de ventas mensuales? Con esto completamos tu solicitud.',
 				},
 			],
 			historial: formatHistory(context?.history),
@@ -475,17 +603,15 @@ export class PagosAgent implements IAgent {
 	name = 'Medios de Pago';
 
 	async handle(message: string, context: any): Promise<AgentResponse> {
+		const datos = `Opciones de pago: 1) En línea desde https://jlc-electronics.com/ (PSE, tarjeta, etc.). 2) En punto físico. 3) Crédito lo gestiona Cristina al WhatsApp +57 318 740 8190.`;
+
 		const { system, user } = buildGemmaPrompt({
-			rol: 'Eres asistente de medios de pago de Electrodomésticos JLC. Ayudas al cliente a saber cómo pagar su compra.',
-			datos: `Opciones de pago:
-- En línea: el cliente entra a https://jlc-electronics.com/, selecciona el artículo y elige medio de pago al finalizar la compra (PSE, tarjeta, etc.).
-- En punto físico: pago directo en la tienda.
-- Crédito: lo gestiona Cristina al WhatsApp +57 318 740 8190.`,
+			instruccion: `Eres asistente de medios de pago de Electrodomésticos JLC. Ayudas al cliente a saber cómo pagar. Datos: ${datos}`,
 			ejemplos: [
 				{
 					cliente: '¿Cómo puedo pagar?',
 					asistente:
-						'Tenemos dos formas: 1) En línea entrando a https://jlc-electronics.com/, seleccionas el artículo y eliges medio de pago (PSE, tarjeta, etc.). 2) En el punto físico directamente en la tienda. ¿Cuál te queda más cómoda?',
+						'Tienes dos opciones: 1) En línea en https://jlc-electronics.com/ con PSE, tarjeta de crédito o débito. 2) En punto físico directamente en la tienda. ¿Cuál prefieres?',
 				},
 				{
 					cliente: '¿Aceptan tarjeta de crédito?',
@@ -495,7 +621,7 @@ export class PagosAgent implements IAgent {
 				{
 					cliente: 'Quiero pagar a crédito',
 					asistente:
-						'¡Perfecto! El crédito lo gestiona Cristina directamente. Escríbele al WhatsApp +57 318 740 8190 con el producto que te interesa y ella te guía paso a paso.',
+						'¡Perfecto! El crédito lo gestiona Cristina. Escríbele al WhatsApp +57 318 740 8190 con el producto que te interesa y ella te guía paso a paso.',
 				},
 			],
 			historial: formatHistory(context?.history),

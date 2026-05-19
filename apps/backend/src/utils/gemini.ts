@@ -5,8 +5,10 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 const MODELS = [
+	'gemini-2.0-flash',
+	'gemini-1.5-flash',
+	'gemma-3-27b-it',
 	'gemma-4-31b-it',
-	//'gemma-4-26b-a4b-it',
 ];
 
 export const getGeminiModel = (systemInstruction?: string) => {
