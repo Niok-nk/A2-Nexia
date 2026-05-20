@@ -18,75 +18,15 @@ export interface WCProduct {
 const MOCK_CATALOG: WCProduct[] = [
 	{
 		id: 1,
-		name: 'Moto Hero Hunk 160R',
-		price: '8500000',
-		regular_price: '9200000',
-		sale_price: '8500000',
-		description: 'Motocicleta deportiva 160cc con frenos ABS, ideal para ciudad y carretera.',
-		short_description: 'Deportiva 160cc, ABS, excelente rendimiento',
-		stock_status: 'instock',
-		categories: [{ name: 'Motocicletas Deportivas' }],
-		permalink: 'https://example.com/moto-hero-hunk',
-	},
-	{
-		id: 2,
-		name: 'Moto Honda CB190R',
-		price: '11200000',
-		regular_price: '11200000',
+		name: 'congeladores JLC',
+		price: '',
+		regular_price: '',
 		sale_price: '',
-		description: 'Naked sport 190cc de alto rendimiento con frenos de disco delantero y trasero.',
-		short_description: 'Naked sport 190cc, potencia y estilo',
+		description: '',
+		short_description: '',
 		stock_status: 'instock',
-		categories: [{ name: 'Motocicletas Deportivas' }],
-		permalink: 'https://example.com/honda-cb190r',
-	},
-	{
-		id: 3,
-		name: 'Moto Bajaj Pulsar NS 200',
-		price: '13500000',
-		regular_price: '14000000',
-		sale_price: '13500000',
-		description: 'Deportiva de alta cilindrada 200cc con tecnología DTS-i y frenos de disco.',
-		short_description: '200cc DTS-i, deportiva de alto rendimiento',
-		stock_status: 'instock',
-		categories: [{ name: 'Motocicletas Deportivas' }],
-		permalink: 'https://example.com/bajaj-ns200',
-	},
-	{
-		id: 4,
-		name: 'Moto Honda CB125F',
-		price: '6800000',
-		regular_price: '7100000',
-		sale_price: '6800000',
-		description: 'Motocicleta económica 125cc, ideal para ciudad. Bajo consumo de combustible.',
-		short_description: '125cc económica, perfecta para ciudad',
-		stock_status: 'instock',
-		categories: [{ name: 'Motocicletas Económicas' }],
-		permalink: 'https://example.com/honda-cb125f',
-	},
-	{
-		id: 5,
-		name: 'Scooter Yamaha FreeGo 125',
-		price: '7400000',
-		regular_price: '7400000',
-		sale_price: '',
-		description: 'Scooter automático 125cc con baúl integrado, cargador USB y arranque inteligente.',
-		short_description: 'Scooter automático 125cc, cómodo y práctico',
-		stock_status: 'instock',
-		categories: [{ name: 'Scooters' }],
-		permalink: 'https://example.com/yamaha-freego',
-	},
-	{
-		id: 6,
-		name: 'Moto Eléctrica Voltra E1',
-		price: '15000000',
-		regular_price: '15000000',
-		sale_price: '',
-		description: 'Moto eléctrica con autonomía de 120km, carga en 4 horas, velocidad máx 90km/h.',
-		short_description: 'Eléctrica 120km autonomía, ecológica y económica',
-		stock_status: 'instock',
-		categories: [{ name: 'Motos Eléctricas' }],
-		permalink: 'https://example.com/voltra-e1',
+		categories: [{ name: '' }],
+		permalink: 'https://jlc-electronics.com/product-category/hogar/refrigeracion/congeladores/',
 	},
 ];
 
@@ -117,6 +57,12 @@ export const wooCommerceService = {
 				params: { per_page: limit, status: 'publish' },
 			});
 			logger.info({ count: data.length }, 'WooCommerce products fetched successfully');
+			
+			if (data.length === 0) {
+				logger.warn('No WooCommerce products, falling back to mock catalog');
+				return MOCK_CATALOG.slice(0, limit);
+			}
+			
 			return data as WCProduct[];
 		} catch (error: any) {
 			logger.error({ error: error.message, status: error.response?.status, data: error.response?.data }, 'WooCommerce API error, falling back to mock');
@@ -141,6 +87,18 @@ export const wooCommerceService = {
 				params: { search: query, per_page: limit },
 			});
 			logger.info({ query, count: data.length }, 'WooCommerce search results');
+			
+			if (data.length === 0) {
+				logger.warn({ query }, 'No WooCommerce results, falling back to mock catalog');
+				const q = query.toLowerCase();
+				return MOCK_CATALOG.filter(
+					(p) =>
+						p.name.toLowerCase().includes(q) ||
+						p.description.toLowerCase().includes(q) ||
+						p.categories.some((c) => c.name.toLowerCase().includes(q))
+				).slice(0, limit);
+			}
+			
 			return data as WCProduct[];
 		} catch (error: any) {
 			logger.error({ error: error.message, query, status: error.response?.status, data: error.response?.data }, 'WooCommerce search error, falling back to mock');

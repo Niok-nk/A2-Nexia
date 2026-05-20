@@ -285,7 +285,7 @@ function buildGemmaPrompt(opts: {
 	mensajeCliente: string;
 }): { system: string; user: string } {
 	// system: rol mínimo + nota de formato
-	const system = `${opts.instruccion} Responde en español natural, en una o dos frases breves, sin asteriscos, sin encabezados, sin etiquetas, sin explicar tu razonamiento. IMPORTANTE: Responde SOLO el mensaje al cliente.`;
+	const system = `${opts.instruccion} Responde en español natural, en una o dos frases breves, sin asteriscos, sin encabezados, sin etiquetas, sin explicar tu razonamiento. IMPORTANTE: Responde SOLO el mensaje al cliente leyendo su contexto.`;
 
 	// user: conversación continua con ejemplos + historial + mensaje actual
 	const ejemplosTexto = opts.ejemplos
@@ -299,97 +299,170 @@ function buildGemmaPrompt(opts: {
 	return { system, user };
 }
 
-// ─── AGENTE BIENVENIDA (sin LLM) ─────────────────────────────────────────────
+// ─── AGENTE BIENVENIDA ────────────────────────────────────────────────────────
+
+const AGENT_NAME = 'Sara'; // Nombre de la asistente virtual
 
 export class BienvenidaAgent implements IAgent {
-	name = 'Bienvenida';
+  name = 'Bienvenida';
 
-	async handle(_message: string, _context: any): Promise<AgentResponse> {
-		const hora = new Date().getHours();
-		let saludo = 'Hola';
-		if (hora >= 5 && hora < 12) saludo = 'Buenos días';
-		else if (hora >= 12 && hora < 19) saludo = 'Buenas tardes';
-		else saludo = 'Buenas noches';
+  private getSaludo(): string {
+    const hora = new Date().getHours();
+    if (hora >= 5 && hora < 12) return 'Buenos días';
+    if (hora >= 12 && hora < 19) return 'Buenas tardes';
+    return 'Buenas noches';
+  }
 
-		const response = `${saludo}, bienvenido(a) a Electrodomésticos JLC. 😊 ¿En qué puedo ayudarte hoy? Puedes preguntarme por:
+  private tieneIntencionClara(mensaje: string): boolean {
+    const keywords = [
+      'nevera', 'televisor', 'tv', 'lavadora', 'congelador', 'parlante',
+      'precio', 'cotizar', 'cuánto', 'cuanto', 'comprar', 'garantía',
+      'garantia', 'técnico', 'tecnico', 'distribuidor', 'trabajo', 'vacante',
+      'pago', 'crédito', 'credito', 'envío', 'envio',
+    ];
+    const lower = mensaje.toLowerCase();
+    return keywords.some((kw) => lower.includes(kw));
+  }
 
-• Compra o cotización de electrodomésticos
-• Repuestos
-• Servicio técnico
-• Medios de pago
-• Distribuidores
-• Vacantes`;
+  async handle(message: string, _context: any): Promise<AgentResponse> {
+    const saludo = this.getSaludo();
+    const tieneIntencion = this.tieneIntencionClara(message);
 
-		return {
-			response,
-			metadata: { agentType: 'bienvenida' },
-		};
-	}
+    // Si el usuario ya llegó con una intención clara, la bienvenida es breve
+    // y el router tomará el relevo con el mismo mensaje.
+    if (tieneIntencion) {
+      return {
+        response: `${saludo} 👋 Soy ${AGENT_NAME}, asistente virtual de *JLC Electronics*. Con gusto te ayudo con eso.`,
+        metadata: {
+          agentType: 'bienvenida',
+          passthrough: true, // señal para que el router procese el mensaje original
+        },
+      };
+    }
+
+    // Bienvenida completa con menú cuando no hay intención detectada
+    const menu = `${saludo} 👋 Soy ${AGENT_NAME}, la asistente virtual de *JLC Electronics*.
+
+¿En qué puedo ayudarte hoy?
+
+1️⃣ Productos y cotizaciones
+2️⃣ Garantías y servicio técnico
+3️⃣ Medios de pago y financiación
+4️⃣ Distribuidores y puntos de venta
+5️⃣ Trabaja con nosotros
+
+Escríbeme el número de tu opción o cuéntame directamente lo que necesitas. 😊`;
+
+    return {
+      response: menu,
+      metadata: { agentType: 'bienvenida', passthrough: false },
+    };
+  }
 }
 
 // ─── AGENTE VENTAS ───────────────────────────────────────────────────────────
 
 export class VentasAgent implements IAgent {
-	name = 'Ventas';
+  name = 'Ventas';
 
-	async handle(message: string, context: any): Promise<AgentResponse> {
-		let productList = '';
-		try {
-			const products = await wooCommerceService.searchProducts(message, 4);
-			productList = wooCommerceService.formatProductList(products);
-		} catch {
-			productList = '';
-		}
+  // Formatea los productos en un bloque claro y legible para el LLM
+  private formatProductosParaPrompt(products: any[]): string {
+    if (!products || products.length === 0) return 'No se encontraron productos relacionados.';
 
-		const datos = `Cierre de ventas: Cristina, WhatsApp +57 318 740 8190. Compra al detal: contado o crédito. Compra al por mayor: área de distribuidores. Zona Putumayo tiene asesor dedicado. Sitio web: https://jlc-electronics.com/.${productList ? ` Productos relacionados: ${productList}` : ''}`;
+    return products
+      .map((p, i) => {
+        const precio = p.sale_price
+          ? `~~$${Number(p.regular_price).toLocaleString('es-CO')}~~ → *$${Number(p.sale_price).toLocaleString('es-CO')}* (en oferta)`
+          : `$${Number(p.price).toLocaleString('es-CO')}`;
+        return `${i + 1}. *${p.name}*\n   Precio: ${precio}\n   Ver producto: ${p.permalink}`;
+      })
+      .join('\n\n');
+  }
 
-		const { system, user } = buildGemmaPrompt({
-			instruccion: `Eres asesor comercial de Electrodomésticos JLC, cordial y breve, hablas español de Colombia. Datos que puedes usar: ${datos}`,
-			ejemplos: [
-				{
-					cliente: 'Quiero saber el precio de una nevera',
-					asistente:
-						'¡Con gusto! Para darte el precio exacto, ¿desde qué ciudad escribes y qué tipo de nevera buscas (capacidad o marca)? ¿La compra sería al contado o a crédito?',
-				},
-				{
-					cliente: 'que productos tienen disponibles',
-					asistente:
-						'Manejamos neveras, congeladores, lavadoras, televisores, y más. Puedes ver el catálogo en https://jlc-electronics.com/. ¿Buscas algo en particular para confirmarte disponibilidad?',
-				},
-				{
-					cliente: 'congeladores',
-					asistente:
-						'¡Sí, tenemos congeladores! ¿Desde qué ciudad escribes y qué capacidad necesitas (en litros)? ¿Lo pagarías de contado o a crédito?',
-				},
-				{
-					cliente: 'A crédito por favor',
-					asistente:
-						'Perfecto. Para iniciar el estudio de crédito necesito tres datos: tu nombre completo, número de cédula e ingresos mensuales. Luego Cristina (+57 318 740 8190) continúa la gestión.',
-				},
-				{
-					cliente: 'Al contado',
-					asistente:
-						'¡Genial! Confírmame el modelo exacto y tu ciudad, y te paso precio y disponibilidad. Después te conecto con Cristina (+57 318 740 8190) para finalizar la compra.',
-				},
-				{
-					cliente: 'Soy de Mocoa, Putumayo',
-					asistente:
-						'¡Bienvenido! Para Putumayo tenemos asesor dedicado. Cuéntame qué producto buscas y te paso el contacto directo del asesor de tu zona.',
-				},
-			],
-			historial: formatHistory(context?.history),
-			mensajeCliente: message,
-		});
+  async handle(message: string, context: any): Promise<AgentResponse> {
+    // ── 1. Consulta WooCommerce ──────────────────────────────────────────────
+    let productosFormateados = '';
+    let hayProductos = false;
 
-		const raw = await generateResponse(user, system);
-		const response = cleanResponse(raw);
+    try {
+      // Buscar productos con la consulta del usuario
+      let products = await wooCommerceService.searchProducts(message, 6);
+      
+      // Si no hay resultados, buscar productos destacados del catálogo
+      if (!products || products.length === 0) {
+        products = await wooCommerceService.getProducts(6);
+      }
+      
+      hayProductos = products && products.length > 0;
+      productosFormateados = hayProductos
+        ? this.formatProductosParaPrompt(products)
+        : 'No se encontraron productos que coincidan con la búsqueda.';
+    } catch {
+      productosFormateados = 'No fue posible consultar el catálogo en este momento.';
+    }
 
-		return {
-			response,
-			nextStage: 'PROPOSAL',
-			metadata: { agentType: 'ventas' },
-		};
-	}
+    // ── 2. Construcción del prompt con productos en sección separada ─────────
+    const instruccion = `Eres ${AGENT_NAME}, asesora comercial de JLC Electronics.
+Tu tono es neutro, cálido y directo. Hablas en español colombiano. Tus respuestas son cortas (máximo 5 líneas).
+
+REGLAS:
+- Si hay productos en el CATÁLOGO, SIEMPRE mencioná al menos uno con su nombre, precio y enlace.
+- Si el producto está en oferta, destacá el descuento.
+- No inventes productos ni precios. Solo usá los del CATÁLOGO.
+- Si no hay productos coincidentes, dirigí al cliente al sitio web o a Cristina +57 318 740 8190.
+- Si el cliente es de Putumayo, mencioná que tienen asesor dedicado en esa zona.
+- Si pregunta por crédito, pedí: nombre completo, cédula e ingresos mensuales.
+
+MEDIOS DE COMPRA:
+- Detal: contado o crédito.
+- Por mayor: área de distribuidores.
+- Sitio web: https://jlc-electronics.com/
+
+CATÁLOGO CONSULTADO PARA ESTE MENSAJE:
+${productosFormateados}`;
+
+    const { system, user } = buildGemmaPrompt({
+      instruccion,
+      ejemplos: [
+        {
+          cliente: 'Quiero una nevera',
+          asistente: hayProductos
+            ? 'Tenemos opciones disponibles 👇 ¿La compra sería al contado o a crédito? ¿Desde qué ciudad escribes?'
+            : '¡Con gusto! ¿Qué capacidad necesitas y desde qué ciudad escribes? Así te confirmo disponibilidad y precio.',
+        },
+        {
+          cliente: '¿Cuánto vale el televisor de 55 pulgadas?',
+          asistente:
+            'Te comparto lo que tenemos disponible ahora mismo 👇 ¿Te interesa alguno? Puedo conectarte con Cristina (+57 318 740 8190) para finalizar la compra.',
+        },
+        {
+          cliente: 'Quiero pagar a crédito',
+          asistente:
+            'Perfecto, manejamos crédito. Para iniciar el estudio necesito: nombre completo, número de cédula e ingresos mensuales. Con esos datos Cristina (+57 318 740 8190) gestiona todo.',
+        },
+        {
+          cliente: 'Soy de Mocoa',
+          asistente:
+            'Para la zona de Putumayo tenemos un asesor dedicado. Cuéntame qué producto buscas y te paso el contacto directo.',
+        },
+      ],
+      historial: formatHistory(context?.history),
+      mensajeCliente: message,
+    });
+
+    // ── 3. Generar y limpiar respuesta ───────────────────────────────────────
+    const raw = await generateResponse(user, system);
+    const response = cleanResponse(raw);
+
+    return {
+      response,
+      nextStage: 'PROPOSAL',
+      metadata: {
+        agentType: 'ventas',
+        productosEncontrados: hayProductos,
+      },
+    };
+  }
 }
 
 // ─── AGENTE CARTERA ──────────────────────────────────────────────────────────

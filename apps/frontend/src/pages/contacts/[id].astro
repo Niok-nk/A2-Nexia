@@ -166,11 +166,13 @@ const { id } = Astro.params;
       if (res.ok) {
         input.value = '';
         loadContact();
+      } else if (res.status === 503) {
+        alert('⚠️ WhatsApp no está conectado.\n\nVe a la página de WhatsApp en el panel y escanea el QR para conectar.');
       } else {
         alert(data.error || 'Error al enviar mensaje');
       }
     } catch {
-      alert('Error de conexión. Verifica que WhatsApp esté conectado.');
+      alert('❌ Error de conexión.\n\nEl servidor no responde. Verifica que el backend esté corriendo.');
     }
   }
 
