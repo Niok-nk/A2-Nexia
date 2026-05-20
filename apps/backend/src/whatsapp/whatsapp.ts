@@ -89,11 +89,12 @@ export const initWhatsApp = async (forceNewSession = false): Promise<Client | nu
 		const client = await create({
 			sessionId: 'nexia-crm-client',
 			multiDevice: true,
-			// useChrome: true es RECOMENDADO por la librería para soporte Multi-Device
+			// useChrome: true le dice a la librería que busque e inicie Google Chrome real del sistema
 			useChrome: true,
-			executablePath: chromePath,
-			// headless: false evita detección de bot en WhatsApp Web
-			headless: false,
+			// headless: 'new' permite que el navegador se ejecute en segundo plano de manera estable
+			headless: 'new' as any,
+			// useStealth: true activa técnicas de evasión de detección de bots y automatización
+			useStealth: true,
 			qrTimeout: 0,
 			authTimeout: 0,
 			killProcessOnBrowserClose: true,
@@ -103,9 +104,9 @@ export const initWhatsApp = async (forceNewSession = false): Promise<Client | nu
 			popup: 3012,
 			defaultViewport: null,
 			logConsole: true,
-			// User-Agent de Chrome real para evitar fingerprinting como bot
+			// User-Agent real y moderno para evitar detección de headless y bloqueos de actualización de WhatsApp Web
 			userAgent:
-				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
 			// Evitar fallos si WhatsApp Web actualiza métodos internos
 			skipBrokenMethodsCheck: true,
 		});
