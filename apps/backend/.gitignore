@@ -4,3 +4,9 @@ dist
 wa_session
 keys
 *.log
+
+# managed
+**.data.json
+**.node-persist**
+**_IGNORE_**
+# end managed

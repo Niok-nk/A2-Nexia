@@ -1,5 +1,5 @@
 allowBuilds:
-  '@open-wa/wa-automate': set this to true or false
+  '@open-wa/wa-automate': true
   '@prisma/client': true
   '@prisma/engines': true
   cloudflared: set this to true or false
@@ -8,3 +8,4 @@ allowBuilds:
   prisma: true
   puppeteer: true
   unix-dgram: set this to true or false
+onlyBuiltDependencies: '["@open-wa/wa-automate","cloudflared","unix-dgram"]'
