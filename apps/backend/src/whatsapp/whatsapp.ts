@@ -68,21 +68,14 @@ export const initWhatsApp = async (forceNewSession = false): Promise<WASocket | 
 			logger.warn({ err }, 'Failed to fetch latest WaWeb version, using fallback version');
 		}
 
-		const dummyLogger = {
-			level: 'silent',
-			child: () => dummyLogger,
-			info: () => {},
-			error: () => {},
-			warn: () => {},
-			debug: () => {},
-			trace: () => {},
-		};
+		const baileysLogger = logger.child({ module: 'baileys' });
+		baileysLogger.level = 'warn';
 
 		const client = makeWASocket({
 			auth: state,
 			version,
 			printQRInTerminal: true,
-			logger: dummyLogger as any,
+			logger: baileysLogger as any,
 			browser: Browsers.macOS('Desktop'),
 		});
 
@@ -104,15 +97,15 @@ export const initWhatsApp = async (forceNewSession = false): Promise<WASocket | 
 				currentQR = null;
 				
 				const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-				const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+				const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== DisconnectReason.badSession;
 				
 				logger.info({ shouldReconnect, statusCode, error: lastDisconnect?.error }, 'Connection closed');
 				
 				if (shouldReconnect) {
 					logger.info('Attempting reconnect due to connection drop...');
-					await reconnectWhatsApp();
+					await reconnectWhatsApp(false);
 				} else {
-					logger.warn('Logged out of WhatsApp. Reconnection will require scanning a new QR.');
+					logger.warn('Logged out or bad session of WhatsApp. Reconnection will require scanning a new QR.');
 					await clearSession();
 				}
 			} else if (connection === 'open') {
@@ -175,7 +168,7 @@ export const sendMessage = async (to: string, message: string): Promise<void> =>
 	await sock.sendMessage(jid, { text: message });
 };
 
-export const reconnectWhatsApp = async (): Promise<boolean> => {
+export const reconnectWhatsApp = async (forceNewSession = true): Promise<boolean> => {
 	if (isReconnecting) {
 		logger.info('Reconnection already in progress, skipping duplicate call...');
 		return false;
@@ -199,13 +192,15 @@ export const reconnectWhatsApp = async (): Promise<boolean> => {
 		logger.info('Waiting 3s for session files to unlock...');
 		await sleep(3000);
 
-		// Limpiar sesión para forzar re-login limpio
-		await clearSession();
+		// Limpiar sesión solo si se requiere
+		if (forceNewSession) {
+			await clearSession();
+		}
 
 		await sleep(1000);
 
 		logger.info('Attempting to reconnect WhatsApp...');
-		await initWhatsApp(true);
+		await initWhatsApp(forceNewSession);
 
 		setTimeout(() => {
 			isReconnecting = false;
