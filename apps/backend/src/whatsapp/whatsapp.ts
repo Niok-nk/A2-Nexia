@@ -93,6 +93,56 @@ export const resolvePhoneFromJid = async (jid: string): Promise<string> => {
 	return jid.replace(/@s\.whatsapp\.net|@c\.us/g, '').trim();
 };
 
+/**
+ * Backfill: intenta resolver realPhone para todos los contactos que aún tienen null.
+ * Consulta primero el mapa en memoria y luego el auth-key-store de Baileys.
+ * Se llama al abrir conexión y tras recibir messaging-history.
+ */
+export const backfillLidMappings = async (): Promise<void> => {
+	try {
+		const contacts = await prisma.contact.findMany({
+			where: { realPhone: null },
+			select: { phone: true },
+		});
+
+		const candidates = contacts.map((c) => c.phone).filter((p) => /^\d{9,20}$/.test(p));
+
+		if (candidates.length === 0) return;
+
+		logger.info({ count: candidates.length }, 'Backfill: attempting to resolve realPhone for contacts');
+
+		for (const lid of candidates) {
+			// 1. Revisar mapa en memoria
+			const memPn = lidToPhone.get(lid);
+			if (memPn) {
+				await prisma.contact.update({ where: { phone: lid }, data: { realPhone: memPn } });
+				logger.info({ lid, realPhone: memPn }, 'Backfill: realPhone set from memory');
+				continue;
+			}
+
+			// 2. Consultar auth-key-store
+			if (sock?.authState?.keys) {
+				try {
+					const results = await sock.authState.keys.get('lid-mapping', [lid]);
+					if (results && results[lid]) {
+						const cleanPn = String(results[lid])
+							.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '')
+							.trim();
+						if (cleanPn && cleanPn !== lid) {
+							lidToPhone.set(lid, cleanPn);
+							await prisma.contact.update({ where: { phone: lid }, data: { realPhone: cleanPn } });
+							logger.info({ lid, realPhone: cleanPn }, 'Backfill: realPhone set from auth-store');
+						}
+					}
+				} catch (err) {
+					logger.warn({ err, lid }, 'Backfill: failed to query auth-store for lid');
+				}
+			}
+		}
+	} catch (err) {
+		logger.error({ err }, 'Backfill: unexpected error');
+	}
+};
 
 export type WAStatus = 'disconnected' | 'qr_pending' | 'connected';
 
@@ -168,7 +218,7 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 			}
 		});
 
-		client.ev.on('messaging-history.set', (history) => {
+		client.ev.on('messaging-history.set', async (history) => {
 			if (history.lidPnMappings) {
 				for (const mapping of history.lidPnMappings) {
 					registerLidMapping(mapping.lid, mapping.pn);
@@ -183,6 +233,8 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 					}
 				}
 			}
+			// Tras recibir historial, re-intentar backfill con los nuevos mapeos ya en memoria
+			setTimeout(() => backfillLidMappings().catch((e) => logger.warn({ e }, 'backfill error after history.set')), 2000);
 		});
 
 		client.ev.on('contacts.upsert', (contacts) => {
@@ -234,6 +286,8 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 				logger.info('WhatsApp connection opened successfully!');
 				isReady = true;
 				currentQR = null;
+				// Intentar rellenar realPhone para contactos con LID sin resolver
+				setTimeout(() => backfillLidMappings().catch((e) => logger.warn({ e }, 'backfill error')), 5000);
 			}
 		});
 
