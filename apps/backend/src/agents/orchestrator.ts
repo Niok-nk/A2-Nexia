@@ -222,7 +222,7 @@ Categoría:`;
 	async route(
 		message: string,
 		context: any
-	): Promise<{ agentType: string; response: string }> {
+	): Promise<{ agentType: string; response: string; metadata?: Record<string, any> }> {
 		const hasHistory = Array.isArray(context?.history) && context.history.length > 0;
 
 		// Si hay un flujo activo en el contexto, respetar el agente actual
@@ -250,6 +250,7 @@ Categoría:`;
 		return {
 			agentType: intent,
 			response: result.response,
+			metadata: result.metadata,
 		};
 	}
 }

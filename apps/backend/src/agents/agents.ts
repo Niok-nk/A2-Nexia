@@ -539,7 +539,15 @@ export class VentasAgent implements IAgent {
 		message: string,
 		context: any
 	): Promise<AgentResponse> {
-		const creditoData: CreditoData = context?.creditoData ?? {};
+		const creditoData: CreditoData = {
+			...context?.creditoData,
+			// Pre-poblar desde UserData persistido si existe
+			...(context?.userData?.nombre ? { nombres: context.userData.nombre } : {}),
+			...(context?.userData?.cedula ? { cedula: context.userData.cedula } : {}),
+			...(context?.userData?.departamento ? { departamento: context.userData.departamento } : {}),
+			...(context?.userData?.ciudad ? { ciudad: context.userData.ciudad } : {}),
+			...(context?.userData?.productoSolicitado ? { producto: context.userData.productoSolicitado } : {}),
+		};
 		const stepIndex: number = context?.creditoStep ?? 0;
 
 		if (stepIndex > 0) {

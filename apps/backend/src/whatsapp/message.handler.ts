@@ -4,6 +4,15 @@ import { orchestrator } from '../agents/orchestrator.js';
 import { sendMessage, getStatus, resolvePhoneFromJid } from './whatsapp.js';
 import logger from '../utils/logger.js';
 
+function safeParseJson(str: string | null | undefined): any {
+	if (!str) return {};
+	try {
+		return JSON.parse(str);
+	} catch {
+		return {};
+	}
+}
+
 /**
  * Maneja cada mensaje entrante de WhatsApp:
  * 1. Busca o crea el Contact en BD
@@ -96,7 +105,21 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 			orderBy: { createdAt: 'desc' },
 		});
 
-		const context = {
+		// 5. Cargar UserData persistido (datos recolectados por la IA progresivamente)
+		let userDataRecord = lead
+			? await prisma.userData.findUnique({ where: { leadId: lead.id } })
+			: null;
+
+		const userData = {
+			ciudad: userDataRecord?.ciudad ?? null,
+			departamento: userDataRecord?.departamento ?? null,
+			nombre: userDataRecord?.nombre ?? null,
+			cedula: userDataRecord?.cedula ?? null,
+			productoSolicitado: userDataRecord?.productoSolicitado ?? null,
+			extra: safeParseJson(userDataRecord?.extra),
+		};
+
+		const context: Record<string, any> = {
 			contactId: contact.id,
 			phone,
 			leadId: lead?.id,
@@ -107,12 +130,20 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 				body: m.body,
 				sentAt: m.sentAt,
 			})),
+			userData,
 		};
 
-		// 5. Enrutar al orquestador
-		const { agentType, response } = await orchestrator.route(body, context);
+		// Si ya tenemos ciudad guardada, pre-poblamos el contexto
+		// para que los agentes no vuelvan a preguntar
+		if (userData.ciudad) {
+			context.ciudad = userData.ciudad;
+			context.ciudadValidada = true;
+		}
 
-		// 6. Persistir respuesta OUTBOUND
+		// 6. Enrutar al orquestador
+		const { agentType, response, metadata } = await orchestrator.route(body, context);
+
+		// 7. Persistir respuesta OUTBOUND
 		await prisma.message.create({
 			data: {
 				contactId: contact.id,
@@ -122,7 +153,7 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 			},
 		});
 
-		// 7. Crear o actualizar lead
+		// 8. Crear o actualizar lead
 		const moduleMap: Record<string, string> = {
 			ventas: 'VENTAS',
 			cartera: 'CARTERA',
@@ -152,7 +183,41 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 			});
 		}
 
-		// 8. Enviar respuesta por WhatsApp solo si está conectado
+		// 9. Guardar datos recolectados por la IA en UserData
+		if (lead && metadata) {
+			const ud: Record<string, any> = {};
+			if (metadata.ciudad) ud.ciudad = metadata.ciudad;
+			if (metadata.departamento) ud.departamento = metadata.departamento;
+
+			const credito = metadata.creditoData;
+			if (credito?.nombres) ud.nombre = credito.nombres;
+			if (credito?.cedula) ud.cedula = credito.cedula;
+			if (credito?.producto) ud.productoSolicitado = credito.producto;
+
+			const repuesto = metadata.repuestoData;
+			if (repuesto?.nombreCliente) ud.nombre = repuesto.nombreCliente;
+			if (repuesto?.repuesto) ud.productoSolicitado = repuesto.repuesto;
+
+			// Guardar todo el metadata como extra para depuración
+			const extra = { ...safeParseJson(userDataRecord?.extra) };
+			let changed = false;
+			for (const [k, v] of Object.entries(ud)) {
+				if (v !== undefined && v !== null && v !== (userDataRecord as any)?.[k]) {
+					changed = true;
+				}
+			}
+
+			if (changed || Object.keys(ud).length > 0) {
+				const mergedExtra = { ...extra, ...metadata };
+				await prisma.userData.upsert({
+					where: { leadId: lead.id },
+					update: { ...ud, extra: JSON.stringify(mergedExtra) },
+					create: { leadId: lead.id, ...ud, extra: JSON.stringify(mergedExtra) },
+				});
+			}
+		}
+
+		// 10. Enviar respuesta por WhatsApp solo si está conectado
 		if (getStatus() === 'connected') {
 			await sendMessage(phone, response);
 			logger.info({ phone, agentType, leadId: lead.id }, 'Response sent');
