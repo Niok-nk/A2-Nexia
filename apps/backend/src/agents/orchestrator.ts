@@ -36,7 +36,7 @@ export class Orchestrator {
 	// ─── Filtro 1: ¿Es un saludo / mensaje vago? ──────────────────────────────
 	//
 	// Si el mensaje es un saludo simple, sin intención clara, o muy corto y
-	// vago, va al agente de Bienvenida. Esto evita que Gemma "adivine" la
+	// vago, va al agente de Bienvenida. Esto evita que el modelo "adivine" la
 	// intención de un "hola" y lo mande a servicio técnico.
 
 	private isGreetingOrVague(message: string, hasHistory: boolean): boolean {
@@ -60,6 +60,7 @@ export class Orchestrator {
 			'pregunta', 'consulta', 'quisiera saber', 'me gustaría saber',
 			'soy nuevo', 'soy nueva', 'primera vez', 'vengo de',
 			'quiero informacion', 'quiero información', 'necesito ayuda',
+			'1', '2', '3', '4', '5', '6', '7',   // opciones del menú de bienvenida
 			'?', '??', '...',
 		];
 
@@ -67,11 +68,11 @@ export class Orchestrator {
 		const cleaned = m.replace(/[.,!?¡¿…]+$/g, '').trim();
 		if (greetings.includes(cleaned)) return true;
 
-		// Saludos con coma: "hola, ¿como estan?" o con algo después
+		// Saludos con coma o con algo después
 		const firstWord = cleaned.split(/[\s,]+/)[0];
 		if (greetings.includes(firstWord) && cleaned.length < 30) return true;
 
-		// Patrones de presentación: "me llamo...", "soy...", "me llamo"
+		// Patrones de presentación: "me llamo...", "soy...", etc.
 		const presentationPatterns = [
 			/^me\s+llamo/i, /^soy\s+[a-z]/i, /^mi\s+nombre/i,
 			/^vengo\s+por/i, /^quisiera\s+info/i, /^busco\s+info/i,
@@ -80,13 +81,32 @@ export class Orchestrator {
 			if (pattern.test(cleaned) && cleaned.length < 40) return true;
 		}
 
-		// Muy corto y sin palabras clave de intención (menos de 5 caracteres)
+		// Muy corto y sin palabras clave de intención
 		if (cleaned.length < 5) return true;
 
 		return false;
 	}
 
-	// ─── Filtro 2: Atajo por palabras clave (sin llamar al modelo) ────────────
+	// ─── Filtro 2: Mapeo de opciones del menú (1-7) ───────────────────────────
+	//
+	// Cuando el cliente responde un número del menú de bienvenida, lo mapeamos
+	// directamente al agente correspondiente sin pasar por el modelo.
+
+	private menuOptionToIntent(message: string): IntentKey | null {
+		const m = message.trim().replace(/[.,!?¡¿]+$/g, '');
+		const map: Record<string, IntentKey> = {
+			'1': 'ventas',
+			'2': 'cartera',
+			'3': 'servicio_tecnico',
+			'4': 'repuestos',
+			'5': 'pagos',
+			'6': 'distribuidores',
+			'7': 'vacantes',
+		};
+		return map[m] ?? null;
+	}
+
+	// ─── Filtro 3: Atajo por palabras clave (sin llamar al modelo) ────────────
 
 	private quickIntent(message: string): IntentKey | null {
 		const m = message.toLowerCase();
@@ -103,25 +123,34 @@ export class Orchestrator {
 		if (/\b(repuesto|repuestos|pieza|piezas|accesorio|accesorios|filtro|empaque|resistencia|motor de)\b/.test(m)) {
 			return 'repuestos';
 		}
-		if (/\b(cartera|deuda|mora|cuota|cuotas|atrasado|estado de cuenta|saldo|recordatorio de pago|cu[aá]nto debo|me debe|debo)\b/.test(m)) {
+		if (/\b(cartera|deuda|mora|cuota atrasada|atrasado|estado de cuenta|saldo|recordatorio de pago|cu[aá]nto debo|me debe|debo|paz y salvo|factura)\b/.test(m)) {
 			return 'cartera';
 		}
-		if (/\b(c[oó]mo pago|d[oó]nde pago|medio de pago|medios de pago|formas de pago|forma de pago|pse|pagar con tarjeta|transferencia|consignar|consignaci[oó]n)\b/.test(m)) {
+		if (/\b(c[oó]mo pago|d[oó]nde pago|medio de pago|medios de pago|formas de pago|forma de pago|pse|pagar con tarjeta|transferencia|consignar|consignaci[oó]n|soporte de pago|comprobante de pago)\b/.test(m)) {
 			return 'pagos';
 		}
-		if (/\b(comprar|cotizar|cotizaci[oó]n|precio|cu[aá]nto cuesta|cu[aá]nto vale|nevera|lavadora|televisor|televisores|tv|estufa|microondas|licuadora|aire acondicionado|electrodom[eé]stico|electrodom[eé]sticos)\b/.test(m)) {
+		if (/\b(comprar|cotizar|cotizaci[oó]n|precio|cu[aá]nto cuesta|cu[aá]nto vale|nevera|lavadora|televisor|televisores|tv|estufa|microondas|licuadora|aire acondicionado|electrodom[eé]stico|electrodom[eé]sticos|cr[eé]dito|financiar|cuotas)\b/.test(m)) {
 			return 'ventas';
 		}
 
 		return null;
 	}
 
-	// ─── Filtro 3: Clasificación con el modelo (few-shot) ─────────────────────
+	// ─── Filtro 4: Clasificación con el modelo (few-shot) ─────────────────────
 
 	private async classifyWithModel(message: string): Promise<IntentKey> {
-		const prompt = `Eres un clasificador. Lee el mensaje del cliente y responde con UNA SOLA palabra de esta lista:
+		const prompt = `Eres un clasificador de intención para un chatbot de electrodomésticos. Lee el mensaje del cliente y responde con UNA SOLA palabra de esta lista:
 
 ventas | cartera | servicio_tecnico | repuestos | vacantes | distribuidores | pagos
+
+REGLAS:
+- "ventas" cubre: comprar, cotizar, precios, productos, crédito, financiación.
+- "cartera" cubre: deudas, cuotas, mora, estado de cuenta, paz y salvo, factura vencida.
+- "servicio_tecnico" cubre: reparación, mantenimiento, garantía, equipo dañado o que no funciona.
+- "repuestos" cubre: piezas, partes, accesorios, filtros, empaques.
+- "vacantes" cubre: trabajo, empleo, hoja de vida.
+- "distribuidores" cubre: ser distribuidor, venta al mayor, mayorista.
+- "pagos" cubre: medios de pago, PSE, tarjeta, cómo pagar una cuota, envío de soportes.
 
 Ejemplos:
 
@@ -145,6 +174,9 @@ Categoría: distribuidores
 
 Mensaje: "¿Puedo pagar con tarjeta?"
 Categoría: pagos
+
+Mensaje: "Quiero una nevera a crédito"
+Categoría: ventas
 
 Mensaje: "${message.replace(/"/g, "'")}"
 Categoría:`;
@@ -175,11 +207,15 @@ Categoría:`;
 		// Paso 1: saludo / vago → bienvenida
 		if (this.isGreetingOrVague(message, hasHistory)) return 'bienvenida';
 
-		// Paso 2: palabras clave
+		// Paso 2: opción numérica del menú (1-7)
+		const menuIntent = this.menuOptionToIntent(message);
+		if (menuIntent) return menuIntent;
+
+		// Paso 3: palabras clave
 		const quick = this.quickIntent(message);
 		if (quick) return quick;
 
-		// Paso 3: modelo
+		// Paso 4: modelo
 		return this.classifyWithModel(message);
 	}
 
@@ -188,9 +224,27 @@ Categoría:`;
 		context: any
 	): Promise<{ agentType: string; response: string }> {
 		const hasHistory = Array.isArray(context?.history) && context.history.length > 0;
-		const intent = await this.classifyIntent(message, hasHistory);
-		const agent = this.agents[intent] || this.agents.ventas;
 
+		// Si hay un flujo activo en el contexto, respetar el agente actual
+		// para no interrumpir procesos en curso (crédito, repuestos, etc.)
+		let intent: IntentKey;
+
+		const flujoActivo = context?.flujo;
+		if (flujoActivo) {
+			// Mapear flujo activo al agente correspondiente
+			if (/^credito/.test(flujoActivo) || flujoActivo === 'sin_cobertura' || flujoActivo === 'contado_sin_cobertura' || flujoActivo === 'esperando_ciudad' || flujoActivo === 'credito_perfilando') {
+				intent = 'ventas';
+			} else if (/^repuesto/.test(flujoActivo)) {
+				intent = 'repuestos';
+			} else {
+				// Flujo desconocido → reclasificar normalmente
+				intent = await this.classifyIntent(message, hasHistory);
+			}
+		} else {
+			intent = await this.classifyIntent(message, hasHistory);
+		}
+
+		const agent = this.agents[intent] || this.agents.ventas;
 		const result = await agent.handle(message, context);
 
 		return {
