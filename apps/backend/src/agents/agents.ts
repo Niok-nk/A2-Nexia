@@ -826,15 +826,17 @@ function extraerCiudadDelMensaje(mensaje: string): string | null {
 	// Buscar directamente si el mensaje ES una ciudad (respuesta corta)
 	const trimmed = lower.trim().replace(/[.,!?]+$/, '');
 	if (trimmed.length > 2 && trimmed.length < 30 && !/\s{2,}/.test(trimmed)) {
-		// Es posible que sea solo el nombre de la ciudad
 		const allCities = [...CIUDADES_COBERTURA, ...DEPARTAMENTOS_COBERTURA];
 		const exactMatch = allCities.find((c) => trimmed.includes(c) || c.includes(trimmed));
 		if (exactMatch) return trimmed;
 
-		// Si es una respuesta de 1-3 palabras a "¿de qué ciudad eres?", asumir que es ciudad
+		// Solo asumir que es ciudad si al menos una palabra coincide con una ciudad/departamento conocido
 		const words = trimmed.split(/\s+/);
 		if (words.length <= 3 && words.every((w) => /^[a-záéíóúñ]+$/i.test(w))) {
-			return trimmed;
+			const algunaCoincide = words.some((w) =>
+				w.length > 2 && allCities.some((c) => c.includes(w) || w.includes(c))
+			);
+			if (algunaCoincide) return trimmed;
 		}
 	}
 
