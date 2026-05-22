@@ -178,6 +178,20 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 			userData.departamento = deptoDelMensaje;
 		}
 
+		// Guardar en UserData INMEDIATAMENTE si se detectó ubicación y el lead existe
+		if (lead && (ciudadDelMensaje || deptoDelMensaje)) {
+			const saveData: Record<string, any> = {};
+			if (ciudadDelMensaje && !userDataRecord?.ciudad) saveData.ciudad = ciudadDelMensaje;
+			if (deptoDelMensaje && !userDataRecord?.departamento) saveData.departamento = deptoDelMensaje;
+			if (Object.keys(saveData).length > 0) {
+				await prisma.userData.upsert({
+					where: { leadId: lead.id },
+					update: saveData,
+					create: { leadId: lead.id, ...saveData },
+				}).catch(e => logger.error({ error: e.message }, 'Failed to save location to UserData'));
+			}
+		}
+
 		const context: Record<string, any> = {
 			contactId: contact.id,
 			phone,
