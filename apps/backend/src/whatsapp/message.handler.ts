@@ -198,21 +198,22 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 			if (repuesto?.nombreCliente) ud.nombre = repuesto.nombreCliente;
 			if (repuesto?.repuesto) ud.productoSolicitado = repuesto.repuesto;
 
-			// Guardar todo el metadata como extra para depuración
 			const extra = { ...safeParseJson(userDataRecord?.extra) };
-			let changed = false;
-			for (const [k, v] of Object.entries(ud)) {
-				if (v !== undefined && v !== null && v !== (userDataRecord as any)?.[k]) {
-					changed = true;
-				}
-			}
+			const mergedExtra = { ...extra, ...metadata };
+			const udHasData = Object.keys(ud).length > 0;
 
-			if (changed || Object.keys(ud).length > 0) {
-				const mergedExtra = { ...extra, ...metadata };
+			if (udHasData) {
 				await prisma.userData.upsert({
 					where: { leadId: lead.id },
 					update: { ...ud, extra: JSON.stringify(mergedExtra) },
 					create: { leadId: lead.id, ...ud, extra: JSON.stringify(mergedExtra) },
+				});
+			} else {
+				// Aún sin campos específicos, guardar extra para depuración
+				await prisma.userData.upsert({
+					where: { leadId: lead.id },
+					update: { extra: JSON.stringify(mergedExtra) },
+					create: { leadId: lead.id, extra: JSON.stringify(mergedExtra) },
 				});
 			}
 		}
