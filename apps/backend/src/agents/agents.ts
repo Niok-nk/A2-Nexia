@@ -317,15 +317,15 @@ function verificarCobertura(lugar: string): 'cobertura' | 'sin_cobertura' | 'des
 
 const AGENT_NAME = 'Sara';
 
+function getSaludo(): string {
+	const hora = new Date().getHours();
+	if (hora >= 5 && hora < 12) return 'Buenos días';
+	if (hora >= 12 && hora < 19) return 'Buenas tardes';
+	return 'Buenas noches';
+}
+
 export class BienvenidaAgent implements IAgent {
 	name = 'Bienvenida';
-
-	private getSaludo(): string {
-		const hora = new Date().getHours();
-		if (hora >= 5 && hora < 12) return 'Buenos días';
-		if (hora >= 12 && hora < 19) return 'Buenas tardes';
-		return 'Buenas noches';
-	}
 
 	private tieneIntencionClara(mensaje: string): boolean {
 		const keywords = [
@@ -340,7 +340,7 @@ export class BienvenidaAgent implements IAgent {
 	}
 
 	async handle(message: string, _context: any): Promise<AgentResponse> {
-		const saludo = this.getSaludo();
+		const saludo = getSaludo();
 		const tieneIntencion = this.tieneIntencionClara(message);
 
 		// Si el usuario ya llegó con una intención clara, bienvenida breve
@@ -664,6 +664,19 @@ export class VentasAgent implements IAgent {
 				ciudadValidada: true,
 				ciudad: ciudadDetectada,
 				tieneCobertura: cobertura === 'cobertura',
+			};
+
+			// La ciudad se acaba de detectar en este mensaje.
+			// No mostrar productos todavía — primero preguntar qué necesita.
+			const saludo = getSaludo();
+			return {
+				response: `${saludo} ¡Qué bien! En ${ciudadDetectada} tienes cobertura con envío gratis. Cuéntame, ¿qué referencia o modelo buscas? 😊`,
+				metadata: {
+					agentType: 'ventas',
+					ciudad: ciudadDetectada,
+					ciudadValidada: true,
+					tieneCobertura: context.tieneCobertura,
+				},
 			};
 		}
 
