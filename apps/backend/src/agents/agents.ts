@@ -1073,6 +1073,86 @@ export class VentasAgent implements IAgent {
 			};
 		}
 
+		// ── PASO 6: Detectar datos personales del cliente ──────────────────
+		// Patrones: nombre + cédula, dirección, teléfono
+		const datosPersonales: Record<string, string> = {};
+		const cedulaMatch = message.match(/\b\d{5,12}\b/);
+		if (cedulaMatch) datosPersonales.cedulaCliente = cedulaMatch[0];
+
+		const nombreMatch = message.match(/^(?:mi nombre es|soy|me llamo)\s+([A-Za-záéíóúñÁÉÍÓÚÑ\s]+)/i);
+		if (nombreMatch) datosPersonales.nombreCliente = nombreMatch[1].trim();
+
+		if (message.length > 5 && message.split(/[,;]/).length >= 2 && datosPersonales.cedulaCliente) {
+			// Posible formato: "Nicolas, 10853444444, cr34 via lorena"
+			const partes = message.split(/[,;]/).map((p) => p.trim()).filter(Boolean);
+			if (partes.length >= 2 && !datosPersonales.nombreCliente) {
+				datosPersonales.nombreCliente = partes[0];
+			}
+			if (partes.length >= 3) {
+				datosPersonales.direccion = partes.slice(2).join(', ');
+			}
+		}
+
+		// ── PASO 7: Perfilación de producto (categoría general sin especificar) ─
+		const categoriaGeneral = /^(?:busco|quiero|necesito|me interesa|tiene[ns]?)\s*(?:un[oa]?|unas?|información de|info de)?\s*(televisor|televisores|tv|nevera|neveras|refrigerador|lavadora|lavadoras|estufa|microondas|licuadora|aire acondicionado|congelador|parlante|parlantes|sonido|equipo de sonido)\b/i.test(message);
+		const yaTieneTamano = /(\d+\s*(?:pulgadas|pulg|lt|litros|kg|kilos))|(?:grande|pequeñ[oa]|mediano|mediana)/i.test(message);
+		const yaTienePresupuesto = context?.userData?.presupuesto || context?.presupuesto;
+
+		if (context?.flujo === 'perfilando_producto') {
+			// Pregunta 1 ya fue hecha → procesar respuesta de tamaño
+			const tamanoMencionado = message.match(/(\d+)\s*(?:pulgadas|pulg|lt|litros|kg|kilos)/i);
+			if (tamanoMencionado) {
+				context = { ...context, tamanoPerfil: tamanoMencionado[0], flujo: 'perfilando_presupuesto' };
+				return {
+					response: '¿Tienes un presupuesto aproximado en mente? Así te recomiendo lo que mejor se ajuste.',
+					metadata: {
+						agentType: 'ventas',
+						flujo: 'perfilando_presupuesto',
+						ciudad: context?.ciudad,
+						ciudadValidada: true,
+						...datosPersonales,
+					},
+				};
+			}
+			return {
+				response: '¿Qué tamaño buscas? Por ejemplo: 43, 55 o 65 pulgadas (o litros/kilos según el producto).',
+				metadata: {
+					agentType: 'ventas',
+					flujo: 'perfilando_producto',
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					...datosPersonales,
+				},
+			};
+		}
+
+		if (context?.flujo === 'perfilando_presupuesto') {
+			const presupuestoMatch = message.match(/(\d[\d.,]*)/);
+			if (presupuestoMatch) {
+				context = { ...context, presupuesto: presupuestoMatch[1], flujo: null };
+				datosPersonales.presupuesto = presupuestoMatch[1];
+			} else {
+				context = { ...context, flujo: null };
+			}
+			// Continúa al flujo normal para mostrar productos
+		}
+
+		// Si es categoría general sin tamaño ni presupuesto, entrar a perfilación
+		if (categoriaGeneral && !yaTieneTamano && !yaTienePresupuesto && context?.flujo !== 'perfilando_presupuesto') {
+			return {
+				response: '¿Qué tamaño buscas? Por ejemplo: 43, 55 o 65 pulgadas (o litros/kilos según el producto).',
+				metadata: {
+					agentType: 'ventas',
+					flujo: 'perfilando_producto',
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					...datosPersonales,
+				},
+			};
+		}
+
+		// Los datos personales se pasan en metadata para que message.handler los guarde
+
 		// ── Flujo normal de ventas (mostrar productos) ──────────────────────
 		const ciudadStr = context?.ciudad ? `En ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
 		const envioStr = context?.tieneCobertura
@@ -1157,7 +1237,9 @@ REGLAS:
 - Si NO hay productos, pide amablemente más detalles (marca, modelo, referencia).
 - No inventes productos ni precios.
 - No compartas datos de agencias físicas.
-- Responde en máximo 3 líneas, sin asteriscos ni formato.`,
+- Responde en máximo 3 líneas, sin asteriscos ni formato.
+- CAPTURA Y REGISTRA automáticamente cualquier dato personal que el cliente mencione: nombre, cédula, dirección, teléfono, presupuesto. No los pidas de nuevo si ya fueron mencionados.
+- Si el cliente cambia de tema (ej: pregunta por cartera, garantías), redirecto suavemente al flujo de compra activo: "Entiendo, pero antes déjame ayudarte a terminar tu compra. ¿Quieres continuar?" Solo transferir si el cliente insiste.`,
 			ejemplos: [
 				{
 					cliente: 'Busco una nevera',
@@ -1193,6 +1275,7 @@ REGLAS:
 				ultimaBusqueda: products.length > 0
 					? { results: products.slice(0, 6), productoIndex }
 					: undefined,
+				...datosPersonales,
 			},
 		};
 	}

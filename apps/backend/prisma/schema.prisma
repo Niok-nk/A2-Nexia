@@ -60,6 +60,9 @@ model UserData {
   nombre            String?
   cedula            String?
   productoSolicitado String?
+  presupuesto       String?
+  direccion         String?
+  telefono          String?
   extra             String  @default("{}")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
