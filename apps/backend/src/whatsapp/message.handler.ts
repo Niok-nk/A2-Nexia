@@ -339,6 +339,7 @@ export async function processIncomingMessage(
 		if (repuesto?.repuesto) ud.productoSolicitado = repuesto.repuesto;
 
 		if (metadata?.productoCompra) ud.productoSolicitado = metadata.productoCompra;
+		if (metadata?.productoSolicitado && !ud.productoSolicitado) ud.productoSolicitado = metadata.productoSolicitado;
 
 		// Datos personales continuos (nombre, cédula, dirección, teléfono, presupuesto)
 		if (metadata?.nombreCliente) ud.nombre = metadata.nombreCliente;

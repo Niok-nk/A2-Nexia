@@ -109,6 +109,20 @@ function cleanResponse(raw: string): string {
 	text = text.replace(/\d+\s*lines?\s*max\??\s*:\s*yes|no|sí|si/gi, '').trim();
 	text = text.replace(/(?:max|máx)\s*\d+\s*(?:lines|palabras|productos)\??\s*\??\s*(?:yes|no|sí|si)/gi, '').trim();
 
+	// 5b) Quitar auto-rezonamiento en inglés (modelo probando respuestas)
+	//     Patrón:  " Applying that here:", " Or, I can...", " But the rule says...", " Final veron/version:"
+	text = text.replace(/"[^"]+"\s*\n*\s*(?:Applying\s+that\s+here|Or[,]?\s*I\s+can|But\s+the\s+rule\s+says|However|Let me|I think|Actually|The\s+user\s+asked|Since\s+the|The\s+key\s+point|Wait|I'll|Maybe\s+I\s+should|The\s+correct)[^.]*\./gi, '').trim();
+	text = text.replace(/(?:Applying\s+that\s+here|Or[,]?\s*I\s+can|But\s+the\s+rule\s+says|However|Let me|Actually|The\s+user\s+asked|Since\s+the)[^.]*\.\s*/gi, '').trim();
+	// Quitar líneas completas en inglés auto-diagnóstico
+	const englishLines = text.split('\n').filter(l => {
+		const t = l.trim();
+		if (!t) return true;
+		// Detectar línea que es auto-rezonamiento en inglés (no es respuesta al cliente)
+		if (/^[""'"][A-ZÁÉÍÓÚÑ]/i.test(t) && /Applying|But the|Or, I|However|Let me|Actually|I think|The user|Since the|The key|Wait,|I'll|Maybe I|The correct/i.test(t)) return false;
+		return true;
+	});
+	if (englishLines.length > 0) text = englishLines.join('\n').trim();
+
 	// 6) Cortar listas de "User Role:", "Client Goal:", etc.
 	const labelRe = /(?:^|[\s.])(?:user role|client goal|customer goal|customer's current request|customer current request|context(?:\s+from\s+previous\s+examples)?|reference info|style|i need to know|the customer is interested|the draft|following the examples)\s*:?/gi;
 	const labelMatches = [...text.matchAll(labelRe)];
@@ -1167,6 +1181,10 @@ export class VentasAgent implements IAgent {
 		let productoIndex = 0;
 		let terminoBusqueda = message;
 
+		// Extraer término de producto para guardar como productoSolicitado
+		const busquedaMatch = message.match(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa|info de|informacion de)\s*(?:un[oa]?|unas?|disponible)?\s*([a-záéíóúñÁÉÍÓÚÑ][a-záéíóúñÁÉÍÓÚÑ\s]{2,40})/i);
+		const productoBuscado = busquedaMatch ? busquedaMatch[1].trim() : terminoBusqueda;
+
 		if (pideMas) {
 			const busquedaGuardada = context?.ultimaBusqueda;
 			if (busquedaGuardada?.results?.length > 0) {
@@ -1272,6 +1290,7 @@ REGLAS:
 				productosEncontrados: hayProductos,
 				ciudadValidada: context?.ciudadValidada,
 				ciudad: context?.ciudad,
+				productoSolicitado: productoBuscado,
 				ultimaBusqueda: products.length > 0
 					? { results: products.slice(0, 6), productoIndex }
 					: undefined,
