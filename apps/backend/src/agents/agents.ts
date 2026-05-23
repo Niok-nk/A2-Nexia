@@ -1316,6 +1316,11 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (products.length === 0) {
+			// Verificar si el usuario preguntó por un producto que no está en nuestro catálogo
+			const palabrasMensaje = terminoBusqueda.toLowerCase().replace(/[.,!?¡¿]+/g, '').split(/\s+/);
+			const mencionaAlgunaCategoria = palabrasMensaje.some(p => CATEGORIAS_RE.test(p));
+			const esConsultaProducto = /(?:tiene[ns]?|hay|venden|busco|quiero|necesito|me interesa|consulta|precio|cu[aá]nto)/i.test(message);
+
 			try {
 				products = await wooCommerceService.searchProducts(terminoBusqueda, 6);
 
@@ -1334,6 +1339,22 @@ export class VentasAgent implements IAgent {
 							break;
 						}
 					}
+				}
+
+				// Si el usuario preguntó específicamente por un producto que no está en categorías
+				// y WooCommerce no encontró nada, no hacemos fallback a productos generales
+				if ((!products || products.length === 0) && esConsultaProducto && !mencionaAlgunaCategoria) {
+					const nombreProducto = busquedaMatch?.[1]?.trim().toLowerCase() || 'ese producto';
+					return {
+						response: `Lo siento, no tenemos ${nombreProducto} en nuestro catálogo actualmente. ¿Te puedo ayudar con otro producto? 🛒`,
+						nextStage: 'PROPOSAL',
+						metadata: {
+							agentType: 'ventas',
+							ciudadValidada: context?.ciudadValidada,
+							ciudad: context?.ciudad,
+							...datosPersonales,
+						},
+					};
 				}
 
 				if (!products || products.length === 0) {
