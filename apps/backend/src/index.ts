@@ -4,7 +4,7 @@ import logger from './utils/logger.js';
 import prisma from './db/index.js';
 import { initWhatsApp } from './whatsapp/whatsapp.js';
 import { validateEnv } from './utils/env.js';
-import { buildIndex } from './services/vector-store.js';
+
 
 validateEnv();
 
@@ -13,8 +13,7 @@ const PORT = process.env.PORT || 8000;
 const server = app.listen(PORT, () => {
 	logger.info(`Server running on port ${PORT}`);
 	initWhatsApp();
-	// Indexar productos para búsqueda vectorial (no bloqueante)
-	buildIndex().catch(e => logger.error({ error: e?.message }, 'VectorStore: falló al iniciar'));
+
 });
 
 process.on('SIGINT', async () => {

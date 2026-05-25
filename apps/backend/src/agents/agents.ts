@@ -1,6 +1,6 @@
 import { generateResponse } from '../utils/gemini.js';
 import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
-import { searchByVector, isIndexReady } from '../services/vector-store.js';
+
 import { sendMessage as sendWA } from '../whatsapp/whatsapp.js';
 import categoriasData from './categorias-generales.json';
 
@@ -1324,15 +1324,7 @@ export class VentasAgent implements IAgent {
 			const esConsultaProducto = /(?:tiene[ns]?|hay|venden|busco|quiero|necesito|me interesa|consulta|precio|cu[aá]nto)/i.test(message);
 
 			try {
-				// 1) Búsqueda vectorial (si el índice está listo)
-				if (isIndexReady()) {
-					const vectorResults = await searchByVector(terminoBusqueda, 6);
-					if (vectorResults.length > 0) {
-						products = vectorResults.map(r => r.product);
-					}
-				}
-
-				// 2) Fallback a WooCommerce search si el vectorial no dio resultados
+				// WooCommerce search
 				if (!products || products.length === 0) {
 					products = await wooCommerceService.searchProducts(terminoBusqueda, 6);
 				}
