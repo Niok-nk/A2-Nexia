@@ -19,12 +19,20 @@ const PATRONES_BLOQUEO = [
 	/\b(?:Yes|No)\.\s*(?:Colombian|Warm|Clear|Direct|asterisks)/i,
 	/(?:applying that here|the rule says)/i,
 	/\b(?:i can|i will|let's|should we|we should|i'll)\b/i,
+	/Max\s+\d+\s+(?:lines|words|palabras?)/i,
+	/asterisks?/i,
+	/Colombian\s+Spanish/i,
+	/\bconstent\b/i,
+	/free\s+shipping/i,
+	/Note:|Note:/i,
 ];
 
 const PALABRAS_INGLES_COMUNES = new Set([
 	'the', 'and', 'with', 'have', 'must', 'should', 'this', 'that', 'they', 'what', 'would', 'there',
 	'their', 'about', 'which', 'will', 'your', 'from', 'been', 'were', 'could', 'some', 'them', 'into',
-	'than', 'then', 'only', 'other', 'most', 'such', 'very', 'down', 'over', 'after', 'also', 'even'
+	'than', 'then', 'only', 'other', 'most', 'such', 'very', 'down', 'over', 'after', 'also', 'even',
+	'here', 'how', 'why', 'just', 'like', 'more', 'now', 'way', 'does', 'did', 'has', 'had',
+	'max', 'lines', 'shipping', 'best', 'better', 'good', 'please',
 ]);
 
 function esRespuestaSegura(texto: string): boolean {

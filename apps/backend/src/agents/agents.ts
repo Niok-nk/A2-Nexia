@@ -78,6 +78,7 @@ const PROFILING_STEPS: Record<string, ProfilingStep[]> = {
 		{ field: 'espacio', pregunta: '¿Para qué espacio es? 📺\n\n1️⃣ Sala\n2️⃣ Habitación\n3️⃣ Cocina o negocio' },
 		{ field: 'tamano', pregunta: '¿Qué tamaño buscas? 📏\n\n1️⃣ 32" a 43"\n2️⃣ 50" a 55"\n3️⃣ 65" o más\n4️⃣ No estoy seguro' },
 		{ field: 'smart', pregunta: '¿Necesitas Smart TV con apps? 🌐\n\n1️⃣ Sí\n2️⃣ No importa' },
+		{ field: 'presupuesto', pregunta: '¿Presupuesto aproximado? 💰\n\n1️⃣ Menos de $700.000\n2️⃣ $700.000 – $1.200.000\n3️⃣ Más de $1.200.000' },
 	],
 	nevera: [
 		{ field: 'personas', pregunta: '¿Para cuántas personas? ❄️\n\n1️⃣ 1 a 2\n2️⃣ 3 a 4\n3️⃣ 5 o más' },
@@ -88,6 +89,7 @@ const PROFILING_STEPS: Record<string, ProfilingStep[]> = {
 		{ field: 'espacio', pregunta: '¿Para qué espacio? ❄️\n\n1️⃣ Habitación\n2️⃣ Sala o comedor\n3️⃣ Oficina o local' },
 		{ field: 'tamano', pregunta: '¿Tamaño del espacio? 📏\n\n1️⃣ Menos de 15 m²\n2️⃣ 15 a 25 m²\n3️⃣ Más de 25 m²' },
 		{ field: 'inverter', pregunta: '¿Inverter o convencional? 🟢\n\n1️⃣ Inverter (ahorra hasta 60% energía)\n2️⃣ Convencional (más económico)\n3️⃣ No estoy seguro' },
+		{ field: 'presupuesto', pregunta: '¿Presupuesto aproximado? 💰\n\n1️⃣ Menos de $600.000\n2️⃣ $600.000 – $1.200.000\n3️⃣ Más de $1.200.000' },
 	],
 	audio: [
 		{ field: 'uso_audio', pregunta: '¿Para qué uso? 🎵\n\n1️⃣ Fiestas y eventos\n2️⃣ Sonido ambiental\n3️⃣ Karaoke o DJ\n4️⃣ Uso portátil' },
@@ -104,14 +106,17 @@ const PROFILING_STEPS: Record<string, ProfilingStep[]> = {
 	congelador: [
 		{ field: 'uso_negocio', pregunta: '¿Para hogar o negocio? ❄️\n\n1️⃣ Hogar\n2️⃣ Negocio / tienda' },
 		{ field: 'tamano', pregunta: '¿Tamaño? 📐\n\n1️⃣ Pequeño (menos de 300L)\n2️⃣ Mediano (300L – 500L)\n3️⃣ Grande (más de 500L)' },
+		{ field: 'presupuesto', pregunta: '¿Presupuesto aproximado? 💰\n\n1️⃣ Menos de $700.000\n2️⃣ $700.000 – $1.200.000\n3️⃣ Más de $1.200.000' },
 	],
 	vitrina: [
 		{ field: 'uso_negocio', pregunta: '¿Para hogar o negocio? 🏪\n\n1️⃣ Hogar\n2️⃣ Negocio / tienda' },
 		{ field: 'tamano', pregunta: '¿Tamaño? 📐\n\n1️⃣ Pequeña (menos de 300L)\n2️⃣ Mediana (300L – 500L)\n3️⃣ Grande (más de 500L)' },
+		{ field: 'presupuesto', pregunta: '¿Presupuesto aproximado? 💰\n\n1️⃣ Menos de $800.000\n2️⃣ $800.000 – $1.500.000\n3️⃣ Más de $1.500.000' },
 	],
 	exhibidor: [
 		{ field: 'uso_negocio', pregunta: '¿Para hogar o negocio? 🏪\n\n1️⃣ Hogar\n2️⃣ Negocio / tienda' },
 		{ field: 'tamano', pregunta: '¿Tamaño? 📐\n\n1️⃣ Pequeño (menos de 200L)\n2️⃣ Grande (más de 200L)' },
+		{ field: 'presupuesto', pregunta: '¿Presupuesto aproximado? 💰\n\n1️⃣ Menos de $600.000\n2️⃣ $600.000 – $1.000.000\n3️⃣ Más de $1.000.000' },
 	],
 	minibar: [
 		{ field: 'uso_minibar', pregunta: '¿Para dónde es? 🧊\n\n1️⃣ Oficina\n2️⃣ Habitación\n3️⃣ Sala / bar' },
@@ -293,6 +298,9 @@ function detectarShortcuts(message: string, categoria: string): Record<string, s
 		if (/habitaci[oó]n|cuarto|alcoba/i.test(lower)) answers.uso_minibar = 'habitacion';
 		if (/sala|bar|compartir/i.test(lower)) answers.uso_minibar = 'sala';
 	}
+	// Presupuesto espontáneo genérico
+	if (/barato|econ[oó]mico|menos/i.test(lower)) answers.presupuesto = 'bajo';
+	if (/lo que sea|sin l[ií]mite|no importa|indistinto|el mejor|necesario/i.test(lower)) answers.presupuesto = 'alto';
 	return answers;
 }
 
@@ -1622,8 +1630,8 @@ export class VentasAgent implements IAgent {
 
 			const camposOk = camposPerfilCompletados(perfilState.answers);
 
-			// Ya tenemos al menos 2 preguntas respondidas → recomendar productos
-			if (camposOk >= 2 || perfilState.step > pasos.length) {
+			// Todos los pasos del perfil completados → recomendar productos
+			if (camposOk >= pasos.length || perfilState.step > pasos.length) {
 				const terminoBusqueda = obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
 				// Continuar al flujo de ventas normal con término de búsqueda derivado del perfil
 				// (colocamos terminoBusqueda en el contexto para que el flujo normal lo use)
@@ -1661,15 +1669,15 @@ export class VentasAgent implements IAgent {
 			if (cat) {
 				// Detectar si el usuario ya dio información espontánea (shortcuts)
 				const shortcuts = detectarShortcuts(message, cat);
+				const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
 				const campos = camposPerfilCompletados(shortcuts);
 
-				// Si ya completó 2+ campos espontáneamente, usar directamente
-				if (campos >= 2) {
+				// Si ya completó todos los campos espontáneamente, omitir perfilamiento
+				if (campos >= pasos.length) {
 					const terminoBusqueda = obtenerTerminoBusquedaDesdePerfil(cat, shortcuts);
 					context = { ...context, terminoBusqueda };
 				} else {
 					// Iniciar perfilamiento: encontrar el primer campo sin responder
-					const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
 					const primerPaso = pasos.find(p => !shortcuts[p.field]);
 					if (primerPaso) {
 						return {
