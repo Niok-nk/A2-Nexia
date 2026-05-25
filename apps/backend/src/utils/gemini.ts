@@ -9,8 +9,45 @@ const MODELS = [
 	'gemini-3.1-flash-lite',
 	'gemini-2.0-flash-lite-001',
 	'gemini-2.0-flash',
-
 ];
+
+const PATRONES_BLOQUEO = [
+	/(?:wait|let me|double check|revised|final polish)/i,
+	/(?:the system prompt|the assistant|i must|i should)/i,
+	/(?:chain of thought|reasoning|let's refine)/i,
+	/(?:as an ai|as a language model|my instructions)/i,
+	/\b(?:Yes|No)\.\s*(?:Colombian|Warm|Clear|Direct|asterisks)/i,
+	/(?:applying that here|the rule says)/i,
+	/\b(?:i can|i will|let's|should we|we should|i'll)\b/i,
+];
+
+const PALABRAS_INGLES_COMUNES = new Set([
+	'the', 'and', 'with', 'have', 'must', 'should', 'this', 'that', 'they', 'what', 'would', 'there',
+	'their', 'about', 'which', 'will', 'your', 'from', 'been', 'were', 'could', 'some', 'them', 'into',
+	'than', 'then', 'only', 'other', 'most', 'such', 'very', 'down', 'over', 'after', 'also', 'even'
+]);
+
+function esRespuestaSegura(texto: string): boolean {
+	if (!texto) return true;
+
+	// 1. Patrones explícitos
+	for (const patron of PATRONES_BLOQUEO) {
+		if (patron.test(texto)) {
+			return false;
+		}
+	}
+
+	// 2. Porcentaje de inglés (compara palabras comunes de inglés)
+	const palabras = texto.toLowerCase().replace(/[.,!?¡¿()\-"]/g, '').split(/\s+/).filter(Boolean);
+	if (palabras.length > 0) {
+		const ingles = palabras.filter(p => PALABRAS_INGLES_COMUNES.has(p)).length;
+		if (ingles / palabras.length > 0.15) {
+			return false;
+		}
+	}
+
+	return true;
+}
 
 export const getGeminiModel = (systemInstruction?: string) => {
 	const model = genAI.getGenerativeModel({
@@ -27,18 +64,29 @@ export const generateResponse = async (
 	let lastError: any;
 
 	for (const modelName of MODELS) {
-		try {
-			const model = genAI.getGenerativeModel({
-				model: modelName,
-				systemInstruction: systemInstruction,
-			});
-			const result = await model.generateContent(prompt);
-			return result.response.text();
-		} catch (error) {
-			console.warn(`[Gemini API] Model (${modelName}) failed. Trying next model... Error: ${error}`);
-			lastError = error;
+		let currentPrompt = prompt;
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			try {
+				const model = genAI.getGenerativeModel({
+					model: modelName,
+					systemInstruction: systemInstruction,
+				});
+				const result = await model.generateContent(currentPrompt);
+				const text = result.response.text();
+
+				if (esRespuestaSegura(text)) {
+					return text;
+				}
+
+				console.warn(`[Gemini API] Model (${modelName}) leaked reasoning or English on attempt ${attempt}. Retrying...`);
+				currentPrompt = `${prompt}\n\n[SISTEMA - ERROR DE SEGURIDAD]: Tu respuesta anterior contenía razonamiento interno o texto en inglés. RESPONDE ÚNICAMENTE EN ESPAÑOL COLOMBIANO. PROHIBIDO escribir en inglés, prohibido mostrar tu razonamiento, análisis o notas de constraints. Escribe solo el mensaje final para el cliente.`;
+			} catch (error) {
+				console.warn(`[Gemini API] Model (${modelName}) failed on attempt ${attempt}. Trying next... Error: ${error}`);
+				lastError = error;
+				break; // Romper intentos para probar el siguiente modelo
+			}
 		}
 	}
 
-	throw new Error(`Gemini API error (All models failed). Last error: ${lastError}`);
+	throw new Error(`Gemini API error (All models failed or leaked reasoning). Last error: ${lastError}`);
 };
