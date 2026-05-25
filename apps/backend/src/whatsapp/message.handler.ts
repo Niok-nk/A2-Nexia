@@ -270,6 +270,9 @@ export async function processIncomingMessage(
 	if (extra?.flujo && typeof extra.flujo === 'string') context.flujo = extra.flujo;
 	if (extra?.pendingMessage) context.pendingMessage = extra.pendingMessage;
 	if (extra?.ultimaBusqueda) context.ultimaBusqueda = extra.ultimaBusqueda;
+	if (extra?.perfilState) context.perfilState = extra.perfilState;
+	if (typeof extra?.tieneCobertura === 'boolean') context.tieneCobertura = extra.tieneCobertura;
+	if (extra?.modalidad) context.modalidad = extra.modalidad;
 
 	// 6. Enrutar al orquestador
 	const { agentType, response, metadata } = await orchestrator.route(body, context);

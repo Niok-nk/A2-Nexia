@@ -1642,6 +1642,8 @@ export class VentasAgent implements IAgent {
 						perfilState,
 						ciudad: context?.ciudad,
 						ciudadValidada: true,
+						tieneCobertura: context?.tieneCobertura,
+						modalidad: context?.modalidad,
 						...datosPersonales,
 					},
 				};
@@ -1678,6 +1680,8 @@ export class VentasAgent implements IAgent {
 								perfilState: { categoria: cat, step: pasos.indexOf(primerPaso) + 1, answers: shortcuts },
 								ciudad: context?.ciudad,
 								ciudadValidada: true,
+								tieneCobertura: context?.tieneCobertura,
+								modalidad: context?.modalidad,
 								...datosPersonales,
 							},
 						};
