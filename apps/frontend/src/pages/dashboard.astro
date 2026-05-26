@@ -50,10 +50,7 @@ import Layout from '../layouts/Layout.astro';
 </Layout>
 
 <script>
-  const API = 'http://localhost:8000/api/v1';
-  const token = localStorage.getItem('crm_token') || '';
-
-  const headers = { Authorization: `Bearer ${token}` };
+  const API = window.API || 'http://localhost:8000/api/v1';
 
   function fmtPhone(p: string) {
     return p ? p.replace(/(\d{2})(\d{3})(\d{3})(\d{4})/, '+$1 $2 $3 $4') : '—';
@@ -75,8 +72,8 @@ import Layout from '../layouts/Layout.astro';
   async function loadDashboard() {
     try {
       const [contactsRes, leadsRes] = await Promise.all([
-        fetch(`${API}/contacts?_t=${Date.now()}`, { headers }),
-        fetch(`${API}/leads?_t=${Date.now()}`, { headers }),
+        apiFetch(`${API}/contacts?_t=${Date.now()}`),
+        apiFetch(`${API}/leads?_t=${Date.now()}`),
       ]);
       const contacts = await contactsRes.json();
       const leads = await leadsRes.json();

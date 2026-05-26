@@ -8,9 +8,7 @@ import Layout from '../layouts/Layout.astro';
 </Layout>
 
 <script>
-  const API = 'http://localhost:8000/api/v1';
-  const token = localStorage.getItem('crm_token') || '';
-  const headers = { Authorization: `Bearer ${token}` };
+  const API = window.API || 'http://localhost:8000/api/v1';
 
   const STAGES = [
     { key: 'INITIAL',           label: 'Nuevos',            color: 'var(--stage-initial)' },
@@ -36,7 +34,7 @@ import Layout from '../layouts/Layout.astro';
 
   async function loadPipeline() {
     try {
-      const res = await fetch(`${API}/leads?_t=${Date.now()}`, { headers });
+      const res = await apiFetch(`${API}/leads?_t=${Date.now()}`);
       const leads = await res.json();
       const board = document.getElementById('kanban-board')!;
 

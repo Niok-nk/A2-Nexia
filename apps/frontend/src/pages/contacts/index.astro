@@ -19,9 +19,7 @@ import Layout from '../../layouts/Layout.astro';
 </Layout>
 
 <script>
-  const API = 'http://localhost:8000/api/v1';
-  const token = localStorage.getItem('crm_token') || '';
-  const headers = { Authorization: `Bearer ${token}` };
+  const API = window.API || 'http://localhost:8000/api/v1';
 
   let allContacts = [];
 
@@ -76,7 +74,7 @@ import Layout from '../../layouts/Layout.astro';
 
   async function loadContacts() {
     try {
-      const res = await fetch(`${API}/contacts?_t=${Date.now()}`, { headers });
+      const res = await apiFetch(`${API}/contacts?_t=${Date.now()}`);
       allContacts = await res.json();
       renderTable(allContacts);
     } catch {

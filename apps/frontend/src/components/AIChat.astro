@@ -38,8 +38,6 @@ const API = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
   const inputEl = document.getElementById('chat-input');
   const sendBtn = document.getElementById('chat-send');
 
-  let token = localStorage.getItem('crm_token');
-
   toggle?.addEventListener('click', () => {
     windowEl.classList.toggle('hidden');
     if (!windowEl.classList.contains('hidden')) {

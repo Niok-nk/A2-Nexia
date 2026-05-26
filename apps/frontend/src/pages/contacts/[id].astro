@@ -14,9 +14,7 @@ const { id } = Astro.params;
 </Layout>
 
 <script define:vars={{ contactId: id }}>
-  const API = 'http://localhost:8000/api/v1';
-  const token = localStorage.getItem('crm_token') || '';
-  const headers = { Authorization: `Bearer ${token}` };
+  const API = window.API || 'http://localhost:8000/api/v1';
 
   let currentContact = null;
 
@@ -47,9 +45,9 @@ const { id } = Astro.params;
   ];
 
   async function changeStage(leadId, stage) {
-    await fetch(`${API}/leads/${leadId}/stage`, {
+    await apiFetch(`${API}/leads/${leadId}/stage`, {
       method: 'PATCH',
-      headers: { ...headers, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stage }),
     });
     loadContact();
@@ -58,9 +56,9 @@ const { id } = Astro.params;
   async function addNote(leadId) {
     const body = prompt('Escribe la nota interna:');
     if (!body?.trim()) return;
-    await fetch(`${API}/leads/${leadId}/notes`, {
+    await apiFetch(`${API}/leads/${leadId}/notes`, {
       method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body }),
     });
     loadContact();
@@ -69,7 +67,7 @@ const { id } = Astro.params;
   async function loadContact() {
     const container = document.getElementById('contact-detail');
     try {
-      const res = await fetch(`${API}/contacts/${contactId}`, { headers });
+      const res = await apiFetch(`${API}/contacts/${contactId}`);
       if (!res.ok) { container.innerHTML = '<div class="text-muted">Contacto no encontrado.</div>'; return; }
       const c = await res.json();
       currentContact = c;
@@ -173,9 +171,9 @@ const { id } = Astro.params;
     if (!msg) return;
 
     try {
-      const res = await fetch(`${API}/whatsapp/send`, {
+      const res = await apiFetch(`${API}/whatsapp/send`, {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: currentContact?.phone, message: msg }),
       });
       const data = await res.json();

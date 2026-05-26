@@ -90,11 +90,54 @@ const navItems = [
 )}
 
 <script define:vars={{ API }}>
-  // Auth guard
-  const token = localStorage.getItem('crm_token');
-  if (!token && !window.location.pathname.includes('/login')) {
-    window.location.href = '/login';
+  /**
+   * Decodifica payload de un JWT sin verificar firma (solo para leer exp).
+   */
+  function jwtPayload(token) {
+    try {
+      return JSON.parse(atob(token.split('.')[1]));
+    } catch {
+      return null;
+    }
   }
+
+  /**
+   * Auth guard: chequea que el token exista Y no haya expirado.
+   */
+  const token = localStorage.getItem('crm_token');
+  if (!window.location.pathname.includes('/login')) {
+    if (!token) {
+      window.location.href = '/login';
+    } else {
+      const payload = jwtPayload(token);
+      if (!payload || Date.now() >= payload.exp * 1000) {
+        localStorage.removeItem('crm_token');
+        window.location.href = '/login';
+      }
+    }
+  }
+
+  /**
+   * fetchWrapper — cualquier 401 cierra sesión automáticamente.
+   */
+  async function apiFetch(url, options = {}) {
+    const tok = localStorage.getItem('crm_token');
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': tok ? `Bearer ${tok}` : '',
+        ...options.headers,
+      },
+    });
+    if (res.status === 401 && !window.location.pathname.includes('/login')) {
+      localStorage.removeItem('crm_token');
+      window.location.href = '/login';
+      throw new Error('Sesión expirada');
+    }
+    return res;
+  }
+  window.apiFetch = apiFetch;
+  window.API = API;
 
   // WA status polling
   async function updateWAStatus() {
@@ -102,9 +145,7 @@ const navItems = [
     const txt = document.getElementById('wa-status-text');
     if (!dot || !txt) return;
     try {
-      const res = await fetch(`${API}/whatsapp/status`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await apiFetch(`${API}/whatsapp/status`);
       if (!res.ok) return;
       const { status } = await res.json();
       dot.className = `wa-dot ${status}`;

@@ -52,14 +52,12 @@ import Layout from '../layouts/Layout.astro';
 </Layout>
 
 <script>
-  const API = 'http://localhost:8000/api/v1';
-  const token = localStorage.getItem('crm_token') || '';
-  const headers = { Authorization: `Bearer ${token}` };
+  const API = window.API || 'http://localhost:8000/api/v1';
 
   async function refreshStatus() {
     const panel = document.getElementById('status-panel')!;
     try {
-      const res = await fetch(`${API}/whatsapp/status`, { headers });
+      const res = await apiFetch(`${API}/whatsapp/status`);
       const { status } = await res.json();
       const sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
       sendBtn.disabled = status !== 'connected';
@@ -75,7 +73,7 @@ import Layout from '../layouts/Layout.astro';
           </div>`;
       } else if (status === 'qr_pending') {
         // Load QR image
-        const qrRes = await fetch(`${API}/whatsapp/qr`, { headers });
+        const qrRes = await apiFetch(`${API}/whatsapp/qr`);
         const { qr } = await qrRes.json();
         panel.innerHTML = `
           <div style="text-align:center;">
@@ -102,7 +100,7 @@ import Layout from '../layouts/Layout.astro';
   async function loadRecentMessages() {
     const el = document.getElementById('recent-msgs')!;
     try {
-      const res = await fetch(`${API}/contacts?_t=${Date.now()}`, { headers });
+      const res = await apiFetch(`${API}/contacts?_t=${Date.now()}`);
       const contacts = await res.json();
       const allMsgs: any[] = [];
       contacts.forEach((c: any) => {
@@ -143,9 +141,9 @@ import Layout from '../layouts/Layout.astro';
     const result = document.getElementById('send-result')!;
     if (!to || !message) { result.innerHTML = '<span style="color:var(--color-red);">Completa todos los campos.</span>'; return; }
     try {
-      const res = await fetch(`${API}/whatsapp/send`, {
+      const res = await apiFetch(`${API}/whatsapp/send`, {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to, message }),
       });
       const data = await res.json();
@@ -164,9 +162,9 @@ import Layout from '../layouts/Layout.astro';
     const statusEl = document.getElementById('reconnect-status')!;
     statusEl.innerHTML = '<span style="color:var(--color-wa);">Reconectando...</span>';
     try {
-      const res = await fetch(`${API}/whatsapp/reconnect`, {
+      const res = await apiFetch(`${API}/whatsapp/reconnect`, {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' }
       });
       const data = await res.json();
       if (res.ok) {
