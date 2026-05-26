@@ -57,11 +57,13 @@ function esRespuestaSegura(texto: string): boolean {
 	return true;
 }
 
+const REQUEST_TIMEOUT_MS = 60_000;
+
 export const getGeminiModel = (systemInstruction?: string) => {
 	const model = genAI.getGenerativeModel({
 		model: MODELS[0],
 		systemInstruction,
-	});
+	}, { timeout: REQUEST_TIMEOUT_MS });
 	return model;
 };
 
@@ -75,10 +77,10 @@ export const generateResponse = async (
 		let currentPrompt = prompt;
 		for (let attempt = 1; attempt <= 3; attempt++) {
 			try {
-				const model = genAI.getGenerativeModel({
-					model: modelName,
-					systemInstruction: systemInstruction,
-				});
+			const model = genAI.getGenerativeModel({
+				model: modelName,
+				systemInstruction: systemInstruction,
+			}, { timeout: REQUEST_TIMEOUT_MS });
 				const result = await model.generateContent(currentPrompt);
 				const text = result.response.text();
 
