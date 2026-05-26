@@ -2,7 +2,7 @@ import { WAMessage } from '@whiskeysockets/baileys';
 import prisma from '../db/index.js';
 import { orchestrator } from '../agents/orchestrator.js';
 import { extractAndSaveData } from '../agents/data-extractor.js';
-import { sendMessage, getStatus, resolvePhoneFromJid } from './whatsapp.js';
+import { sendMessage, resolvePhoneFromJid } from './whatsapp.js';
 import logger from '../utils/logger.js';
 
 function safeParseJson(str: string | null | undefined): any {
@@ -124,40 +124,39 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 	try {
 		const { response, agentType } = await processIncomingMessage(phone, body, realPhone);
 
-		// 10. Enviar respuesta por WhatsApp solo si está conectado
-		if (getStatus() === 'connected') {
+		// 10. Enviar respuesta por WhatsApp (intentar aunque el status no sea 'connected')
+		//     Baileys puede recibir mensajes incluso cuando isReady = false
+		try {
 			await sendMessage(phone, response);
 			logger.info({ phone, agentType }, 'Response sent');
-		} else {
-			logger.warn({ phone, agentType }, 'WhatsApp not connected, response not sent');
+		} catch (err) {
+			logger.warn({ phone, agentType, error: err }, 'Failed to send WhatsApp response');
 		}
 	} catch (error) {
 		logger.error({ error, phone }, 'Error handling incoming message');
 
-		// Intentar enviar mensaje de error al usuario solo si está conectado
-		if (getStatus() === 'connected') {
-			try {
-				const fallbackResponse = 'Lo siento, hubo un problema procesando tu mensaje. Por favor intenta de nuevo en un momento.';
-				await sendMessage(phone, fallbackResponse);
+		// Intentar enviar mensaje de error al usuario
+		try {
+			const fallbackResponse = 'Lo siento, hubo un problema procesando tu mensaje. Por favor intenta de nuevo en un momento.';
+			await sendMessage(phone, fallbackResponse);
 
 				// Intentar buscar el contacto y persistir la respuesta de error de fallback en BD
-				const contact = await prisma.contact.findUnique({
-					where: { phone },
-				});
+			const contact = await prisma.contact.findUnique({
+				where: { phone },
+			});
 
-				if (contact) {
-					await prisma.message.create({
-						data: {
-							contactId: contact.id,
-							direction: 'OUTBOUND',
-							body: fallbackResponse,
-							agentType: 'SYSTEM',
-						},
-					});
-				}
-			} catch (err) {
-				logger.error({ err }, 'Failed to send or save fallback error message');
+			if (contact) {
+				await prisma.message.create({
+					data: {
+						contactId: contact.id,
+						direction: 'OUTBOUND',
+						body: fallbackResponse,
+						agentType: 'SYSTEM',
+					},
+				});
 			}
+		} catch (err) {
+			logger.error({ err }, 'Failed to send or save fallback error message');
 		}
 	}
 }

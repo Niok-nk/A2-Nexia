@@ -124,13 +124,11 @@ router.post('/chat', async (req: Request, res: Response) => {
 
 		const waStatus = getStatus();
 		logger.info({ waStatus, phone }, 'WhatsApp send check');
-		if (waStatus === 'connected') {
-			try {
-				await sendMessage(phone, response);
-				logger.info({ phone }, 'Message sent via WhatsApp');
-			} catch (err) {
-				logger.error({ error: err, phone }, 'Failed to send WhatsApp message');
-			}
+		try {
+			await sendMessage(phone, response);
+			logger.info({ phone }, 'Message sent via WhatsApp');
+		} catch (err) {
+			logger.warn({ error: err, phone, waStatus }, 'WhatsApp send failed (may be disconnected)');
 		}
 
 		res.json({ success: true, message: response, agentType });
@@ -153,13 +151,11 @@ router.post('/test', requireAuth, async (req: Request, res: Response) => {
 	try {
 		const { response, agentType, contactId, leadId } = await processIncomingMessage(phone, message);
 
-		// Enviar respuesta por WhatsApp solo si está conectado
-		if (getStatus() === 'connected') {
-			try {
-				await sendMessage(phone, response);
-			} catch (err) {
-				logger.error({ error: err, phone }, 'Failed to send WhatsApp message');
-			}
+		// Enviar respuesta por WhatsApp (intentar aunque no esté marcado como 'connected')
+		try {
+			await sendMessage(phone, response);
+		} catch (err) {
+			logger.warn({ error: err, phone }, 'Failed to send WhatsApp response');
 		}
 
 		res.json({
