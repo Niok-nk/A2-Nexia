@@ -81,9 +81,7 @@ const PROFILING_STEPS: Record<string, ProfilingStep[]> = {
 		{ field: 'presupuesto', pregunta: '¿Presupuesto aproximado? 💰\n\n1️⃣ Menos de $700.000\n2️⃣ $700.000 – $1.200.000\n3️⃣ Más de $1.200.000' },
 	],
 	nevera: [
-		{ field: 'personas', pregunta: '¿Para cuántas personas? ❄️\n\n1️⃣ 1 a 2\n2️⃣ 3 a 4\n3️⃣ 5 o más' },
-		{ field: 'espacio', pregunta: '¿Tienes espacio amplio o reducido en la cocina? 📐\n\n1️⃣ Amplio\n2️⃣ Reducido' },
-		{ field: 'presupuesto', pregunta: '¿Presupuesto aproximado? 💰\n\n1️⃣ Menos de $900.000\n2️⃣ $900.000 – $1.500.000\n3️⃣ Sin límite' },
+		{ field: 'presupuesto', pregunta: '¿Qué presupuesto tienes en mente? 💰\n\n1️⃣ Menos de $1.000.000\n2️⃣ $1.000.000 – $2.500.000\n3️⃣ $2.500.000 – $5.000.000 (nevecones)\n4️⃣ Sin límite' },
 	],
 	aire: [
 		{ field: 'espacio', pregunta: '¿Para qué espacio? ❄️\n\n1️⃣ Habitación\n2️⃣ Sala o comedor\n3️⃣ Oficina o local' },
@@ -210,10 +208,16 @@ function resolverRespuestaPerfil(msg: string, field: string): string {
 	}
 	if (field === 'presupuesto') {
 		if (num === '1' || /menos|bajo|barato|econ[oó]mico/i.test(lower)) return 'bajo';
-		if (num === '2' || /medio|moderado|normal|800|900|entre/i.test(lower)) return 'medio';
-		if (num === '3' || /alto|mucho|sin l[ií]mite|lo que sea|no importa|indistinto|necesario/i.test(lower)) return 'alto';
+		if (num === '2' || /medio|moderado|normal|800|900|mill[oó]n|entre/i.test(lower)) return 'medio';
+		if (num === '3' || /nevecon|alto|2\.5|3|4|5\s*mill/i.test(lower)) return 'alto';
+		if (num === '4' || /sin l[ií]mite|lo que sea|no importa|indistinto|necesario|ilimitado/i.test(lower)) return 'alto';
 		const numVal = lower.match(/([\d.]+)/);
-		if (numVal) return numVal[1];
+		if (numVal) {
+			const valor = parseFloat(numVal[1].replace(/\./g, ''));
+			if (valor < 1000000) return 'bajo';
+			if (valor < 2500000) return 'medio';
+			return 'alto';
+		}
 		return 'medio';
 	}
 	return msg;
@@ -265,9 +269,11 @@ function detectarShortcuts(message: string, categoria: string): Record<string, s
 		if (/pequeñ[oa]/i.test(lower)) answers.tamano = '32-43';
 		if (/mediano/i.test(lower)) answers.tamano = '50-55';
 	} else if (categoria === 'nevera') {
-		if (/grande|nevecon|nevecones/i.test(lower)) answers.espacio = 'amplio';
-		if (/pequeñ[oa]|mini|compacto/i.test(lower)) answers.espacio = 'reducido';
-		if (/barato|econ[oó]mico/i.test(lower)) answers.presupuesto = 'bajo';
+		if (/nevecon|nevecones|doble puerta|side by side|french door/i.test(lower)) {
+			answers.presupuesto = 'alto'; // Nevecones siempre son gama alta
+		}
+		if (/barato|econ[oó]mico|barata/i.test(lower)) answers.presupuesto = 'bajo';
+		if (/grande|familiar|ampli[oa]/i.test(lower)) answers.presupuesto = 'medio';
 	} else if (categoria === 'aire') {
 		if (/habitaci[oó]n|cuarto|alcoba/i.test(lower)) answers.espacio = 'habitacion';
 		if (/sala|comedor/i.test(lower)) answers.espacio = 'sala';
@@ -324,14 +330,11 @@ function obtenerTerminoBusquedaDesdePerfil(categoria: string, answers: Record<st
 		return 'televisor';
 	}
 	if (categoria === 'nevera') {
-		const personas = answers.personas || '3-4';
-		const espacio = answers.espacio || 'amplio';
-		if (personas === '1-2') {
-			if (espacio === 'reducido') return 'minibar';
-			return 'nevera 197';
-		}
-		if (personas === '3-4') return 'nevera 251';
-		return 'nevecon';
+		const presupuesto = answers.presupuesto || 'medio';
+		if (presupuesto === 'bajo') return 'nevera 197';          // menos de $1M
+		if (presupuesto === 'medio') return 'nevera 251';         // $1M-$2.5M
+		if (presupuesto === 'alto') return 'nevecon';             // $2.5M-$5M o sin límite
+		return 'nevera';
 	}
 	if (categoria === 'aire') {
 		const tamano = answers.tamano || '15-25';
@@ -756,12 +759,15 @@ function buildGemmaPrompt(opts: {
 
 FORMATO DE RESPUESTA OBLIGATORIO:
 - Responde ÚNICAMENTE el mensaje para el cliente.
-- Español colombiano natural, 1-3 frases cortas.
+- Español colombiano natural, cercano y femenino (eres Sara).
+- Mensajes cortos tipo WhatsApp: 1-3 frases máximo.
 - Sin asteriscos, sin encabezados, sin etiquetas, sin listas con viñetas.
 - PROHIBIDO incluir tu razonamiento, borradores, auto-evaluación o checklist.
 - PROHIBIDO escribir en inglés.
+- PROHIBIDO usar frases genéricas como "¡Excelente elección!", "¡Qué bue que preguntas!", "¡Con gusto!". Sé natural.
 - Si no estás seguro de algo, di "déjame verificar" en vez de inventar.
-- Tu respuesta empieza directamente con el mensaje al cliente.`;
+- Tu respuesta empieza directamente con el mensaje al cliente.
+- Usa un tono cálido como si fueras una amiga que trabaja en la tienda.`;
 
 	const ejemplosTexto = opts.ejemplos
 		.map((e) => `Cliente: ${e.cliente}\nAsistente: ${e.asistente}`)
@@ -995,9 +1001,9 @@ export class BienvenidaAgent implements IAgent {
 		}
 
 		// Bienvenida completa con menú organizado (mejora #1)
-		const menu = `${saludo} 👋 Soy ${AGENT_NAME}, la asistente virtual de JLC Electronics.
+		const menu = `${saludo} 👋 Soy ${AGENT_NAME}, tu asesora virtual en JLC Electronics.
 
-¿En qué puedo ayudarte hoy?
+¿En qué te puedo ayudar?
 
 1️⃣ Comprar un producto (contado o crédito)
 2️⃣ Cartera / estado de cuenta
@@ -1007,7 +1013,7 @@ export class BienvenidaAgent implements IAgent {
 6️⃣ Distribuidores
 7️⃣ Trabaja con nosotros
 
-Escríbeme el número de tu opción o cuéntame directamente lo que necesitas. 😊`;
+Escríbeme el número o cuéntame qué necesitas 😊`;
 
 		return {
 			response: menu,
@@ -1050,45 +1056,45 @@ interface CreditoStep {
 // ─── PASOS DEL FORMULARIO DE CRÉDITO ─────────────────────────────────────────
 
 const CREDITO_STEPS: CreditoStep[] = [
-	{ field: 'nombres',            pregunta: '¿Cuáles son tus nombres?' },
-	{ field: 'cedula',             pregunta: '¿Cuál es tu número de cédula de ciudadanía?' },
-	{ field: 'celular',            pregunta: '¿Cuál es tu número de celular?' },
-	{ field: 'direccion',          pregunta: '¿Cuál es tu dirección de residencia y barrio?' },
+	{ field: 'nombres',            pregunta: '¿Cómo te llamas? (nombre completo)' },
+	{ field: 'cedula',             pregunta: '¿Cuál es tu número de cédula?' },
+	{ field: 'celular',            pregunta: '¿Un celular donde te pueda contactar?' },
+	{ field: 'direccion',          pregunta: '¿Cuál es tu dirección con barrio?' },
 	{
 		field: 'tipoVivienda',
-		pregunta: '¿Qué tipo de vivienda tienes?\n1. Propia\n2. Arriendo\n3. Anticrés\n4. Familiar',
+		pregunta: '¿Tu vivienda es...?\n1️⃣ Propia\n2️⃣ Arriendo\n3️⃣ Anticrés\n4️⃣ Familiar',
 		opciones: ['Propia', 'Arriendo', 'Anticrés', 'Familiar'],
 	},
 	{ field: 'departamento',       pregunta: '¿En qué departamento vives?' },
-	{ field: 'ciudad',             pregunta: '¿En qué ciudad? Si aplica, escribe también la vereda.' },
+	{ field: 'ciudad',             pregunta: '¿Y la ciudad? Si aplica, incluye la vereda.' },
 	{
 		field: 'personasACargo',
-		pregunta: '¿Cuántas personas tienes a cargo?\n1. 1\n2. 2\n3. 3\n4. 4\n5. 5 o más',
+		pregunta: '¿Cuántas personas tienes a cargo?\n1️⃣ 1\n2️⃣ 2\n3️⃣ 3\n4️⃣ 4\n5️⃣ 5 o más',
 		opciones: ['1', '2', '3', '4', '5 o más'],
 	},
-	{ field: 'empresa',            pregunta: '¿En qué empresa trabajas?' },
-	{ field: 'cargo',              pregunta: '¿Qué cargo desempeñas? Si eres independiente, describe tu actividad comercial.' },
-	{ field: 'experienciaLaboral', pregunta: '¿Cuánto tiempo llevas en esa empresa o actividad?' },
+	{ field: 'empresa',            pregunta: '¿En qué empresa trabajas? Si eres independiente, cuéntame tu actividad.' },
+	{ field: 'cargo',              pregunta: '¿Qué cargo tienes?' },
+	{ field: 'experienciaLaboral', pregunta: '¿Cuánto tiempo llevas ahí?' },
 	{
 		field: 'estadoCivil',
-		pregunta: '¿Cuál es tu estado civil?\n1. Soltero/a\n2. Casado/a\n3. Unión libre\n4. Viudo/a',
+		pregunta: '¿Estado civil?\n1️⃣ Soltero/a\n2️⃣ Casado/a\n3️⃣ Unión libre\n4️⃣ Viudo/a',
 		opciones: ['Soltero/a', 'Casado/a', 'Unión libre', 'Viudo/a'],
 	},
-	{ field: 'ingresosMensuales',  pregunta: '¿Cuáles son tus ingresos mensuales? (valor aproximado en pesos)' },
-	{ field: 'gastosMensuales',    pregunta: '¿Cuáles son tus gastos mensuales? (valor aproximado en pesos)' },
-	{ field: 'otrosIngresos',      pregunta: '¿Tienes otros ingresos? Si es así, especifica la fuente. Si no, escribe "No".' },
+	{ field: 'ingresosMensuales',  pregunta: '¿Cuánto ganas al mes aproximadamente?' },
+	{ field: 'gastosMensuales',    pregunta: '¿Y cuánto gastas al mes más o menos?' },
+	{ field: 'otrosIngresos',      pregunta: '¿Tienes otros ingresos? Si no, escribe "No".' },
 	{
 		field: 'reportadoDataCredito',
-		pregunta: '¿Te encuentras reportado en DataCrédito?\n1. Sí\n2. No\n3. No sé',
+		pregunta: '¿Estás reportado en DataCrédito?\n1️⃣ Sí\n2️⃣ No\n3️⃣ No sé',
 		opciones: ['Sí', 'No', 'No sé'],
 	},
 	{
 		field: 'dispuestoSaldarDeuda',
-		pregunta: '¿Estarías dispuesto/a a saldar tu deuda con la empresa que te reportó para aspirar a un nuevo crédito?\n1. Sí\n2. No',
+		pregunta: '¿Estarías dispuesto/a a saldar esa deuda para aspirar a un nuevo crédito?\n1️⃣ Sí\n2️⃣ No',
 		opciones: ['Sí', 'No'],
 	},
-	{ field: 'producto',           pregunta: '¿Qué producto te interesa financiar?' },
-	{ field: 'skuProducto',        pregunta: 'Por último, ¿cuál es el código SKU o referencia del producto? Lo encuentras debajo del título en la página. Si no lo tienes, escribe "No sé".' },
+	{ field: 'producto',           pregunta: '¿Qué producto te gustaría financiar?' },
+	{ field: 'skuProducto',        pregunta: 'Por último, ¿tienes el código o referencia del producto? Lo ves debajo del nombre en la página. Si no lo tienes, escribe "No sé".' },
 ];
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -1175,10 +1181,37 @@ export class VentasAgent implements IAgent {
 
 		if (stepIndex > 0) {
 			const stepAnterior = CREDITO_STEPS[stepIndex - 1];
-			const valor = stepAnterior.opciones
-				? resolverOpcion(message, stepAnterior.opciones)
-				: message.trim();
-			creditoData[stepAnterior.field] = valor;
+
+			// Reconocimiento inteligente de nombres: si estamos pidiendo nombres,
+			// aceptar cualquier texto que parezca un nombre (no solo si matchea opciones)
+			if (stepAnterior.field === 'nombres') {
+				const textoLimpio = message.trim();
+				// Aceptar como nombre si: tiene al menos 2 caracteres, 
+				// no es solo un número, no es un emoji solo
+				if (textoLimpio.length >= 2 && !/^\d+$/.test(textoLimpio) && !/^[\p{Emoji}\s]+$/u.test(textoLimpio)) {
+					creditoData.nombres = textoLimpio;
+				}
+				// Si no se pudo interpretar como nombre, volver a pedir
+				if (!creditoData.nombres) {
+					return {
+						response: 'Disculpa, no logré captar tu nombre. ¿Me lo escribes de nuevo? 😊',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'credito',
+							creditoData,
+							creditoStep: stepIndex, // mismo paso
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+						},
+					};
+				}
+			} else {
+				const valor = stepAnterior.opciones
+					? resolverOpcion(message, stepAnterior.opciones)
+					: message.trim();
+				creditoData[stepAnterior.field] = valor;
+			}
 		}
 
 		const camposFaltantes = CREDITO_STEPS.filter((s) => !creditoData[s.field]);
@@ -1189,8 +1222,18 @@ export class VentasAgent implements IAgent {
 				(s) => s.field === siguientePaso.field
 			);
 
+			// Transiciones naturales entre preguntas (no solo la pregunta pelada)
+			const completados = CREDITO_STEPS.length - camposFaltantes.length;
+			let transicion = '';
+			if (completados === 1) transicion = '¡Gracias! ';
+			else if (completados === 3) transicion = 'Vamos muy bien 💪 ';
+			else if (completados === 6) transicion = 'Ya casi terminamos la parte personal. ';
+			else if (completados === 11) transicion = 'Casi listo, solo faltan unos pocos datos más. ';
+			else if (completados >= 15) transicion = '¡Ya casi terminamos! ';
+			else if (completados > 0 && completados % 3 === 0) transicion = 'Perfecto. ';
+
 			return {
-				response: siguientePaso.pregunta,
+				response: `${transicion}${siguientePaso.pregunta}`,
 				metadata: {
 					agentType: 'ventas',
 					flujo: 'credito',
@@ -1271,7 +1314,7 @@ export class VentasAgent implements IAgent {
 
 			if (cobertura === 'cobertura') {
 				return {
-					response: `${getSaludo()} ¡Qué bien! En ${ciudadCap} tienes cobertura con envío gratis.\n\n¿La compra sería al *contado* o a *crédito*? 😊`,
+					response: `¡Qué bien! A ${ciudadCap} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
 					metadata: {
 						agentType: 'ventas',
 						ciudad: ciudadDetectada,
@@ -1302,8 +1345,9 @@ export class VentasAgent implements IAgent {
 			const quiereContado = /contado|efectivo|pago inmediato|precio de contado|contadito|2/i.test(lower);
 
 			if (quiereCredito) {
+				// Intro natural sin mencionar cantidad de campos (cliente desiste si ve "19 campos")
 				return {
-					response: `Perfecto, te ayudo con el proceso de crédito 📋\n\nVoy a hacerte unas preguntas para diligenciar tu solicitud. Son ${CREDITO_STEPS.length} campos en total, uno por uno.\n\n${CREDITO_STEPS[0].pregunta}`,
+					response: `¡Dale, te ayudo con el crédito! 📋\n\nPara armar tu solicitud necesito algunos datos. Empecemos con lo básico:\n\n¿Cómo te llamas? (nombre completo)`,
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'credito',
@@ -1319,7 +1363,7 @@ export class VentasAgent implements IAgent {
 
 			if (quiereContado) {
 				return {
-					response: `¡Perfecto! Cuéntame, ¿qué producto o referencia buscas? Así te muestro lo que tenemos disponible 😊`,
+					response: `¡Perfecto! Cuéntame, ¿qué estás buscando? 😊`,
 					metadata: {
 						agentType: 'ventas',
 						modalidad: 'contado',
@@ -1371,7 +1415,7 @@ export class VentasAgent implements IAgent {
 					tieneCobertura: true,
 				};
 				return {
-					response: `${getSaludo()} ¡Qué bien! En ${ciudadDetectada} tienes cobertura con envío gratis.\n\n¿La compra sería al *contado* o a *crédito*? 😊`,
+					response: `¡Qué bien! A ${ciudadDetectada.charAt(0).toUpperCase() + ciudadDetectada.slice(1)} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
 					metadata: {
 						agentType: 'ventas',
 						ciudad: ciudadDetectada,
@@ -1405,7 +1449,7 @@ export class VentasAgent implements IAgent {
 		// ── PASO 3: Si eligió crédito → iniciar formulario ──────────────────
 		if (context?.modalidad === 'credito') {
 			return {
-				response: `Perfecto, te ayudo con el proceso de crédito 📋\n\nVoy a hacerte unas preguntas para diligenciar tu solicitud. Son ${CREDITO_STEPS.length} campos en total, uno por uno.\n\n${CREDITO_STEPS[0].pregunta}`,
+				response: `¡Dale, te ayudo con el crédito! 📋\n\nPara armar tu solicitud necesito algunos datos. Empecemos con lo básico:\n\n¿Cómo te llamas? (nombre completo)`,
 				metadata: {
 					agentType: 'ventas',
 					flujo: 'credito',
@@ -1682,7 +1726,25 @@ export class VentasAgent implements IAgent {
 		// 7b) Detectar si el mensaje actual menciona una categoría de producto
 		const CATEGORIAS = CATEGORIAS_RE;
 		const esCategoriaSola = CATEGORIAS.test(message) && message.split(/\s+/).length <= 4;
-		const esBusquedaCategoria = CATEGORIAS.test(message) && /(?:busco|quiero|necesito|me interesa|tiene[ns]?|hay|venden|muestra|quisiera|info de|informacion de|precio de|precios de|cuesta|cuestan|vale|valen|consulta)/i.test(message);
+		const esBusquedaCategoria = CATEGORIAS.test(message) && /(?:busco|quiero|necesito|me interesa|tiene[ns]?|hay|venden|muestra|quisiera|info de|informacion de|precio de|precios de|cuesta|cuestan|vale|valen|consulta|tambi[eé]n)/i.test(message);
+		const categoriaGeneral = esCategoriaSola || esBusquedaCategoria;
+
+		// Detectar cambio de categoría: si el cliente ya tenía un producto seleccionado
+		// pero ahora pide algo diferente, resetear el contexto de búsqueda anterior
+		if (categoriaGeneral) {
+			const nuevaCategoria = detectarCategoria(message);
+			const categoriaAnterior = context?.ultimaBusqueda?.categoria;
+			if (nuevaCategoria && categoriaAnterior && nuevaCategoria !== categoriaAnterior) {
+				// Cliente cambió de categoría → limpiar búsqueda anterior
+				context = {
+					...context,
+					ultimaBusqueda: undefined,
+					terminoBusqueda: undefined,
+					perfilState: undefined,
+					flujo: null,
+				};
+			}
+		}
 		const categoriaGeneral = esCategoriaSola || esBusquedaCategoria;
 
 		if (categoriaGeneral && context?.flujo !== 'perfilando') {
@@ -1855,32 +1917,33 @@ export class VentasAgent implements IAgent {
 
 		const { system, user } = buildGemmaPrompt({
 			instruccion: `Eres ${AGENT_NAME}, asesora comercial de JLC Electronics Colombia.
-Tono cálido, claro y directo. Español colombiano. Mensajes cortos tipo WhatsApp.
+Tono cálido, cercano y femenino. Español colombiano natural. Mensajes cortos tipo WhatsApp.
 ${ciudadStr ? `Ciudad del cliente: ${ciudadStr}.` : ''} ${envioStr ? `Condición de envío: ${envioStr}.` : ''}
 ${userDataStr}
 REGLAS:
 - Recomienda máximo 1-2 productos del CATÁLOGO con nombre, precio y enlace.
 - Si hay productos, preséntalos de forma natural y breve.
-- Si NO hay productos, pide más detalles (marca, modelo, referencia).
+- Si NO hay productos en el catálogo, dilo honestamente. NO inventes que "no tenemos" si el catálogo sí tiene.
 - NUNCA inventes productos, precios ni disponibilidad.
 - NUNCA compartas direcciones de agencias físicas.
 - NUNCA contradigas la condición de envío ya comunicada al cliente.
 - Máximo 3 líneas de texto, sin asteriscos ni formato.
 - Si el cliente ya dio datos (nombre, cédula, ciudad, presupuesto), úsalos sin pedirlos de nuevo.
-- PROHIBIDO confirmar o prometer el despacho o envío del pedido (ej: "se envía hoy mismo", "va directo", "tu pedido está listo para salir") si el cliente no ha pagado. Siempre indica que el envío se programará "tan pronto se confirme el pago".
-- Si el cliente dice que ya pagó, dile que para confirmar el pago te comparta el comprobante o número de transacción por este medio.`,
+- Si el cliente pide un producto NUEVO o diferente al anterior, ayúdale con eso. No insistas con el producto anterior.
+- PROHIBIDO confirmar envío o despacho si el cliente no ha pagado. Di "tan pronto se confirme el pago".
+- Si el cliente dice que ya pagó, pide el comprobante o número de transacción.`,
 			ejemplos: [
 				{
 					cliente: 'Busco una nevera',
-					asistente: 'Claro, tenemos neveras disponibles. Por ejemplo la Nevecón JLC No Frost 587L. ¿Te interesa ver más opciones o quieres los detalles de esa?',
+					asistente: 'Tenemos varias opciones en neveras. Te recomiendo la Nevera JLC No Frost 251L por $1.399.900. ¿Te interesa o quieres ver más opciones?',
 				},
 				{
-					cliente: 'Quiero un televisor de 55 pulgadas',
-					asistente: 'Tenemos un televisor que podría interesarte. ¿Te comparto el enlace para que lo veas?',
+					cliente: 'también quiero una lavadora',
+					asistente: 'Claro, tenemos lavadoras también. Te recomiendo la Lavadora JLC Automática 16kg. ¿Quieres que te la busque?',
 				},
 				{
-					cliente: 'Necesito un repuesto para lavadora',
-					asistente: 'No encontré repuestos exactos en el catálogo. ¿Me indicas la marca y modelo de tu lavadora? Así busco más preciso.',
+					cliente: 'y no hay más?',
+					asistente: 'Déjame verificar si tenemos otras opciones disponibles en este momento.',
 				},
 			],
 			historial: formatHistory(context?.history),
@@ -1905,7 +1968,7 @@ REGLAS:
 				tieneCobertura: context?.tieneCobertura,
 				productoSolicitado: productoBuscado,
 				ultimaBusqueda: products.length > 0
-					? { results: products.slice(0, 6), productoIndex }
+					? { results: products.slice(0, 6), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
 					: undefined,
 				...datosPersonales,
 			},
