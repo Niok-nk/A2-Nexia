@@ -1112,6 +1112,51 @@ export class VentasAgent implements IAgent {
 	async handle(message: string, context: any): Promise<AgentResponse> {
 		const lower = message.toLowerCase().trim();
 
+		// ── Flujo de esperando_ciudad o esperando_modalidad pausado ──────────
+		if (context?.flujo === 'esperando_ciudad_pausado') {
+			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			if (quiereContinuar) {
+				context.flujo = 'esperando_ciudad';
+				return {
+					response: '¡Excelente! Sigamos. ¿Desde qué ciudad o municipio nos escribes? 📍',
+					metadata: {
+						agentType: 'ventas',
+						flujo: 'esperando_ciudad',
+						pendingMessage: context?.pendingMessage,
+					},
+				};
+			} else {
+				context.flujo = null;
+				return {
+					response: 'Entendido, cancelamos la consulta. ¿En qué más te puedo ayudar hoy? 😊',
+					metadata: { agentType: 'ventas', flujo: null },
+				};
+			}
+		}
+
+		if (context?.flujo === 'esperando_modalidad_pausado') {
+			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			if (quiereContinuar) {
+				context.flujo = 'esperando_modalidad';
+				return {
+					response: '¡Súper! Cuéntame, ¿la compra sería al *contado* o a *crédito*?',
+					metadata: {
+						agentType: 'ventas',
+						flujo: 'esperando_modalidad',
+						ciudad: context?.ciudad,
+						ciudadValidada: true,
+						tieneCobertura: context?.tieneCobertura,
+					},
+				};
+			} else {
+				context.flujo = null;
+				return {
+					response: 'Listo, dejamos de lado el proceso. ¿Qué otra duda o consulta tienes? 😊',
+					metadata: { agentType: 'ventas', flujo: null },
+				};
+			}
+		}
+
 		// ── Flujo de crédito activo o pausado ──────────────────────────────────
 		if (context?.flujo === 'credito' || context?.flujo === 'credito_pausado') {
 			if (context?.flujo === 'credito_pausado') {
@@ -2234,6 +2279,22 @@ export class RepuestosAgent implements IAgent {
 	name = 'Repuestos';
 
 	async handle(message: string, context: any): Promise<AgentResponse> {
+		const lower = message.toLowerCase().trim();
+
+		// ── Flujo de repuestos pausado ─────────────────────────────────────────
+		if (context?.flujo === 'repuestos_pausado') {
+			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			if (quiereContinuar) {
+				context.flujo = 'repuestos';
+			} else {
+				context.flujo = null;
+				return {
+					response: 'Perfecto, dejamos de lado el tema de los repuestos. ¿En qué más te puedo ayudar hoy? 😊',
+					metadata: { agentType: 'repuestos', flujo: null },
+				};
+			}
+		}
+
 		// Flujo de recolección de datos para repuesto
 		const repuestoData = context?.repuestoData ?? {};
 

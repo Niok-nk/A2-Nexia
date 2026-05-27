@@ -257,9 +257,39 @@ Categoría:`;
 		// Detectar si el usuario hace una pregunta o cambia de tema mientras está en un flujo paso a paso
 		let fueInterrumpido = false;
 		let flujoOriginal = flujoActivo;
-		if (flujoActivo && esInterrupcionFlujo(message, flujoActivo)) {
+		if (flujoActivo && esInterrupcionFlujo(message, flujoActivo, context)) {
 			flujoActivo = null; // Ignorar el flujo por este turno para poder responder la duda del cliente
 			fueInterrumpido = true;
+		}
+
+		// ─── INTERRUPCIÓN DE FLUJOS PAUSADOS ───
+		// Si el usuario ya está en un flujo pausado y escribe algo que no es ni sí ni no directos,
+		// tratamos esto como una interrupción. Así el bot responde su pregunta libre con la IA
+		// y luego le vuelve a ofrecer retomar el flujo pausado.
+		const esPausado = flujoActivo === 'credito_pausado' || flujoActivo === 'pago_pausado' || flujoActivo === 'perfilando_pausado' || flujoActivo === 'esperando_ciudad_pausado' || flujoActivo === 'esperando_modalidad_pausado' || flujoActivo === 'repuestos_pausado';
+		if (flujoActivo && esPausado) {
+			const lowerMsg = message.toLowerCase().trim();
+			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar|reproducir/i.test(lowerMsg);
+			const quiereCancelar = /no|cancelar|salir|ya no|no quiero/i.test(lowerMsg);
+			
+			if (!quiereContinuar && !quiereCancelar) {
+				fueInterrumpido = true;
+				if (flujoActivo === 'credito_pausado') {
+					flujoOriginal = 'credito';
+				} else if (flujoActivo === 'pago_pausado') {
+					flujoOriginal = context?.flujoAnterior || 'seleccion_pago';
+				} else if (flujoActivo === 'perfilando_pausado') {
+					flujoOriginal = 'perfilando';
+				} else if (flujoActivo === 'esperando_ciudad_pausado') {
+					flujoOriginal = 'esperando_ciudad';
+				} else if (flujoActivo === 'esperando_modalidad_pausado') {
+					flujoOriginal = 'esperando_modalidad';
+				} else if (flujoActivo === 'repuestos_pausado') {
+					flujoOriginal = 'repuestos';
+				}
+				flujoActivo = null;
+				if (context) context.flujo = null;
+			}
 		}
 
 		// Si hay un flujo activo en el contexto, respetar el agente actual
@@ -268,9 +298,9 @@ Categoría:`;
 
 		if (flujoActivo) {
 			// Mapear flujo activo al agente correspondiente
-			if (/^credito/.test(flujoActivo) || flujoActivo === 'sin_cobertura' || flujoActivo === 'contado_sin_cobertura' || flujoActivo === 'esperando_ciudad' || flujoActivo === 'credito_perfilando' || flujoActivo === 'esperando_modalidad' || flujoActivo === 'perfilando_producto' || flujoActivo === 'perfilando_presupuesto' || flujoActivo === 'perfilando' || flujoActivo === 'seleccion_pago' || flujoActivo === 'seleccion_pago_ambiguo' || flujoActivo === 'pago_web' || flujoActivo === 'pago_web_paso' || flujoActivo === 'pago_medios' || flujoActivo === 'pago_fisico' || flujoActivo === 'pago_completado' || flujoActivo === 'esperando_comprobante' || flujoActivo === 'credito_pausado' || flujoActivo === 'pago_pausado' || flujoActivo === 'perfilando_pausado') {
+			if (/^credito/.test(flujoActivo) || flujoActivo === 'sin_cobertura' || flujoActivo === 'contado_sin_cobertura' || flujoActivo === 'esperando_ciudad' || flujoActivo === 'credito_perfilando' || flujoActivo === 'esperando_modalidad' || flujoActivo === 'perfilando_producto' || flujoActivo === 'perfilando_presupuesto' || flujoActivo === 'perfilando' || flujoActivo === 'seleccion_pago' || flujoActivo === 'seleccion_pago_ambiguo' || flujoActivo === 'pago_web' || flujoActivo === 'pago_web_paso' || flujoActivo === 'pago_medios' || flujoActivo === 'pago_fisico' || flujoActivo === 'pago_completado' || flujoActivo === 'esperando_comprobante' || flujoActivo === 'credito_pausado' || flujoActivo === 'pago_pausado' || flujoActivo === 'perfilando_pausado' || flujoActivo === 'esperando_ciudad_pausado' || flujoActivo === 'esperando_modalidad_pausado') {
 				intent = 'ventas';
-			} else if (/^repuesto/.test(flujoActivo)) {
+			} else if (/^repuesto/.test(flujoActivo) || flujoActivo === 'repuestos_pausado') {
 				intent = 'repuestos';
 			} else {
 				// Flujo desconocido → reclasificar normalmente
@@ -320,6 +350,40 @@ Categoría:`;
 					flujo: 'perfilando_pausado',
 					perfilState: context?.perfilState,
 				};
+			} else if (flujoOriginal === 'esperando_ciudad') {
+				response += `\n\n¿Quieres que continuemos con tu consulta? Cuéntame o escribe "sí" para indicarme tu ciudad. 😊`;
+				metadata = {
+					...metadata,
+					flujo: 'esperando_ciudad_pausado',
+					pendingMessage: context?.pendingMessage || message,
+				};
+			} else if (flujoOriginal === 'esperando_modalidad') {
+				response += `\n\n¿Quieres que continuemos con tu consulta? Cuéntame o escribe "sí" para indicarme la modalidad de compra. 😊`;
+				metadata = {
+					...metadata,
+					flujo: 'esperando_modalidad_pausado',
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					tieneCobertura: context?.tieneCobertura,
+				};
+			} else if (flujoOriginal === 'seleccion_pago_ambiguo') {
+				response += `\n\n¿Quieres que continuemos con tu compra? Cuéntame o escribe "sí" para elegir tu producto. 😊`;
+				metadata = {
+					...metadata,
+					flujo: 'pago_pausado',
+					flujoAnterior: 'seleccion_pago_ambiguo',
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					tieneCobertura: context?.tieneCobertura,
+					ultimaBusqueda: context?.ultimaBusqueda,
+				};
+			} else if (flujoOriginal === 'repuestos') {
+				response += `\n\n¿Quieres que continuemos con tu solicitud de repuestos? Cuéntame o escribe "sí" para seguir donde íbamos. 😊`;
+				metadata = {
+					...metadata,
+					flujo: 'repuestos_pausado',
+					repuestoData: context?.repuestoData || {},
+				};
 			}
 		}
 
@@ -334,7 +398,7 @@ Categoría:`;
 /**
  * Detecta si el mensaje actual es una interrupción del flujo guiado (una pregunta o un cambio de tema)
  */
-function esInterrupcionFlujo(message: string, flujo: string): boolean {
+function esInterrupcionFlujo(message: string, flujo: string, context?: any): boolean {
 	const msg = message.toLowerCase().trim();
 
 	// Exclusiones: respuestas a preguntas específicas del flujo de crédito o pago
@@ -342,14 +406,44 @@ function esInterrupcionFlujo(message: string, flujo: string): boolean {
 	if (/^\s*\d+\s*$/.test(msg)) return false; // opciones numéricas
 	if (/^(?:si|sí|no|ok|vale|listo|entendido|dale|bueno|por favor|gracias)\s*$/i.test(msg)) return false; // respuestas simples
 
+	// Saludos explícitos (no deben interpretarse como respuestas de formulario, sino como interrupción para saludar)
+	const greetings = [
+		'hola', 'holaa', 'holaaa', 'holi', 'oli', 'ola', 'hello', 'hi', 'hey',
+		'buenas', 'buenos dias', 'buenos días', 'buen dia', 'buen día',
+		'buenas tardes', 'buenas noches', 'que tal', 'qué tal'
+	];
+	const cleaned = msg.replace(/[.,!?¡¿…]+$/g, '').trim();
+	if (greetings.includes(cleaned) || greetings.includes(cleaned.split(/[\s,]+/)[0])) {
+		return true;
+	}
+
 	// Si es una pregunta explícita (tiene signos de interrogación)
 	if (/[?¿]/.test(msg)) return true;
 
-	// Si empieza con palabras clave de pregunta
-	if (/^(?:c[oó]mo|qu[eé]|cu[aá]nto|d[oó]nde|por\s*qu[eé]|cu[aá]l|tiene|tienen|venden)\b/.test(msg)) return true;
+	// Si empieza con palabras clave de pregunta o ayuda
+	if (/^(?:c[oó]mo|qu[eé]|cu[aá]nto|d[oó]nde|por\s*qu[eé]|cu[aá]l|tiene|tienen|venden|ayuda|info|informacion|asesor|humano|soporte)\b/.test(msg)) return true;
 
 	// Palabras clave de interrupción general (características del producto, etc.)
-	if (/\b(?:garant[ií]a|precio|costo|valor|cuanto cuesta|especificaciones|medidas|dimensiones|envio|flete|cobertura|asesor|humano|soporte)\b/.test(msg)) return true;
+	if (/\b(?:garant[ií]a|precio|costo|valor|cuanto cuesta|especificaciones|medidas|dimensiones|envio|flete|cobertura)\b/.test(msg)) return true;
+
+	// Si menciona palabras clave asociadas a otros agentes
+	if (/\b(distribuidor|distribuidores|ser distribuidor|al por mayor|mayorista|mayoreo)\b/.test(msg)) return true;
+	if (/\b(vacante|empleo|trabajo|hoja de vida|cv|curriculum|currículum|aplicar a|aplicar al)\b/.test(msg)) return true;
+	if (/\b(servicio t[eé]cnico|reparaci[oó]n|reparar|mantenimiento|no enciende|no funciona|no enfr[ií]a|no centrifuga|da[ñn]ado|da[ñn]ada|falla|aver[ií]a|garant[ií]a)\b/.test(msg)) return true;
+	if (/\b(repuesto|repuestos|pieza|piezas|accesorio|accesorios|filtro|empaque|resistencia|motor de)\b/.test(msg)) return true;
+	if (/\b(cartera|deuda|mora|cuota atrasada|atrasado|estado de cuenta|saldo|recordatorio de pago|cu[aá]nto debo|me debe|debo|paz y salvo|factura)\b/.test(msg)) return true;
+
+	// Si estamos en flujo de crédito y no estamos en el paso de elegir el producto, y el usuario menciona un producto o pregunta catálogo
+	if (/^credito/.test(flujo)) {
+		const stepIndex = context?.creditoStep ?? 0;
+		// El paso de elegir el producto es cuando creditoStep es 17 (skuProducto)
+		const esPasoProducto = stepIndex === 17;
+		if (!esPasoProducto) {
+			if (/\b(nevera|neveras|nevecon|nevecones|lavadora|lavadoras|televisor|televisores|tv|congelador|congeladores|exhibidor|exhibidores|minibar|freidora|freidoras|horno|hornos|licuadora|licuadoras|cafetera|cafeteras|parlante|parlantes|cocina|estufa|cat[aá]logo|buscar|precio|cuesta|vale|comprar)\b/.test(msg)) {
+				return true;
+			}
+		}
+	}
 
 	// Si estamos en flujo de pago web y preguntan por medios autorizados o transferencias
 	if (flujo === 'pago_web_paso' || flujo === 'pago_web' || flujo === 'seleccion_pago') {
