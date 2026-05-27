@@ -197,13 +197,24 @@ export async function processIncomingMessage(
 		},
 	});
 
-	// 4. Lead activo del contacto (el más reciente)
-	let lead = await prisma.lead.findFirst({
-		where: { contactId: contact.id },
-		orderBy: { createdAt: 'desc' },
-	});
+	// 4. Detectar nueva sesión: cliente que ya tenía conversaciones previas y vuelve a saludar
+	//    Esto crea un nuevo Lead (instancia independiente) para preservar los datos anteriores.
+	const tieneHistorial = history.length > 0;
+	const esNuevaSesion = tieneHistorial && orchestrator.esSaludo(body);
 
-	// 5. Cargar UserData persistido (datos recolectados por la IA progresivamente)
+	if (esNuevaSesion) {
+		logger.info({ phone, contactId: contact.id }, 'Nueva sesión detectada — se creará un nuevo Lead');
+	}
+
+	// 5. Lead activo del contacto (el más reciente), omitido si es nueva sesión
+	let lead = esNuevaSesion
+		? null
+		: await prisma.lead.findFirst({
+			where: { contactId: contact.id },
+			orderBy: { createdAt: 'desc' },
+		});
+
+	// 6. Cargar UserData persistido (datos recolectados por la IA progresivamente)
 	let userDataRecord = lead
 		? await prisma.userData.findUnique({ where: { leadId: lead.id } })
 		: null;
@@ -255,6 +266,7 @@ export async function processIncomingMessage(
 			sentAt: m.sentAt,
 		})),
 		userData,
+		nuevaSesion: esNuevaSesion,
 	};
 
 	// Si ya tenemos ciudad guardada, pre-poblamos el contexto
@@ -278,10 +290,10 @@ export async function processIncomingMessage(
 	if (extra?.creditoData) context.creditoData = extra.creditoData;
 	if (typeof extra?.creditoStep === 'number') context.creditoStep = extra.creditoStep;
 
-	// 6. Enrutar al orquestador
+	// 7. Enrutar al orquestador
 	const { agentType, response, metadata } = await orchestrator.route(body, context);
 
-	// 7. Persistir respuesta OUTBOUND
+	// 8. Persistir respuesta OUTBOUND
 	await prisma.message.create({
 		data: {
 			contactId: contact.id,
@@ -291,7 +303,7 @@ export async function processIncomingMessage(
 		},
 	});
 
-	// 8. Crear o actualizar lead
+	// 9. Crear o actualizar lead
 	const moduleMap: Record<string, string> = {
 		ventas: 'VENTAS',
 		cartera: 'CARTERA',
@@ -321,7 +333,7 @@ export async function processIncomingMessage(
 		});
 	}
 
-	// 9. Guardar datos recolectados por la IA en UserData
+	// 10. Guardar datos recolectados por la IA en UserData
 	if (lead) {
 		const ud: Record<string, any> = {};
 
@@ -374,7 +386,7 @@ export async function processIncomingMessage(
 			});
 		}
 
-		// 10. IA extractora de datos (post-procesamiento)
+		// 11. IA extractora de datos (post-procesamiento)
 		// Analiza el historial completo y extrae datos del cliente que el
 		// agente conversacional pudo haber omitido. También mueve el pipeline.
 		extractAndSaveData(

@@ -39,11 +39,27 @@ export class Orchestrator {
 	// vago, va al agente de Bienvenida. Esto evita que el modelo "adivine" la
 	// intención de un "hola" y lo mande a servicio técnico.
 
-	private isGreetingOrVague(message: string, hasHistory: boolean): boolean {
-		const m = message.toLowerCase().trim();
+	/**
+	 * Versión pública: detecta si un mensaje es saludo/vago, sin importar el historial.
+	 * Usado por message.handler.ts para detectar nuevas sesiones de clientes recurrentes.
+	 */
+	public esSaludo(message: string): boolean {
+		return this.revisarPatronesSaludo(message);
+	}
 
+	private isGreetingOrVague(message: string, hasHistory: boolean): boolean {
 		// Si ya hay historial, no es saludo inicial: dejamos que el clasificador decida.
 		if (hasHistory) return false;
+
+		return this.revisarPatronesSaludo(message);
+	}
+
+	/**
+	 * Lógica central de detección de saludos/mensajes vagos.
+	 * Separada para ser reutilizada sin el guard de hasHistory.
+	 */
+	private revisarPatronesSaludo(message: string): boolean {
+		const m = message.toLowerCase().trim();
 
 		// Mensaje vacío o solo emoji/símbolos
 		if (m.length === 0) return true;
@@ -223,7 +239,7 @@ Categoría:`;
 		message: string,
 		context: any
 	): Promise<{ agentType: string; response: string; metadata?: Record<string, any> }> {
-		const hasHistory = Array.isArray(context?.history) && context.history.length > 0;
+		const hasHistory = Array.isArray(context?.history) && context.history.length > 0 && context?.nuevaSesion !== true;
 
 		// ─── SALIDA DE EMERGENCIA (ESCAPE HATCH) ───
 		// Si el usuario quiere cancelar o cambiar de tema, rompemos cualquier flujo activo
