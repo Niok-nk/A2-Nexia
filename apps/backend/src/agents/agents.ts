@@ -1876,9 +1876,6 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (products.length === 0) {
-			// Verificar si el usuario preguntó por un producto que no está en nuestro catálogo
-			const palabrasMensaje = terminoBusqueda.toLowerCase().replace(/[.,!?¡¿]+/g, '').split(/\s+/);
-			const mencionaAlgunaCategoria = palabrasMensaje.some((p: string) => CATEGORIAS_RE.test(p));
 			const esConsultaProducto = /(?:tiene[ns]?|hay|venden|busco|quiero|necesito|me interesa|consulta|precio|cu[aá]nto)/i.test(message);
 
 			try {
