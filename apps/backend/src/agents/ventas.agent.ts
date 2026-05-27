@@ -104,6 +104,54 @@ export async function enviarResumenWhatsApp(resumen: string): Promise<void> {
 	await sendWA(WHATSAPP_CARTERA, resumen);
 }
 
+/**
+ * Intenta hacer match de un mensaje de usuario con un producto de la lista.
+ * Soporta: ordinales masc/fem, índice numérico corto, specs numéricas en el nombre, nombre parcial.
+ */
+function matchProductoDesdeMsg(msg: string, productos: any[]): any | null {
+	if (!productos || productos.length === 0) return null;
+	const lowerMsg = msg.toLowerCase().trim();
+
+	// 1. Ordinal explícito (masculino y femenino)
+	const ORDINALS: Array<[RegExp, number]> = [
+		[/\b(?:primer[oa]|primera\s+opci[oó]n|el\s+primero|la\s+primera|uno|1[aº]?)\b/, 0],
+		[/\b(?:segund[oa]|segunda\s+opci[oó]n|el\s+segundo|la\s+segunda|dos|2[aº]?)\b/, 1],
+		[/\b(?:tercer[oa]|tercera\s+opci[oó]n|el\s+tercero|la\s+tercera|tres|3[aº]?)\b/, 2],
+		[/\b(?:cuart[oa]|cuarta\s+opci[oó]n|el\s+cuarto|la\s+cuarta|cuatro|4[aº]?)\b/, 3],
+		[/\b(?:quint[oa]|quinta\s+opci[oó]n|el\s+quinto|la\s+quinta|cinco|5[aº]?)\b/, 4],
+	];
+	for (const [re, idx] of ORDINALS) {
+		if (re.test(lowerMsg) && idx < productos.length) {
+			return productos[idx];
+		}
+	}
+
+	// 2. Índice numérico corto ("1", "2", "3" — máx 2 caracteres para no confundir con specs)
+	const shortNum = parseInt(lowerMsg, 10);
+	if (!isNaN(shortNum) && lowerMsg.length <= 2 && shortNum >= 1 && shortNum <= productos.length) {
+		return productos[shortNum - 1];
+	}
+
+	// 3. Nombre parcial: el mensaje incluye parte del nombre del producto o viceversa
+	const byName = productos.find((p: any) => {
+		const nameLower = p.name.toLowerCase();
+		return nameLower.includes(lowerMsg) || lowerMsg.includes(nameLower.slice(0, 20));
+	});
+	if (byName) return byName;
+
+	// 4. Número de specs presente en el mensaje que aparece en el nombre del producto
+	//    Ej: "55" matchea "Televisor JLC 55 pulgadas"
+	const numbersInMsg = lowerMsg.match(/\b\d{2,}\b/g);
+	if (numbersInMsg && numbersInMsg.length > 0) {
+		const candidates = productos.filter((p: any) =>
+			numbersInMsg.some((num: string) => p.name.toLowerCase().includes(num))
+		);
+		if (candidates.length >= 1) return candidates[0];
+	}
+
+	return null;
+}
+
 export class VentasAgent implements IAgent {
 	name = 'Ventas';
 
@@ -352,41 +400,8 @@ export class VentasAgent implements IAgent {
 			const opcion = message.trim();
 			const ultimosProductos = context?.ultimaBusqueda?.results ?? [];
 			
-			let selected: any = null;
-			
-			// 1. Intentar index directo (1, 2, 3...) si el texto es muy corto (para no confundir "55" con index 55)
-			const index = parseInt(opcion, 10) - 1;
-			if (!isNaN(index) && index >= 0 && index < ultimosProductos.length && opcion.length <= 2) {
-				selected = ultimosProductos[index];
-			} else {
-				// 2. Intentar buscar por nombre o número inteligente
-				const lowerMsg = opcion.toLowerCase();
-				let match = ultimosProductos.find((p: any) =>
-					p.name.toLowerCase().includes(lowerMsg) ||
-					lowerMsg.includes(p.name.toLowerCase().slice(0, 20)) ||
-					(lowerMsg.includes('primero') && ultimosProductos[0] === p) ||
-					(lowerMsg.includes('segundo') && ultimosProductos[1] === p) ||
-					(lowerMsg.includes('tercero') && ultimosProductos[2] === p)
-				);
-
-				if (!match) {
-					const numbersInMsg = lowerMsg.match(/\b\d+\b/g);
-					if (numbersInMsg && numbersInMsg.length > 0) {
-						const candidates = ultimosProductos.filter((p: any) =>
-							numbersInMsg.some(num => p.name.toLowerCase().includes(num))
-						);
-						if (candidates.length === 1) {
-							match = candidates[0];
-						} else if (candidates.length > 1) {
-							match = candidates[0];
-						}
-					}
-				}
-				
-				if (match) {
-					selected = match;
-				}
-			}
+			// Usar helper centralizado de matching (soporta ordinales masc/fem, specs, nombre parcial)
+			const selected: any = matchProductoDesdeMsg(opcion, ultimosProductos);
 
 			if (selected) {
 				const precioStr = selected.price ? ` tiene un valor de *$${Number(selected.price).toLocaleString('es-CO')}*` : '';
@@ -630,37 +645,18 @@ export class VentasAgent implements IAgent {
 				productoURL = ultimosProductos[0].permalink;
 				pPrice = ultimosProductos[0].price;
 			} else if (ultimosProductos.length > 1) {
-				const lowerMsg = message.toLowerCase();
-				let match = ultimosProductos.find((p: any) =>
-					p.name.toLowerCase().includes(lowerMsg) ||
-					lowerMsg.includes(p.name.toLowerCase().slice(0, 20)) ||
-					(lowerMsg.includes('primero') && ultimosProductos[0] === p) ||
-					(lowerMsg.includes('segundo') && ultimosProductos[1] === p) ||
-					(lowerMsg.includes('tercero') && ultimosProductos[2] === p)
-				);
-
-				if (!match) {
-					const numbersInMsg = lowerMsg.match(/\b\d+\b/g);
-					if (numbersInMsg && numbersInMsg.length > 0) {
-						const candidates = ultimosProductos.filter((p: any) =>
-							numbersInMsg.some(num => p.name.toLowerCase().includes(num))
-						);
-						if (candidates.length === 1) {
-							match = candidates[0];
-						} else if (candidates.length > 1) {
-							match = candidates[0];
-						}
-					}
-				}
+				// Usar helper centralizado (ordinales masc/fem, specs, nombre parcial)
+				const matchResult = matchProductoDesdeMsg(message, ultimosProductos);
 				
-				if (!match) {
+				if (!matchResult) {
+					// No se pudo identificar → preguntar con lista numerada
 					const listaNombres = ultimosProductos.slice(0, 3).map((p: any, i: number) => {
 						const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
 						return `${i + 1}️⃣ *${p.name}* (${precio})`;
 					}).join('\n');
 					
 					return {
-						response: `¡Me alegra que te decidas a comprar! 😊 Pero como te había mostrado varias opciones, ¿me confirmas cuál de ellas prefieres? Escríbeme el número:\n\n${listaNombres}\n\nQuedo atenta para darte las instrucciones exactas de pago.`,
+						response: `¡Ay, qué bien! Pero para darte las instrucciones exactas necesito saber cuál te llevas 😊 Escríbeme el número:\n\n${listaNombres}`,
 						metadata: {
 							agentType: 'ventas',
 							flujo: 'seleccion_pago_ambiguo',
@@ -672,10 +668,9 @@ export class VentasAgent implements IAgent {
 					};
 				}
 				
-				const selected = match;
-				productoSolicitado = selected.name;
-				productoURL = selected.permalink;
-				pPrice = selected.price;
+				productoSolicitado = matchResult.name;
+				productoURL = matchResult.permalink;
+				pPrice = matchResult.price;
 			}
 
 			const precioStr = pPrice ? ` tiene un valor de *$${Number(pPrice).toLocaleString('es-CO')}*` : '';
