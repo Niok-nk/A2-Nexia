@@ -713,31 +713,68 @@ export class VentasAgent implements IAgent {
 
 		// ── PASO 4c: Seguimiento paso a paso para pago web ──────────────────
 		if (context?.flujo === 'pago_web_paso') {
-			const pasoActual = context?.pasoWeb ?? 1;
-			const pasos = [
-				'Abre el enlace del producto y dale clic en "Añadir al carrito" o "Comprar".',
-				'En el carrito, selecciona tu departamento y dale "Actualizar". Ahí te aparecen los municipios y ciudades.',
-				'Selecciona tu municipio, pon el código postal y dale "Actualizar" de nuevo. Ahí se calcula el flete y confirmas si tienes envío gratis.',
-				'Revisa que todo esté bien y dale "Proceder al pago". Rellena tus datos personales.',
-				'Elige tu método de pago en Wompi (PSE, tarjeta, Nequi) y confirma. ¡Listo, ya quedó! 🎉',
+			const pasoActual: number = context?.pasoWeb ?? 1;
+
+			// Pasos reales del checkout JLC Electronics
+			const PASOS_WEB = [
+				'Abre el enlace del producto y dale clic en el botón *Añadir al carrito* 🛒',
+				'Ya en el carrito, busca la sección *"Calcula el envío"*. Selecciona tu *departamento* y dale clic en *Actualizar*. Así se habilitan las ciudades.',
+				'Ahora selecciona tu *ciudad/municipio*, escribe tu *código postal* y vuelve a dar clic en *Actualizar*. Ahí te aparece el valor del flete (o "Envío gratis" si aplica). 😊',
+				'Dale clic en el botón *Proceder al pago*. Se abre el formulario — llena todos tus datos (nombre, cédula, teléfono, dirección) y luego dale *Realizar el pedido*.',
+				'Por último, selecciona tu método de pago en *Wommpi* (PSE, tarjeta de crédito, Nequi, Bancolombia, y más). Confirma el pago y ¡listo! 🎉',
 			];
-			if (pasoActual <= pasos.length) {
-				const pasoMsg = `Paso ${pasoActual} de ${pasos.length}: ${pasos[pasoActual - 1]}`;
-				const siguiente = pasoActual < pasos.length
-					? '\n\nDime "listo" cuando termines o "ayuda" si tienes algún problema. 😊'
-					: '\n\n¿Lograste completar el pago? Si tuviste algún inconveniente, cuéntame y te ayudo.';
+
+			const avanzar = /\b(?:listo|ya|hecho|ok|okay|sip|dale|s[íï]|siguiente|continu[ae]|lo hice|ya lo hice|ya est[aá]|ya termin[eé]|hice clic|le di|le doy|di clic|puse|escrib[íï]|ya puse|lo vi|me abri[oó]|me aparece|me sali[oó])\b/i.test(lower);
+
+			if (avanzar) {
+				if (pasoActual >= PASOS_WEB.length) {
+					// Último paso completado → esperar comprobante
+					return {
+						response: `¡Genial! 🎉 Cuando aparezca la confirmación de pago, compárteme el comprobante o número de transacción por aquí (foto o pantallazo) y nuestro equipo te confirma el despacho de inmediato.`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'esperando_comprobante',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							productoURL: context?.productoURL,
+						},
+					};
+				}
+				const siguiente = pasoActual + 1;
 				return {
-					response: pasoMsg + siguiente,
+					response: `Paso ${siguiente} de ${PASOS_WEB.length}: ${PASOS_WEB[siguiente - 1]}\n\nDime “listo” cuando termines o cuéntame si tienes alguna duda. 😊`,
 					metadata: {
 						agentType: 'ventas',
-						flujo: pasoActual < pasos.length ? 'pago_web_paso' : 'pago_completado',
-						pasoWeb: pasoActual + 1,
+						flujo: 'pago_web_paso',
+						pasoWeb: siguiente,
 						ciudad: context?.ciudad,
 						ciudadValidada: true,
 						productoURL: context?.productoURL,
 					},
 				};
 			}
+
+			// El usuario escribe algo libre → responder con Gemini y recordar el paso
+			const userDataStr2 = buildUserDataContext(context?.userData);
+			const { system: sys2, user: usr2 } = buildGemmaPrompt({
+				instruccion: `Eres Sara, asesora virtual de JLC Electronics Colombia. El cliente está en el proceso de pago en la página web (Paso ${pasoActual} de ${PASOS_WEB.length}: "${PASOS_WEB[pasoActual - 1]}"). Tiene una duda o comentario sobre ese proceso. Respóndele de forma breve y cálida en español colombiano femenino. NO recomiendes otros productos.\n${userDataStr2}`,
+				ejemplos: [],
+				historial: formatHistory(context?.history),
+				mensajeCliente: message,
+			});
+			const rawWp = await generateResponse(usr2, sys2);
+			const respWp = cleanResponse(rawWp);
+			return {
+				response: `${respWp}\n\n_(Paso ${pasoActual} de ${PASOS_WEB.length}: ${PASOS_WEB[pasoActual - 1]} — dime “listo” cuando termines 😊)_`,
+				metadata: {
+					agentType: 'ventas',
+					flujo: 'pago_web_paso',
+					pasoWeb: pasoActual,
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					productoURL: context?.productoURL,
+				},
+			};
 		}
 
 		// ── Manejo de pago completado o fallido ───────────────────────────────
@@ -775,16 +812,17 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (context?.flujo === 'pago_web') {
-			const quiereAyuda = /\bs[íi]\b|sip|dale|ok|bueno|claro|si gracias|si por favor/i.test(lower);
+			const quiereAyuda = /\bs[íi]\b|sip|dale|ok|bueno|claro|si gracias|si por favor|me acompañas|guíame|ayúdame|paso a paso/i.test(lower);
 			if (quiereAyuda) {
 				return {
-					response: `Paso 1: Añade el producto al carrito de compras.\n\nCuando termines, dime "listo" para continuar con el siguiente paso.`,
+					response: `¡Con mucho gusto te acompaño! 😊\n\nPaso 1 de 5: Abre el enlace del producto y dale clic en el botón *Añadir al carrito* 🛒\n\nDime "listo" cuando lo hayas hecho.`,
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'pago_web_paso',
-						pasoWeb: 2,
+						pasoWeb: 1,
 						ciudad: context?.ciudad,
 						ciudadValidada: true,
+						productoURL: context?.productoURL,
 					},
 				};
 			}
