@@ -138,7 +138,8 @@ REGLAS:
 
 	try {
 		const raw = await generateResponse(msg, system);
-		const num = parseInt(raw.trim(), 10);
+		const match = raw.match(/\d+/);
+		const num = match ? parseInt(match[0], 10) : NaN;
 		if (!isNaN(num) && num >= 1 && num <= productos.length) {
 			return productos[num - 1];
 		}
