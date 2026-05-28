@@ -5,10 +5,8 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 const MODELS = [
-	//'gemma-4-31b-it',
+	'gemma-4-31b-it',
 	'gemini-3.1-flash-lite',
-	'gemini-2.0-flash-lite-001',
-	'gemini-2.0-flash',
 ];
 
 const PATRONES_BLOQUEO = [
