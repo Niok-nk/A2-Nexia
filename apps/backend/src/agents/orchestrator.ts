@@ -328,7 +328,7 @@ Categoría:`;
 		const agenteYaCambioFlujo = metadata?.flujo && metadata.flujo !== flujoOriginal;
 		if (fueInterrumpido && flujoOriginal && !agenteYaCambioFlujo) {
 			if (/^credito/.test(flujoOriginal)) {
-				response += `\n\n¿Quieres que sigamos con tu solicitud de crédito? Cuéntame o escribe "sí" para continuar. 😊`;
+				response += `\n\n¿Seguimos con tu solicitud de crédito? 😊`;
 				metadata = {
 					...metadata,
 					flujo: 'credito_pausado',
@@ -336,7 +336,7 @@ Categoría:`;
 					creditoStep: context?.creditoStep || 1,
 				};
 			} else if (flujoOriginal === 'pago_web_paso' || flujoOriginal === 'pago_web' || flujoOriginal === 'seleccion_pago') {
-				response += `\n\n¿Quieres que continuemos con los pasos de tu pago? Cuéntame o escribe "sí" para seguir donde íbamos. 😊`;
+				response += `\n\n¿Continuamos con los pasos de tu pago? 😊`;
 				metadata = {
 					...metadata,
 					flujo: 'pago_pausado',
@@ -344,21 +344,21 @@ Categoría:`;
 					productoURL: context?.productoURL || context?.ultimaBusqueda?.results?.[0]?.permalink,
 				};
 			} else if (flujoOriginal === 'perfilando') {
-				response += `\n\n¿Quieres que sigamos buscando el producto ideal para ti? Cuéntame o escribe "sí" para continuar. 😊`;
+				response += `\n\n¿Seguimos buscando el producto ideal para ti? 😊`;
 				metadata = {
 					...metadata,
 					flujo: 'perfilando_pausado',
 					perfilState: context?.perfilState,
 				};
 			} else if (flujoOriginal === 'esperando_ciudad') {
-				response += `\n\n¿Quieres que continuemos con tu consulta? Cuéntame o escribe "sí" para indicarme tu ciudad. 😊`;
+				response += `\n\n¿Me dices desde dónde nos escribes? 😊`;
 				metadata = {
 					...metadata,
 					flujo: 'esperando_ciudad_pausado',
 					pendingMessage: context?.pendingMessage || message,
 				};
 			} else if (flujoOriginal === 'esperando_modalidad') {
-				response += `\n\n¿Quieres que continuemos con tu consulta? Cuéntame o escribe "sí" para indicarme la modalidad de compra. 😊`;
+				response += `\n\n¿La compra sería contado o crédito? 😊`;
 				metadata = {
 					...metadata,
 					flujo: 'esperando_modalidad_pausado',
@@ -367,7 +367,7 @@ Categoría:`;
 					tieneCobertura: context?.tieneCobertura,
 				};
 			} else if (flujoOriginal === 'seleccion_pago_ambiguo') {
-				response += `\n\n¿Quieres que continuemos con tu compra? Cuéntame o escribe "sí" para elegir tu producto. 😊`;
+				response += `\n\n¿Continuamos con tu compra? 😊`;
 				metadata = {
 					...metadata,
 					flujo: 'pago_pausado',
@@ -378,7 +378,7 @@ Categoría:`;
 					ultimaBusqueda: context?.ultimaBusqueda,
 				};
 			} else if (flujoOriginal === 'repuestos') {
-				response += `\n\n¿Quieres que continuemos con tu solicitud de repuestos? Cuéntame o escribe "sí" para seguir donde íbamos. 😊`;
+				response += `\n\n¿Seguimos con tu solicitud de repuestos? 😊`;
 				metadata = {
 					...metadata,
 					flujo: 'repuestos_pausado',
