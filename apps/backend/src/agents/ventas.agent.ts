@@ -616,6 +616,23 @@ export class VentasAgent implements IAgent {
 		}
 
 		// ── PASO 3: Si eligió crédito → iniciar formulario ──────────────────
+		const pideCredito = /\b(?:cr[eé]dito|financiar|cuotas|a cuotas|financiaci[oó]n|quiero.*(?:cr[eé]dito|financiar|cuotas)|financiame|me financias|a cr[eé]dito|cr[eé]dito directo)\b/i.test(message);
+		if (pideCredito && context?.modalidad !== 'credito') {
+			const nuevaModalidad = 'credito';
+			return {
+				response: `¡Dale, te ayudo con el crédito! 📋\n\nPara armar tu solicitud necesito algunos datos. Empecemos con lo básico:\n\n¿Cómo te llamas? (nombre completo)`,
+				metadata: {
+					agentType: 'ventas',
+					flujo: 'credito',
+					modalidad: nuevaModalidad,
+					creditoData: {},
+					creditoStep: 1,
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					tieneCobertura: context?.tieneCobertura,
+				},
+			};
+		}
 		if (context?.modalidad === 'credito' && context?.flujo !== 'credito_completado') {
 			return {
 				response: `¡Dale, te ayudo con el crédito! 📋\n\nPara armar tu solicitud necesito algunos datos. Empecemos con lo básico:\n\n¿Cómo te llamas? (nombre completo)`,
