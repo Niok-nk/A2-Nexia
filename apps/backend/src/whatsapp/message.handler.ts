@@ -288,6 +288,7 @@ export async function processIncomingMessage(
 	if (extra?.flujoAnterior) context.flujoAnterior = extra.flujoAnterior;
 	if (extra?.creditoOptions) context.creditoOptions = extra.creditoOptions;
 	if (extra?.creditoData) context.creditoData = extra.creditoData;
+	if (extra?.repuestoData) context.repuestoData = extra.repuestoData;
 	if (typeof extra?.creditoStep === 'number') context.creditoStep = extra.creditoStep;
 	if (extra?.productoURL) context.productoURL = extra.productoURL;
 	if (extra?.productoCompra) context.productoCompra = extra.productoCompra;
