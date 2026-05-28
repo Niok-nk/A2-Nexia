@@ -78,15 +78,15 @@ const { id } = Astro.params;
     <div class="card mb-4">
       <div class="card-title">Datos del cliente</div>
       ${fields.length ? `
-      <div style="display:grid;grid-template-columns:1fr;gap:0.5rem;">
+      <div style="display:grid;grid-template-columns:1fr;gap:0.5rem;min-width:0;">
         ${fields.map(([label, val]) => `
-        <div style="background:var(--color-bg-hover);border-radius:var(--radius-md);padding:0.5rem 0.65rem;">
+        <div style="background:var(--color-bg-hover);border-radius:var(--radius-md);padding:0.5rem 0.65rem;min-width:0;">
           <div class="text-xs text-muted" style="margin-bottom:0.15rem;">${label}</div>
           <div style="font-size:0.85rem;overflow-wrap:break-word;line-height:1.3;">${val}</div>
         </div>`).join('')}
       </div>` : ''}
       ${extraHtml ? `
-      <div style="margin-top:${fields.length ? '0.75rem' : '0'};display:grid;grid-template-columns:1fr;gap:0.5rem;">
+      <div style="margin-top:${fields.length ? '0.75rem' : '0'};display:grid;grid-template-columns:1fr;gap:0.5rem;min-width:0;">
         ${extraHtml}
       </div>` : ''}
     </div>`;
