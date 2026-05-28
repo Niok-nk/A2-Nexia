@@ -26,7 +26,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 	try {
 		const contact = await prisma.contact.findUnique({
 			where: { id: req.params.id as string },
-			include: { leads: true, messages: true },
+			include: { leads: { include: { userData: true } }, messages: true },
 		});
 		if (!contact) {
 			return res.status(404).json({ error: 'Contact not found' });

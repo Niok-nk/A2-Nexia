@@ -114,6 +114,42 @@ const { id } = Astro.params;
                   </div>`).join('')}
               </div>` : ''}
             </div>` : '<div class="card mb-4 text-muted text-sm">Sin lead activo. El contacto aún no ha interactuado.</div>'}
+            ${lead?.userData ? (() => {
+              const u = lead.userData;
+              const fields = [
+                ['Nombre', u.nombre],
+                ['Cédula', u.cedula],
+                ['Teléfono', u.telefono],
+                ['Ciudad', u.ciudad],
+                ['Departamento', u.departamento],
+                ['Dirección', u.direccion],
+                ['Producto solicitado', u.productoSolicitado],
+                ['Presupuesto', u.presupuesto],
+              ].filter(([, v]) => v);
+              let extraHtml = '';
+              try {
+                const extra = JSON.parse(u.extra || '{}');
+                const extraFields = Object.entries(extra).filter(([k, v]) => v && !['__v', '_id', 'perfilState', 'perfil_state', 'perfilCompleto', 'flujo'].includes(k));
+                if (extraFields.length) {
+                  extraHtml = extraFields.map(([k, v]) =>
+                    `<div style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--color-border);font-size:0.8rem;">
+                      <span class="text-muted">${k.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase())}</span>
+                      <span>${typeof v === 'object' ? JSON.stringify(v) : v}</span>
+                    </div>`
+                  ).join('');
+                }
+              } catch {}
+              return fields.length || extraHtml ? `
+            <div class="card mb-4">
+              <div class="card-title">Datos del cliente</div>
+              ${fields.map(([label, val]) => `
+              <div style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--color-border);font-size:0.8rem;">
+                <span class="text-muted">${label}</span>
+                <span style="text-align:right;max-width:55%;word-break:break-word;">${val}</span>
+              </div>`).join('')}
+              ${extraHtml}
+            </div>` : '';
+            })() : ''}
           </div>
 
           <!-- Chat History -->
