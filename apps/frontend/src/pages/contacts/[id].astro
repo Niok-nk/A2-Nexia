@@ -129,7 +129,7 @@ const { id } = Astro.params;
               let extraHtml = '';
               try {
                 const extra = JSON.parse(u.extra || '{}');
-                const extraFields = Object.entries(extra).filter(([k, v]) => v && !['__v', '_id', 'perfilState', 'perfil_state', 'perfilCompleto', 'flujo'].includes(k));
+                const extraFields = Object.entries(extra).filter(([k, v]) => v && !['__v', '_id', 'perfilState', 'perfil_state', 'perfilCompleto', 'flujo', 'productosPreCargados', 'productos_pre_cargados'].includes(k));
                 if (extraFields.length) {
                   extraHtml = extraFields.map(([k, v]) =>
                     `<div style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--color-border);font-size:0.8rem;">
