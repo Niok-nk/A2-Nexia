@@ -346,7 +346,8 @@ export async function processIncomingMessage(
 		pagos: 'MEDIOS_DE_PAGO',
 	};
 
-	const crmModule = moduleMap[agentType] ?? 'VENTAS';
+	const esCredito = metadata?.modalidad === 'credito' || (metadata?.flujo && /^credito/.test(metadata.flujo));
+	const crmModule = esCredito ? 'CREDITO' : (moduleMap[agentType] ?? 'VENTAS');
 
 	if (!lead) {
 		lead = await prisma.lead.create({
