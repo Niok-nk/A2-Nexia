@@ -232,6 +232,21 @@ export async function processIncomingMessage(
 				if (udAnterior.departamento && !userData.departamento) userData.departamento = udAnterior.departamento;
 				if (udAnterior.direccion && !userData.direccion) userData.direccion = udAnterior.direccion;
 				if (udAnterior.telefono && !userData.telefono) userData.telefono = udAnterior.telefono;
+				// Recuperar datos de crédito previos excepto producto y presupuesto
+				if (udAnterior.extra) {
+					const extraAnterior = safeParseJson(typeof udAnterior.extra === 'string' ? udAnterior.extra : JSON.stringify(udAnterior.extra));
+					if (extraAnterior && typeof extraAnterior === 'object') {
+						const currentExtra = userData.extra || {};
+						for (const [k, v] of Object.entries(extraAnterior)) {
+							if (v && !['producto', 'skuProducto', 'presupuesto', 'productoSolicitado', 'producto_solicitado'].includes(k)) {
+								if (!(k in currentExtra) || !currentExtra[k]) {
+									(currentExtra as any)[k] = v;
+								}
+							}
+						}
+						userData.extra = currentExtra;
+					}
+				}
 			}
 		} catch (e) {
 			logger.warn({ error: e }, 'Error recovering previous UserData');
