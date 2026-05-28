@@ -65,11 +65,13 @@ const { id } = Astro.params;
       const extra = JSON.parse(u.extra || '{}');
       const extraFields = Object.entries(extra).filter(([k, v]) => v && !['__v', '_id', 'perfilState', 'perfil_state', 'perfilCompleto', 'flujo', 'productosPreCargados', 'productos_pre_cargados', 'ultimaBusqueda', 'ultima_busqueda', 'productoSolicitado', 'producto_solicitado', 'nombre', 'cedula', 'telefono', 'ciudad', 'departamento', 'direccion', 'presupuesto'].includes(k));
       if (extraFields.length) {
-        extraHtml = extraFields.map(([k, v]) =>
-          `<div style="background:var(--color-bg-hover);border-radius:var(--radius-md);padding:0.5rem 0.65rem;">
+        extraHtml = extraFields.map(([k, v]) => {
+          const val = typeof v === 'object' ? JSON.stringify(v) : String(v);
+          return `<div style="background:var(--color-bg-hover);border-radius:var(--radius-md);padding:0.5rem 0.65rem;min-width:0;">
             <div class="text-xs text-muted" style="margin-bottom:0.15rem;">${k.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase())}</div>
-            <div style="font-size:0.85rem;overflow-wrap:break-word;line-height:1.3;">${typeof v === 'object' ? JSON.stringify(v) : v}</div>
-          </div>`
+            <div style="font-size:0.85rem;overflow-wrap:anywhere;line-height:1.3;">${val}</div>
+          </div>`;
+        }
         ).join('');
       }
     } catch {}
@@ -82,7 +84,7 @@ const { id } = Astro.params;
         ${fields.map(([label, val]) => `
         <div style="background:var(--color-bg-hover);border-radius:var(--radius-md);padding:0.5rem 0.65rem;min-width:0;">
           <div class="text-xs text-muted" style="margin-bottom:0.15rem;">${label}</div>
-          <div style="font-size:0.85rem;overflow-wrap:break-word;line-height:1.3;">${val}</div>
+          <div style="font-size:0.85rem;overflow-wrap:anywhere;line-height:1.3;">${val}</div>
         </div>`).join('')}
       </div>` : ''}
       ${extraHtml ? `
