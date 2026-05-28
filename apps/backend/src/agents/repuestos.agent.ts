@@ -95,7 +95,7 @@ export class RepuestosAgent implements IAgent {
 			return this.pedirPieza(repuestoData);
 		}
 
-		const esAfirmativo = /^(s[íi]|si|ese es|correcto|ese mismo|esa es|sip|dale|ok|bueno|claro|sis[aa])$/i.test(lower);
+		const esAfirmativo = /^(s[ií]|sip|dale|ok|bueno|claro|sis[aa]|correcto|exacto|ese\s*(es|mismo)|esa\s*(es|misma))/i.test(lower);
 
 		if (esAfirmativo) {
 			repuestoData.productoConfirmado = true;
