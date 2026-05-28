@@ -340,7 +340,23 @@ export async function processIncomingMessage(
 	if (lead) {
 		const ud: Record<string, any> = {};
 
-		// ── Notificaciones internas (punto físico, escalamiento) ──────────
+		// ── Notificaciones internas (punto físico, escalamiento, repuestos) ──
+		if (metadata?.notificarRepuestos) {
+			const WA_REPUESTOS = process.env.WA_REPUESTOS || '573207842144';
+			const repuesto = metadata?.repuestoData || {};
+			const producto = repuesto.productoEncontrado
+				? `${repuesto.productoEncontrado.nombre}`
+				: repuesto.referenciaManual || 'No especificado';
+			const notifMsg = `🔧 SOLICITUD DE REPUESTO\n\nProducto: ${producto}\nRepuesto solicitado: ${repuesto.repuesto || 'No especificado'}\n\nCliente: ${repuesto.nombreCliente || 'nombre pendiente'}\nCédula: ${repuesto.cedulaCliente || 'pendiente'}\nTeléfono: ${phone}\nCiudad: ${userData.ciudad || 'No especificada'}\n\nFecha: ${new Date().toLocaleDateString('es-CO')}`;
+			try {
+				const { sendMessage: sendWADirect } = await import('./whatsapp.js');
+				await sendWADirect(WA_REPUESTOS, notifMsg);
+				logger.info({ phone, tipo: 'repuestos' }, 'Notificación de repuesto enviada');
+			} catch (e) {
+				logger.error({ error: e }, 'Error enviando notificación de repuesto');
+			}
+		}
+
 		if (metadata?.notificarPuntoFisico || metadata?.escalado) {
 			const WA_ESCALAMIENTO = process.env.WA_ESCALAMIENTO || '573187408190';
 			const ciudadInfo = metadata?.ciudad || userData.ciudad || 'ciudad no especificada';

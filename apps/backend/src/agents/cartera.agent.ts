@@ -9,7 +9,7 @@ export class CarteraAgent implements IAgent {
 		const userDataCtx = buildUserDataContext(context?.userData);
 		const datos = `Canales oficiales de cartera y facturación:
 - WhatsApp cartera: +57 314 422 9949 y +57 315 721 2367
-- Línea telefónica: +57 320 788 1108 (horario: 12:30 p.m. a 2:30 p.m., lunes a viernes)
+- Línea telefónica: +57 320 788 1108 (horario: 08:30 p.m. a 12:30 p.m., lunes a viernes)
 - Correo peticiones con soportes: callcenter5@electromillonaria.co
 Desde este chat no se puede acceder a información personal del cliente.${userDataCtx}`;
 
