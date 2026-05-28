@@ -54,7 +54,7 @@ export class RepuestosAgent implements IAgent {
 		if (!repuestoData.iniciado) {
 			repuestoData.iniciado = true;
 			return {
-				response: '¿Cuál es el modelo o referencia de tu electrodoméstico? Lo encuentras en la placa trasera del equipo. 😊',
+				response: '¿Cuál es el modelo o referencia de tu electrodoméstico? Lo encuentras en la placa trasera del equipo. 😊🔍',
 				metadata: { agentType: 'repuestos', flujo: 'repuestos', repuestoData },
 			};
 		}
@@ -88,7 +88,7 @@ export class RepuestosAgent implements IAgent {
 
 		// No se encontró
 		return {
-			response: 'No hay problema. ¿Puedes escribirme el nombre exacto o la referencia que aparece en la placa de tu equipo?',
+			response: 'No hay problema. ¿Puedes escribirme el nombre exacto o la referencia que aparece en la placa de tu equipo? 🔍😊',
 			metadata: { agentType: 'repuestos', flujo: 'repuestos_confirmar', repuestoData },
 		};
 	}
@@ -117,7 +117,7 @@ export class RepuestosAgent implements IAgent {
 		// Negativo o ambiguo → pedir referencia manual
 		repuestoData.productoEncontrado = undefined;
 		return {
-			response: 'No hay problema. ¿Puedes escribirme el nombre exacto o la referencia que aparece en la placa de tu equipo?',
+			response: 'No hay problema. ¿Puedes escribirme el nombre exacto o la referencia que aparece en la placa de tu equipo? 🔍😊',
 			metadata: { agentType: 'repuestos', flujo: 'repuestos_confirmar', repuestoData },
 		};
 	}
@@ -126,7 +126,7 @@ export class RepuestosAgent implements IAgent {
 
 	private pedirPieza(repuestoData: any): AgentResponse {
 		return {
-			response: '¿Qué repuesto o pieza necesitas específicamente? (ej: empaque, filtro, resistencia, motor, etc.) 😊',
+			response: '¿Qué repuesto o pieza necesitas específicamente? (ej: empaque, filtro, resistencia, motor, etc.) 🔧😊',
 			metadata: { agentType: 'repuestos', flujo: 'repuestos_pieza', repuestoData },
 		};
 	}
@@ -146,7 +146,7 @@ export class RepuestosAgent implements IAgent {
 
 	private pedirCiudad(repuestoData: any): AgentResponse {
 		return {
-			response: '¿Desde donde nos escribes? 📍',
+			response: '¿Desde donde nos escribes? 📍😊',
 			metadata: { agentType: 'repuestos', flujo: 'repuestos_ciudad', repuestoData },
 		};
 	}

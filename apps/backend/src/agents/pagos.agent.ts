@@ -47,7 +47,7 @@ export class PagosAgent implements IAgent {
 		// Pregunta sobre soportes de pago
 		if (/soporte|comprobante|donde\s*env[ií]o|a\s*d[oó]nde\s*mando/i.test(lower)) {
 			return {
-				response: `Envía tu soporte de pago al WhatsApp de cartera: +57 314 422 9949 o +57 315 721 2367, o al correo callcenter5@electromillonaria.co. 😊`,
+				response: `Envía tu soporte de pago al WhatsApp de cartera: +57 314 422 9949 o +57 315 721 2367, o al correo callcenter5@electromillonaria.co. 😊📄✅`,
 				metadata: { agentType: 'pagos' },
 			};
 		}
