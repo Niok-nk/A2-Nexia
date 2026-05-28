@@ -1,6 +1,65 @@
 import { IAgent, AgentResponse } from './types.js';
 import { getSaludo, AGENT_NAME } from './helpers.js';
 
+const MENSAJES_RECURRENTE = [
+	(s: string) => `¡${s}! Qué bueno verte de nuevo por aquí. 😊 ¿En qué te puedo ayudar hoy?`,
+	(s: string) => `¡${s}! Me alegra verte de nuevo. Cuéntame, ¿qué necesitas el día de hoy?`,
+	(s: string) => `¡${s}! Gracias por seguir confiando en JLC, la marca de los colombianos. 😊 ¿En qué te ayudo?`,
+	(s: string) => `¡${s}! Qué gusto tenerte por acá de nuevo. Dime, ¿cómo puedo ayudarte hoy?`,
+];
+
+const MENSAJES_PRIMERA_VEZ = [
+	(s: string) => `¡${s}! 👋 Soy ${AGENT_NAME}, tu asesora en JLC Electronics, la marca de los colombianos.
+
+Gracias por escribirnos. ¿En qué te puedo ayudar?
+
+1️⃣ Comprar un producto (contado o crédito)
+2️⃣ Cartera / estado de cuenta
+3️⃣ Servicio técnico o garantía
+4️⃣ Repuestos
+5️⃣ Medios de pago / pagar una cuota
+6️⃣ Distribuidores
+7️⃣ Trabaja con nosotros
+
+Escríbeme el número o cuéntame qué necesitas 😊`,
+	(s: string) => `¡${s}! 👋 Soy ${AGENT_NAME}, tu asesora virtual en JLC Electronics.
+
+Cuéntame, ¿en qué puedo ayudarte hoy?
+
+1️⃣ Comprar un producto (contado o crédito)
+2️⃣ Cartera / estado de cuenta
+3️⃣ Servicio técnico o garantía
+4️⃣ Repuestos
+5️⃣ Medios de pago / pagar una cuota
+6️⃣ Distribuidores
+7️⃣ Trabaja con nosotros
+
+Escríbeme el número o cuéntame qué necesitas 😊`,
+	(s: string) => `¡${s}! 👋 Soy ${AGENT_NAME}, de JLC Electronics — la marca de los colombianos.
+
+Gracias por comunicarte con nosotros. ¿En qué te colaboramos?
+
+1️⃣ Comprar un producto (contado o crédito)
+2️⃣ Cartera / estado de cuenta
+3️⃣ Servicio técnico o garantía
+4️⃣ Repuestos
+5️⃣ Medios de pago / pagar una cuota
+6️⃣ Distribuidores
+7️⃣ Trabaja con nosotros
+
+Escríbeme el número o dime qué necesitas 😊`,
+];
+
+const MENSAJES_BREVES = [
+	(s: string) => `¡${s}! 👋 Soy ${AGENT_NAME}, de JLC. Con gusto te ayudo con eso.`,
+	(s: string) => `¡${s}! 👋 Gracias por escribir a JLC, soy ${AGENT_NAME}. Dime cómo te ayudo con eso.`,
+	(s: string) => `¡${s}! 👋 Soy ${AGENT_NAME}, tu asesora en JLC. En qué más te ayudo con eso.`,
+];
+
+function pick<T>(arr: T[]): T {
+	return arr[Math.floor(Math.random() * arr.length)];
+}
+
 export class BienvenidaAgent implements IAgent {
 	name = 'Bienvenida';
 
@@ -25,10 +84,9 @@ export class BienvenidaAgent implements IAgent {
 		const recurrente = this.esClienteRecurrente(context);
 		const tieneIntencion = this.tieneIntencionClara(message);
 
-		// Cliente recurrente: mensaje cálido de bienvenida de regreso
 		if (recurrente && !tieneIntencion) {
 			return {
-				response: `¡${saludo}! Qué gusto tenerte de nuevo por aquí. 😊 ¿En qué te puedo ayudar el día de hoy?`,
+				response: pick(MENSAJES_RECURRENTE)(saludo),
 				metadata: {
 					agentType: 'bienvenida',
 					passthrough: true,
@@ -36,10 +94,9 @@ export class BienvenidaAgent implements IAgent {
 			};
 		}
 
-		// Si el usuario ya llegó con una intención clara, bienvenida breve
 		if (tieneIntencion) {
 			return {
-				response: `${saludo} 👋 Soy ${AGENT_NAME}, asistente virtual de JLC Electronics. Con gusto te ayudo con eso.`,
+				response: pick(MENSAJES_BREVES)(saludo),
 				metadata: {
 					agentType: 'bienvenida',
 					passthrough: true,
@@ -47,23 +104,8 @@ export class BienvenidaAgent implements IAgent {
 			};
 		}
 
-		// Bienvenida completa con menú organizado para primera vez
-		const menu = `${saludo} 👋 Soy ${AGENT_NAME}, tu asesora virtual en JLC Electronics.
-
-¿En qué te puedo ayudar?
-
-1️⃣ Comprar un producto (contado o crédito)
-2️⃣ Cartera / estado de cuenta
-3️⃣ Servicio técnico o garantía
-4️⃣ Repuestos
-5️⃣ Medios de pago / pagar una cuota
-6️⃣ Distribuidores
-7️⃣ Trabaja con nosotros
-
-Escríbeme el número o cuéntame qué necesitas 😊`;
-
 		return {
-			response: menu,
+			response: pick(MENSAJES_PRIMERA_VEZ)(saludo),
 			metadata: { agentType: 'bienvenida', passthrough: false },
 		};
 	}

@@ -308,7 +308,7 @@ export class VentasAgent implements IAgent {
 			if (quiereContinuar) {
 				context.flujo = 'esperando_ciudad';
 				return {
-					response: '¡Excelente! Sigamos. ¿Desde qué ciudad o municipio nos escribes? 📍',
+					response: '¡Excelente! Sigamos. ¿Desde dónde nos escribes? 📍',
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'esperando_ciudad',
@@ -561,7 +561,7 @@ export class VentasAgent implements IAgent {
 
 			if (!ciudadDetectada) {
 				return {
-					response: `Para poder ayudarte mejor, ¿desde qué ciudad o municipio nos escribes? 📍`,
+					response: `Para poder ayudarte mejor, ¿desde dónde nos escribes? 📍`,
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'esperando_ciudad',
