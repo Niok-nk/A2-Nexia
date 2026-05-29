@@ -35,7 +35,7 @@ const ERRORES: Record<string, string> = {
 const TRANSICIONES: Record<string, string> = {
 	nit: '¡Gracias!',
 	nombre: 'Perfecto.',
-	telefono: 'Vamos muy bien 💪',
+	telefono: 'Vamos muy bien',
 	rangoVentas: 'Ya casi terminamos.',
 	departamento: '¡Y por último!',
 };
@@ -289,7 +289,7 @@ Respuesta:`;
 		context: any,
 		distData: any
 	): Promise<AgentResponse> {
-		const esAfirmativo = /^(s[ií]|sip|dale|ok|bueno|claro|correcto|todo bien|est[aá] bien|perfecto|s[ií] .* correcto)s?$/i.test(lower);
+		const esAfirmativo = /^(s[ií]|sip|dale|ok|bueno|claro|correcto|perfecto)|todo\s+(bien|correcto|est[aá]\s+bien)|es\s+correcto|est[aá]\s+correcto|as[ií]\s+es|completo|listo|confirmado|terminado/i.test(lower);
 
 		if (esAfirmativo) {
 			distData.confirmado = true;
