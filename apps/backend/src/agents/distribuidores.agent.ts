@@ -126,7 +126,7 @@ export class DistribuidoresAgent implements IAgent {
 		return {
 			response:
 				'¿Prefieres llenar el formulario en la web o que lo hagamos por aquí? 😊\n\n1️⃣ Web: https://jlc-electronics.com/#distribuidor\n2️⃣ Por WhatsApp paso a paso',
-			metadata: { agentType: 'distribuidores', distribuidorData: distData },
+			metadata: { agentType: 'distribuidores', flujo: 'distribuidores', distribuidorData: distData },
 		};
 	}
 
