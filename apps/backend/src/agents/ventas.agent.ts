@@ -550,16 +550,17 @@ export class VentasAgent implements IAgent {
 						},
 					};
 				}
-				return {
-					response: `¡Qué bien! A ${ciudadCap} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
-					metadata: {
-						agentType: 'ventas',
-						ciudad: ciudadDetectada,
-						ciudadValidada: true,
-						tieneCobertura: true,
-						flujo: 'esperando_modalidad',
-					},
-				};
+			return {
+				response: `¡Qué bien! A ${ciudadCap} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
+				metadata: {
+					agentType: 'ventas',
+					ciudad: ciudadDetectada,
+					ciudadValidada: true,
+					tieneCobertura: true,
+					flujo: 'esperando_modalidad',
+					pendingMessage: context?.pendingMessage,
+				},
+			};
 			}
 
 			const msgSinCobertura = (await generarMensajeSinCobertura(ciudadCap, context?.pendingMessage || '')).trim();
