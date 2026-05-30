@@ -305,6 +305,7 @@ export async function processIncomingMessage(
 	if (extra?.pendingMessage) context.pendingMessage = extra.pendingMessage;
 	if (extra?.ultimaBusqueda) context.ultimaBusqueda = extra.ultimaBusqueda;
 	if (extra?.perfilState) context.perfilState = extra.perfilState;
+	if (extra?.productosPreCargados) context.productosPreCargados = extra.productosPreCargados;
 	if (typeof extra?.tieneCobertura === 'boolean') context.tieneCobertura = extra.tieneCobertura;
 	if (extra?.modalidad) context.modalidad = extra.modalidad;
 	if (extra?.flujoAnterior) context.flujoAnterior = extra.flujoAnterior;

@@ -610,25 +610,48 @@ export class VentasAgent implements IAgent {
 				const msgOriginal = context?.pendingMessage || '';
 				const terminoIA = await extraerProductoConIA(msgOriginal);
 				if (terminoIA) {
+					const cat = detectarCategoria(msgOriginal) || 'otra';
+					let productosDisponibles: any[] = [];
 					try {
-						const products = await wooCommerceService.searchProducts(terminoIA, 5);
-						if (products.length > 0) {
-							const lista = products.map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
-							return {
-								response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
-								metadata: {
-									agentType: 'ventas',
-									modalidad: 'contado',
-									ciudad: context?.ciudad,
-									ciudadValidada: true,
-									tieneCobertura: context?.tieneCobertura,
-									terminoBusqueda: terminoIA,
-									ultimaBusqueda: { results: products, categoria: detectarCategoria(msgOriginal) || undefined, productoIndex: 0 },
-									flujo: null,
-								},
-							};
+						productosDisponibles = await wooCommerceService.searchProducts(terminoIA, 20);
+					} catch { /* continuar sin productos */ }
+					if (productosDisponibles.length > 0) {
+						const shortcuts = detectarShortcuts(msgOriginal, cat);
+						const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
+						const camposOk = camposPerfilCompletados(shortcuts);
+						if (camposOk < pasos.length) {
+							const primerPaso = pasos.find(p => !shortcuts[p.field]);
+							if (primerPaso) {
+								return {
+									response: `¡Perfecto! ${primerPaso.pregunta}`,
+									metadata: {
+										agentType: 'ventas',
+										flujo: 'perfilando',
+										perfilState: { categoria: cat, step: 1, answers: shortcuts, terminoOriginal: terminoIA },
+										ciudad: context?.ciudad,
+										ciudadValidada: true,
+										tieneCobertura: context?.tieneCobertura,
+										modalidad: 'contado',
+										productosPreCargados: productosDisponibles,
+									},
+								};
+							}
 						}
-					} catch { /* fallback: preguntar producto */ }
+						const lista = productosDisponibles.slice(0, 6).map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+						return {
+							response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
+							metadata: {
+								agentType: 'ventas',
+								modalidad: 'contado',
+								ciudad: context?.ciudad,
+								ciudadValidada: true,
+								tieneCobertura: context?.tieneCobertura,
+								terminoBusqueda: terminoIA,
+								ultimaBusqueda: { results: productosDisponibles, categoria: cat, productoIndex: 0 },
+								flujo: null,
+							},
+						};
+					}
 				}
 				return {
 					response: `¡Perfecto! Cuéntame, ¿qué estás buscando? 😊`,
