@@ -566,22 +566,16 @@ export class VentasAgent implements IAgent {
 			}
 
 			const msgSinCobertura = (await generarMensajeSinCobertura(ciudadCap, context?.pendingMessage || '')).trim();
-			const terminoIA = await extraerProductoConIA(context?.pendingMessage || '');
-			const metaSinCobertura: any = {
-				agentType: 'ventas',
-				ciudad: ciudadDetectada,
-				ciudadValidada: true,
-				tieneCobertura: false,
-				modalidad: 'contado',
-				flujo: null,
-			};
-			if (terminoIA) {
-				metaSinCobertura.terminoBusqueda = terminoIA;
-				metaSinCobertura.productoPendiente = terminoIA;
-			}
 			return {
 				response: msgSinCobertura,
-				metadata: metaSinCobertura,
+				metadata: {
+					agentType: 'ventas',
+					ciudad: ciudadDetectada,
+					ciudadValidada: true,
+					tieneCobertura: false,
+					modalidad: 'contado',
+					flujo: null,
+				},
 			};
 		}
 
@@ -616,6 +610,27 @@ export class VentasAgent implements IAgent {
 					} catch { /* continuar sin productos */ }
 					if (products.length > 0) {
 						const cat = detectarCategoria(msgOriginal) || 'otra';
+						const shortcuts = detectarShortcuts(msgOriginal, cat);
+						const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
+						const camposOk = camposPerfilCompletados(shortcuts);
+						if (camposOk < pasos.length) {
+							const primerPaso = pasos.find(p => !shortcuts[p.field]);
+							if (primerPaso) {
+								return {
+									response: `¡Perfecto! ${primerPaso.pregunta}`,
+									metadata: {
+										agentType: 'ventas',
+										flujo: 'perfilando',
+										perfilState: { categoria: cat, step: 1, answers: shortcuts, terminoOriginal: terminoIA },
+										ciudad: context?.ciudad,
+										ciudadValidada: true,
+										tieneCobertura: context?.tieneCobertura,
+										modalidad: 'contado',
+										productosPreCargados: products,
+									},
+								};
+							}
+						}
 						const lista = products.slice(0, 6).map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
 						return {
 							response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
@@ -1097,6 +1112,24 @@ export class VentasAgent implements IAgent {
 
 			if (camposOk >= pasos.length || perfilState.step > pasos.length) {
 				const terminoBusqueda = (perfilState as any).terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
+				if (context?.productosPreCargados?.length > 0) {
+					const products = context.productosPreCargados;
+					const lista = products.slice(0, 6).map((p: any, i: number) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+					return {
+						response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
+						metadata: {
+							agentType: 'ventas',
+							modalidad: 'contado',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							terminoBusqueda,
+							ultimaBusqueda: { results: products, categoria: perfilState.categoria, productoIndex: 0 },
+							flujo: null,
+							presupuesto: perfilState.answers.presupuesto,
+						},
+					};
+				}
 				context = { ...context, flujo: null, terminoBusqueda };
 				if (perfilState.answers.presupuesto) {
 					datosPersonales.presupuesto = perfilState.answers.presupuesto;
