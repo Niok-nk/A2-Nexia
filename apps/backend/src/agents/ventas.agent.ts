@@ -1186,7 +1186,6 @@ export class VentasAgent implements IAgent {
 				if (productosDisponibles.length === 0) {
 					return {
 						response: `En este momento no tenemos ${terminoParaBuscar} disponible en nuestro catálogo. ¿Hay algo más en lo que te pueda ayudar? 😊`,
-						nextStage: 'PROPOSAL',
 						metadata: {
 							agentType: 'ventas',
 							ciudadValidada: context?.ciudadValidada,
@@ -1357,7 +1356,6 @@ export class VentasAgent implements IAgent {
 			} else {
 				return {
 					response: `${ciudadStr} ${envioStr}. ¿Qué referencia o modelo buscas? Así te muestro lo que tenemos disponible 😊`,
-					nextStage: 'PROPOSAL',
 					metadata: { agentType: 'ventas', ciudad: context?.ciudad, ciudadValidada: context?.ciudadValidada },
 				};
 			}
@@ -1404,7 +1402,6 @@ export class VentasAgent implements IAgent {
 						const nombreProducto = busquedaMatch?.[1]?.trim().toLowerCase() || terminoBusqueda.toLowerCase();
 						return {
 							response: `En este momento no tenemos ${nombreProducto} disponible en nuestro catálogo. ¿Hay algo más en lo que te pueda ayudar? 😊`,
-							nextStage: 'PROPOSAL',
 							metadata: {
 								agentType: 'ventas',
 								ciudadValidada: context?.ciudadValidada,
@@ -1417,7 +1414,6 @@ export class VentasAgent implements IAgent {
 					if (!products || products.length === 0) {
 						return {
 							response: `Cuéntame, ¿qué producto te gustaría ver? Tenemos neveras, lavadoras, televisores, congeladores, parlantes, y más. 😊`,
-							nextStage: 'PROPOSAL',
 							metadata: {
 								agentType: 'ventas',
 								ciudadValidada: context?.ciudadValidada,
@@ -1502,7 +1498,6 @@ REGLAS DE CATÁLOGO:
 
 		return {
 			response,
-			nextStage: 'PROPOSAL',
 			metadata: {
 				agentType: 'ventas',
 				productosEncontrados: hayProductos,
