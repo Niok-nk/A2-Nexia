@@ -466,6 +466,7 @@ export class VentasAgent implements IAgent {
 				
 				return {
 					response: `¡Perfecto! El *${selected.name}*${precioStr}${ciudadStr}.${linkStr}\n\n¿Cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\n2️⃣ Directamente en nuestra página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te doy las instrucciones paso a paso. 😊`,
+					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'seleccion_pago',
@@ -850,6 +851,7 @@ export class VentasAgent implements IAgent {
 			const tieneCobertura = context?.tieneCobertura;
 			return {
 				response: `Claro, estas son las opciones:\n1️⃣ Medios de pago autorizados\n2️⃣ Paga directamente en nuestra página web${tieneCobertura ? '\n3️⃣ Paga en un punto físico' : ''}\n¿Cuál prefieres?`,
+				nextStage: 'PROPOSAL',
 				metadata: {
 					agentType: 'ventas',
 					flujo: 'seleccion_pago',
@@ -1031,6 +1033,7 @@ export class VentasAgent implements IAgent {
 			if (/1|transferencia|medios de pago|medios autorizados/i.test(opcion)) {
 				return {
 					response: `Estos son nuestros medios de pago autorizados:\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\nAhí verás todas las cuentas disponibles (Bancolombia, Davivienda, Nequi, etc.). Una vez realices la transferencia, por favor compárteme tu nombre completo, número de cédula y el comprobante de pago para programar tu envío gratis de inmediato.\n\n¿Pudiste completar el pago o te surgió alguna duda? 😊`,
+					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'pago_medios',
@@ -1046,6 +1049,7 @@ export class VentasAgent implements IAgent {
 					: '';
 				return {
 					response: `Puedes pagar directamente en nuestra página web.${productLink}\n\n¿Quieres que te acompañe paso a paso con el proceso?`,
+					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'pago_web',
@@ -1058,6 +1062,7 @@ export class VentasAgent implements IAgent {
 			if (context?.tieneCobertura && /3|punto físico|físico|tienda/i.test(opcion)) {
 				return {
 					response: `¡Claro! Para reservarte el producto en el punto más cercano, necesito tu nombre completo y número de cédula. 😊`,
+					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'pago_fisico',
@@ -1498,6 +1503,7 @@ REGLAS DE CATÁLOGO:
 
 		return {
 			response,
+			...(preguntaSeguimiento ? { nextStage: 'PROPOSAL' } : {}),
 			metadata: {
 				agentType: 'ventas',
 				productosEncontrados: hayProductos,
