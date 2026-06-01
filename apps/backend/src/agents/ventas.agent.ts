@@ -4,6 +4,7 @@ import {
 	PROFILING_STEPS,
 	resolverRespuestaPerfil,
 	detectarCategoria,
+	extraerProductoConIA,
 	detectarShortcuts,
 	obtenerTerminoBusquedaDesdePerfil,
 	camposPerfilCompletados,
@@ -347,16 +348,17 @@ export class VentasAgent implements IAgent {
 			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
 			if (quiereContinuar) {
 				context.flujo = 'esperando_modalidad';
-				return {
-					response: '¡Súper! Cuéntame, ¿la compra sería al *contado* o a *crédito*? 💙',
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'esperando_modalidad',
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						tieneCobertura: context?.tieneCobertura,
-					},
-				};
+			return {
+				response: '¡Súper! Cuéntame, ¿la compra sería al *contado* o a *crédito*? 💙',
+				metadata: {
+					agentType: 'ventas',
+					flujo: 'esperando_modalidad',
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					tieneCobertura: context?.tieneCobertura,
+					pendingMessage: context?.pendingMessage,
+				},
+			};
 			} else {
 				context.flujo = null;
 				return {
@@ -550,29 +552,36 @@ export class VentasAgent implements IAgent {
 						},
 					};
 				}
-				return {
-					response: `¡Qué bien! A ${ciudadCap} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
-					metadata: {
-						agentType: 'ventas',
-						ciudad: ciudadDetectada,
-						ciudadValidada: true,
-						tieneCobertura: true,
-						flujo: 'esperando_modalidad',
-					},
-				};
-			}
-
-			const msgSinCobertura = (await generarMensajeSinCobertura(ciudadCap, context?.pendingMessage || '')).trim();
 			return {
-				response: msgSinCobertura,
+				response: `¡Qué bien! A ${ciudadCap} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
 				metadata: {
 					agentType: 'ventas',
 					ciudad: ciudadDetectada,
 					ciudadValidada: true,
-					tieneCobertura: false,
-					modalidad: 'contado',
-					flujo: null,
+					tieneCobertura: true,
+					flujo: 'esperando_modalidad',
+					pendingMessage: context?.pendingMessage,
 				},
+			};
+			}
+
+			const msgSinCobertura = (await generarMensajeSinCobertura(ciudadCap, context?.pendingMessage || '')).trim();
+			const terminoIA = await extraerProductoConIA(context?.pendingMessage || '');
+			const metaSinCobertura: any = {
+				agentType: 'ventas',
+				ciudad: ciudadDetectada,
+				ciudadValidada: true,
+				tieneCobertura: false,
+				modalidad: 'contado',
+				flujo: null,
+			};
+			if (terminoIA) {
+				metaSinCobertura.terminoBusqueda = terminoIA;
+				metaSinCobertura.productoPendiente = terminoIA;
+			}
+			return {
+				response: msgSinCobertura,
+				metadata: metaSinCobertura,
 			};
 		}
 
@@ -598,6 +607,31 @@ export class VentasAgent implements IAgent {
 			}
 
 			if (quiereContado) {
+				const msgOriginal = context?.pendingMessage || '';
+				const terminoIA = await extraerProductoConIA(msgOriginal);
+				if (terminoIA) {
+					let products: any[] = [];
+					try {
+						products = await wooCommerceService.searchProducts(terminoIA, 20);
+					} catch { /* continuar sin productos */ }
+					if (products.length > 0) {
+						const cat = detectarCategoria(msgOriginal) || 'otra';
+						const lista = products.slice(0, 6).map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+						return {
+							response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
+							metadata: {
+								agentType: 'ventas',
+								modalidad: 'contado',
+								ciudad: context?.ciudad,
+								ciudadValidada: true,
+								tieneCobertura: context?.tieneCobertura,
+								terminoBusqueda: terminoIA,
+								ultimaBusqueda: { results: products, categoria: cat, productoIndex: 0 },
+								flujo: null,
+							},
+						};
+					}
+				}
 				return {
 					response: `¡Perfecto! Cuéntame, ¿qué estás buscando? 😊`,
 					metadata: {
@@ -619,6 +653,7 @@ export class VentasAgent implements IAgent {
 					ciudad: context?.ciudad,
 					ciudadValidada: true,
 					tieneCobertura: context?.tieneCobertura,
+					pendingMessage: context?.pendingMessage,
 				},
 			};
 		}
@@ -660,6 +695,7 @@ export class VentasAgent implements IAgent {
 						ciudadValidada: true,
 						tieneCobertura: true,
 						flujo: 'esperando_modalidad',
+						pendingMessage: message,
 					},
 				};
 			}

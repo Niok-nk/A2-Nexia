@@ -302,6 +302,8 @@ Categoría:`;
 				intent = 'ventas';
 			} else if (/^repuesto/.test(flujoActivo) || flujoActivo === 'repuestos_pausado') {
 				intent = 'repuestos';
+			} else if (/^distribuidor/.test(flujoActivo)) {
+				intent = 'distribuidores';
 			} else {
 				// Flujo desconocido → reclasificar normalmente
 				intent = await this.classifyIntent(message, hasHistory);
