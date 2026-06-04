@@ -23,6 +23,170 @@ import { generateResponse } from '../utils/gemini.js';
 import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
 import { sendMessage as sendWA } from '../whatsapp/whatsapp.js';
 
+// ─── BÚSQUEDA INTELIGENTE DE PRODUCTOS ───────────────────────────────────────
+//
+// Maneja tres tipos de búsqueda que el text-search genérico falla:
+//   1. SKU / referencia (ej: "JLC-21215", "JLC-500W", "JLC-55A71SGO")
+//   2. Specs de potencia (ej: "500W", "2600W RMS") + categoría
+//   3. Texto libre normal
+//
+// Intenta múltiples estrategias en orden de especificidad y devuelve el
+// primer conjunto de resultados que coincida.
+
+const CATEGORIAS_PRODUCTO = ['nevera', 'nevecon', 'lavadora', 'televisor', 'tv', 'congelador', 'parlante', 'sonido', 'licuadora', 'horno', 'microondas', 'estufa', 'ventilador', 'aire', 'plancha', 'aspiradora', 'cafetera', 'freidora', 'minibar', 'exhibidor', 'hervidor', 'arrocera'];
+
+/** Extrae un SKU/referencia tipo "JLC-21215" o "JLC-55A71SGO" del texto. */
+function extraerSKU(texto: string): string | null {
+	// Patrón: JLC seguido de guión opcional y alfanuméricos (mínimo 3 chars)
+	const match = texto.match(/\bJLC[\s-]?([A-Z0-9]{3,15})\b/i);
+	if (match) {
+		return `JLC-${match[1].toUpperCase()}`;
+	}
+	return null;
+}
+
+/** Extrae una spec de potencia tipo "500W", "2600W RMS" del texto. */
+function extraerPotencia(texto: string): string | null {
+	const match = texto.match(/(\d{2,5})\s*w(?:\s*rms)?/i);
+	if (match) {
+		return `${match[1]}W`;
+	}
+	return null;
+}
+
+/** Detecta la categoría mencionada en el texto. */
+function detectarCategoriaTexto(texto: string): string | null {
+	const lower = texto.toLowerCase();
+	for (const cat of CATEGORIAS_PRODUCTO) {
+		if (lower.includes(cat)) {
+			// Normalizar sinónimos
+			if (cat === 'tv') return 'televisor';
+			if (cat === 'sonido') return 'parlante';
+			return cat;
+		}
+	}
+	return null;
+}
+
+/**
+ * Búsqueda inteligente. Recibe el mensaje del cliente y opcionalmente la
+ * categoría/contexto conocido. Devuelve productos + cómo se encontraron.
+ */
+export async function buscarProductoInteligente(
+	mensaje: string,
+	categoriaContexto?: string | null
+): Promise<{ products: any[]; estrategia: string; sku?: string }> {
+	const sku = extraerSKU(mensaje);
+	const potencia = extraerPotencia(mensaje);
+	const categoria = detectarCategoriaTexto(mensaje) || categoriaContexto || null;
+
+	// ── Estrategia 1: Búsqueda por SKU exacto ──────────────────────────
+	if (sku) {
+		try {
+			// Intentar método dedicado de SKU si existe
+			if (typeof (wooCommerceService as any).getProductBySku === 'function') {
+				const bySku = await (wooCommerceService as any).getProductBySku(sku);
+				if (bySku) return { products: [bySku], estrategia: 'sku', sku };
+			}
+			// Fallback: buscar el SKU como texto
+			const results = await wooCommerceService.searchProducts(sku, 10);
+			if (results?.length > 0) return { products: results, estrategia: 'sku', sku };
+			// Intentar sin el prefijo JLC- (solo el código)
+			const codigo = sku.replace(/^JLC-/, '');
+			const results2 = await wooCommerceService.searchProducts(codigo, 10);
+			if (results2?.length > 0) return { products: results2, estrategia: 'sku_codigo', sku };
+		} catch { /* continuar */ }
+	}
+
+	// ── Estrategia 2: Categoría + potencia (ej: "parlante 500W") ────────
+	if (potencia && categoria) {
+		try {
+			const query = `${categoria} ${potencia}`;
+			const results = await wooCommerceService.searchProducts(query, 20);
+			if (results?.length > 0) {
+				// Filtrar para priorizar los que realmente mencionan la potencia
+				const conPotencia = results.filter((p: any) =>
+					p.name?.toLowerCase().includes(potencia.toLowerCase())
+				);
+				if (conPotencia.length > 0) return { products: conPotencia, estrategia: 'categoria_potencia' };
+				return { products: results, estrategia: 'categoria_potencia_aprox' };
+			}
+		} catch { /* continuar */ }
+	}
+
+	// ── Estrategia 3: Solo potencia, buscar en toda la tienda ───────────
+	if (potencia && !categoria) {
+		try {
+			const results = await wooCommerceService.searchProducts(potencia, 20);
+			if (results?.length > 0) {
+				const conPotencia = results.filter((p: any) =>
+					p.name?.toLowerCase().includes(potencia.toLowerCase())
+				);
+				if (conPotencia.length > 0) return { products: conPotencia, estrategia: 'potencia' };
+				return { products: results, estrategia: 'potencia_aprox' };
+			}
+		} catch { /* continuar */ }
+	}
+
+	// ── Estrategia 4: Categoría sola ────────────────────────────────────
+	if (categoria) {
+		try {
+			const results = await wooCommerceService.searchProducts(categoria, 20);
+			if (results?.length > 0) return { products: results, estrategia: 'categoria' };
+		} catch { /* continuar */ }
+	}
+
+	// ── Estrategia 5: Texto libre (limpiar palabras de relleno) ─────────
+	const textoLimpio = mensaje
+		.toLowerCase()
+		.replace(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa|info de|informacion de|el|la|los|las|un|una|este|esta|ese|esa)\s*/gi, '')
+		.replace(/[.,!?¡¿]+/g, '')
+		.trim();
+	if (textoLimpio.length >= 3) {
+		try {
+			const results = await wooCommerceService.searchProducts(textoLimpio, 20);
+			if (results?.length > 0) return { products: results, estrategia: 'texto' };
+		} catch { /* continuar */ }
+	}
+
+	// ── Estrategia 6: Palabras clave individuales ───────────────────────
+	const palabras = textoLimpio.split(/\s+/).filter((w) => w.length > 3);
+	for (const palabra of palabras) {
+		try {
+			const results = await wooCommerceService.searchProducts(palabra, 20);
+			if (results?.length > 0) return { products: results, estrategia: 'palabra_clave' };
+		} catch { /* continuar */ }
+	}
+
+	return { products: [], estrategia: 'sin_resultados', sku: sku || undefined };
+}
+
+/** Convierte texto de presupuesto a un techo numérico en pesos. */
+function parsearPresupuesto(texto: string): number {
+	if (!texto) return 0;
+	const t = texto.toLowerCase().trim();
+
+	// Mapeo de rangos cualitativos
+	if (t === 'bajo') return 800000;
+	if (t === 'medio') return 2500000;
+	if (t === 'alto') return 99000000;
+
+	// Extraer número directo (ej: "1000000", "1.000.000", "1 millón")
+	if (/mill[oó]n/.test(t)) {
+		const m = t.match(/(\d+(?:[.,]\d+)?)\s*mill/);
+		if (m) return parseFloat(m[1].replace(',', '.')) * 1000000;
+		return 1000000;
+	}
+	const num = t.replace(/[^\d]/g, '');
+	if (num) {
+		const valor = parseInt(num);
+		// Si parece estar en miles (ej: "1000" → probablemente $1.000.000)
+		if (valor < 10000) return valor * 1000;
+		return valor;
+	}
+	return 0;
+}
+
 // ─── PASOS DEL FORMULARIO DE CRÉDITO ─────────────────────────────────────────
 
 export const CREDITO_STEPS: CreditoStep[] = [
@@ -1151,11 +1315,37 @@ export class VentasAgent implements IAgent {
 
 			if (camposOk >= pasos.length || perfilState.step > pasos.length) {
 				const terminoBusqueda = (perfilState as any).terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
-				if (context?.productosPreCargados?.length > 0) {
-					const products = context.productosPreCargados;
+
+				// Re-buscar con el término real (no usar pre-cargados genéricos si el
+				// cliente especificó algo concreto como "500W RMS" o un SKU)
+				let products = context?.productosPreCargados || [];
+				const terminoOriginal = (perfilState as any).terminoOriginal;
+				if (terminoOriginal && (extraerSKU(terminoOriginal) || extraerPotencia(terminoOriginal))) {
+					const resultado = await buscarProductoInteligente(terminoOriginal, perfilState.categoria);
+					if (resultado.products.length > 0) products = resultado.products;
+				}
+
+				// Aplicar filtro de presupuesto si el cliente lo dio
+				const presupuestoRaw = perfilState.answers.presupuesto;
+				if (presupuestoRaw && products.length > 0) {
+					const techo = parsearPresupuesto(presupuestoRaw);
+					if (techo > 0) {
+						const dentroPresupuesto = products.filter((p: any) => {
+							const precio = parseFloat(p.price || '0');
+							return precio > 0 && precio <= techo * 1.15; // 15% de margen
+						});
+						if (dentroPresupuesto.length > 0) {
+							products = dentroPresupuesto.sort((a: any, b: any) =>
+								parseFloat(a.price || '0') - parseFloat(b.price || '0')
+							);
+						}
+					}
+				}
+
+				if (products.length > 0) {
 					const lista = products.slice(0, 6).map((p: any, i: number) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
 					return {
-						response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
+						response: `¡Listo! Mira lo que encontré para ti:\n\n${lista}\n\n¿Cuál te llama la atención? Dime el número y te doy más detalles 😊`,
 						metadata: {
 							agentType: 'ventas',
 							modalidad: 'contado',
@@ -1420,44 +1610,33 @@ export class VentasAgent implements IAgent {
 
 			const esConsultaProducto = /(?:tiene[ns]?|hay|venden|busco|quiero|necesito|me interesa|consulta|precio|cu[aá]nto)/i.test(message);
 
-			if (context?.productosPreCargados?.length > 0) {
+			if (context?.productosPreCargados?.length > 0 && !extraerSKU(message) && !extraerPotencia(message)) {
+				// Solo usar pre-cargados si el mensaje NO trae SKU ni potencia específica
+				// (si trae spec específica, hay que re-buscar con ella)
 				products = context.productosPreCargados;
 				hayProductos = true;
 			} else {
 				try {
 					if (!products || products.length === 0) {
-						products = await wooCommerceService.searchProducts(terminoBusqueda, 20);
-					}
+						// BÚSQUEDA INTELIGENTE: detecta SKU, potencia, categoría
+						const categoriaCtx = context?.ultimaBusqueda?.categoria || detectarCategoria(terminoBusqueda);
+						const resultado = await buscarProductoInteligente(message, categoriaCtx);
+						products = resultado.products;
 
-					if (!products || products.length === 0) {
-						const palabrasClave = terminoBusqueda
-							.toLowerCase()
-							.replace(/[.,!?¡¿]+/g, '')
-							.split(/\s+/)
-							.filter((w: string) => w.length > 3)
-							.filter((w: string) => !['para', 'con', 'mas', 'más', 'que', 'una', 'uno', 'las', 'los', 'del', 'por', 'pero', 'esta', 'todo', 'como', 'entre', 'sobre', 'cuando', 'donde', 'tiene', 'ser', 'desde', 'hasta', 'cada'].includes(w));
-
-						for (const keyword of palabrasClave) {
-							const results = await wooCommerceService.searchProducts(keyword, 20);
-							if (results && results.length > 0) {
-								products = results;
-								break;
-							}
-						}
-					}
-
-					if (!products || products.length === 0) {
-						const categoriaFallback = await detectarCategoria(message);
-						if (categoriaFallback) {
-							const results = await wooCommerceService.searchProducts(categoriaFallback, 20);
-							if (results?.length > 0) products = results;
+						// Si encontró por SKU o potencia, refinar el término guardado
+						if (resultado.estrategia.startsWith('sku') || resultado.estrategia.startsWith('potencia') || resultado.estrategia.startsWith('categoria_potencia')) {
+							terminoBusqueda = resultado.sku || extraerPotencia(message) || terminoBusqueda;
 						}
 					}
 
 					if ((!products || products.length === 0) && esConsultaProducto) {
-						const nombreProducto = busquedaMatch?.[1]?.trim().toLowerCase() || terminoBusqueda.toLowerCase();
+						const sku = extraerSKU(message);
+						const potencia = extraerPotencia(message);
+						let nombreProducto = busquedaMatch?.[1]?.trim().toLowerCase() || terminoBusqueda.toLowerCase();
+						if (sku) nombreProducto = `la referencia ${sku}`;
+						else if (potencia) nombreProducto = `un producto de ${potencia}`;
 						return {
-							response: `En este momento no tenemos ${nombreProducto} disponible en nuestro catálogo. ¿Hay algo más en lo que te pueda ayudar? 😊`,
+							response: `Qué pena, en este momento no encuentro ${nombreProducto} en el catálogo. ¿Quieres que te muestre las opciones que sí tenemos disponibles? 😊`,
 							metadata: {
 								agentType: 'ventas',
 								ciudadValidada: context?.ciudadValidada,
@@ -1530,8 +1709,14 @@ REGLAS DE CATÁLOGO:
 - NUNCA compartas números de WhatsApp de cartera, correos de facturación ni números de soporte de pago.
 - NUNCA digas "generé tu orden de compra" ni "tu orden quedó lista". Di que el producto queda reservado pendiente a su pago.
 - Si NO encontraste el producto exacto que busca, NO le recomiendes productos de otra categoría.
-- NUNCA recomiendes productos que el cliente NO pidió.`,
+- NUNCA recomiendes productos que el cliente NO pidió.
+- Si el cliente menciona una referencia/SKU (ej: "JLC-21215", "JLC-500W") o una potencia ("500W RMS") y SÍ está en el CATÁLOGO, confírmaselo y dale el enlace. Si NO está, dilo con naturalidad y ofrece mostrarle las opciones similares que sí tenemos (sin afirmar que "no existe", solo que no lo tienes disponible).
+- Si el cliente hace una pregunta técnica (compatibilidad, conexiones, adaptadores), responde con criterio según lo que sabes del producto del catálogo; si no tienes el dato exacto, dilo con honestidad y ofrece la info que sí tienes. No inventes especificaciones.`,
 			ejemplos: [
+				{
+					cliente: '¿Tienen el parlante JLC-21215 de 500W?',
+					asistente: 'Sí, déjame confirmarte la disponibilidad y el precio de esa referencia. Un momentico 😊',
+				},
 				{
 					cliente: 'Busco una nevera',
 					asistente: 'Tenemos varias opciones en neveras. Te recomiendo la Nevera JLC No Frost 251L por $1.399.900. ¿Te interesa o quieres ver más opciones?',
