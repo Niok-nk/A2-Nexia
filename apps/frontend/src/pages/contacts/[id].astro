@@ -180,18 +180,14 @@ const { id } = Astro.params;
                 let extra = {};
                 try { extra = JSON.parse(m.extra || '{}'); } catch {}
                 const stage = extra.stage || '';
-                let stageBadge = '';
-                if (stage && stage !== prevStage && prevStage !== '') {
-                  stageBadge = `<div class="stage-change"><span>${stageLabel(stage)}</span></div>`;
-                }
+                const cambioStage = stage && stage !== prevStage && prevStage !== '';
                 prevStage = stage;
                 return `
-              ${stageBadge}
               <div class="msg-item ${m.direction === 'INBOUND' ? 'msg-inbound' : 'msg-outbound'}">
                 <div class="msg-bubble ${m.direction === 'INBOUND' ? 'inbound' : 'outbound'}">
                   ${m.body}
                   <div class="msg-meta">
-                    ${m.agentType ? `${m.agentType} · ` : ''}${fmtTime(m.sentAt)}
+                    ${cambioStage ? `🔄 ${stageLabel(stage)} · ` : ''}${m.agentType ? `${m.agentType} · ` : ''}${fmtTime(m.sentAt)}
                   </div>
                 </div>
               </div>`;
