@@ -625,6 +625,26 @@ export class VentasAgent implements IAgent {
 					} catch { /* continuar sin productos */ }
 					if (products.length > 0) {
 						const cat = detectarCategoria(msgOriginal) || 'otra';
+						const esEspecifico = /[A-Z]{2,5}[-][A-Z0-9]+/.test(msgOriginal) || /\d+\s*(?:litros?|kg|pulgadas?|lb|w|vatios?|refrigeraci[oó]n)/i.test(msgOriginal);
+						if (esEspecifico) {
+							const nums = (msgOriginal.match(/\d+[kKlLgG]*/g) || []).map((n: string) => n.toLowerCase());
+							const filtrados = products.filter(p => nums.some((n: string) => p.name.toLowerCase().includes(n)));
+							const finales = filtrados.length > 0 ? filtrados.slice(0, 4) : products.slice(0, 4);
+							const lista = finales.map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+							return {
+								response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
+								metadata: {
+									agentType: 'ventas',
+									modalidad: 'contado',
+									ciudad: context?.ciudad,
+									ciudadValidada: true,
+									tieneCobertura: context?.tieneCobertura,
+									terminoBusqueda: terminoIA,
+									ultimaBusqueda: { results: finales, categoria: cat, productoIndex: 0 },
+									flujo: null,
+								},
+							};
+						}
 						const shortcuts = detectarShortcuts(msgOriginal, cat);
 						const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
 						const camposOk = camposPerfilCompletados(shortcuts);
@@ -1492,7 +1512,7 @@ Personalidad y Estilo:
 
 ${ciudadStr ? `Ciudad del cliente: ${ciudadStr}.` : ''} ${envioStr ? `Condición de envío: ${envioStr}.` : ''}
 ${userDataStr}
-POLÍTICA DE ENTREGA: Los transportadores entregan el producto en la puerta del negocio o domicilio (primer piso). No ingresan al interior del local ni suben a segundos pisos por políticas de la empresa. El cliente debe asegurarse de tener personal disponible para recibir.
+POLÍTICA DE ENTREGA: NO menciones que la entrega es en primer piso a menos que el cliente pregunte específicamente por condiciones de entrega o envío.
 REGLAS DE CATÁLOGO:
 - Si el cliente pregunta por detalles, especificaciones, características o diferencias de un producto que YA está en el CATÁLOGO, respóndele usando la información de "Detalles" del catálogo. NO hagas una nueva búsqueda.
 - Si el cliente menciona "la primera opción", "el de 55", "el primero", o algo similar, identifica a qué producto del catálogo se refiere y dale la información pedida.
@@ -1506,6 +1526,7 @@ REGLAS DE CATÁLOGO:
 - Si el cliente pide un producto NUEVO o diferente al anterior, ayúdale con eso.
 - PROHIBIDO confirmar envío o despacho si el cliente no ha pagado. Di "tan pronto se confirme el pago".
 - Si el cliente dice que ya pagó, pide el comprobante o número de transacción.
+- Cuando el cliente confirma que quiere un producto ("sí", "dalo", "resérvalo", etc.), ofrécele ayuda con el pago: pregúntale si necesita asesoramiento para pagar o si quiere que le expliques las opciones de pago.
 - NUNCA compartas números de WhatsApp de cartera, correos de facturación ni números de soporte de pago.
 - NUNCA digas "generé tu orden de compra" ni "tu orden quedó lista". Di que el producto queda reservado pendiente a su pago.
 - Si NO encontraste el producto exacto que busca, NO le recomiendes productos de otra categoría.
