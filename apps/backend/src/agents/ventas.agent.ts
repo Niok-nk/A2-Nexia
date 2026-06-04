@@ -161,6 +161,20 @@ export async function buscarProductoInteligente(
 	return { products: [], estrategia: 'sin_resultados', sku: sku || undefined };
 }
 
+/**
+ * Detecta si el mensaje es una PREGUNTA sobre especificaciones, medidas o
+ * características del producto. Estas preguntas deben responderse SIEMPRE,
+ * tienen prioridad sobre cualquier flujo de compra o pago.
+ */
+export function esPreguntaEspecificacion(texto: string): boolean {
+	const t = texto.toLowerCase();
+	// Palabras de especificación técnica
+	const tieneSpec = /(?:medida|medidas|mide|miden|cu[aá]nto mide|dimensi[oó]n|dimensiones|alto|ancho|largo|profundidad|fondo|altura|anchura|cent[ií]metro|cm\b|metro|pulgada|tama[ñn]o|capacidad|litro|litros|pies|peso|consumo|voltaje|potencia|watt|vatio|color|colores|garant[ií]a|especificaci|caracter[ií]stica|ficha t[eé]cnica|cabe|caben|entra|cu[aá]nto pesa|material|funci[oó]n|funciones|programa)/i.test(t);
+	// Forma interrogativa
+	const esPregunta = /[?¿]/.test(t) || /^(?:cu[aá]l|cu[aá]nto|cu[aá]nta|qu[eé]|c[oó]mo|d[oó]nde|tiene|tienen|me\s+(?:das|pasas|dices|confirmas|puedes)|podr[ií]as|sabes)/i.test(t);
+	return tieneSpec && esPregunta;
+}
+
 /** Convierte texto de presupuesto a un techo numérico en pesos. */
 function parsearPresupuesto(texto: string): number {
 	if (!texto) return 0;
@@ -969,7 +983,11 @@ export class VentasAgent implements IAgent {
 		}
 
 		// ── PASO 4: Detectar intención de compra ─────────────────────────────
-		const quiereComprar = /\b(?:comprar(?:lo|la)?|lo quiero|la quiero|quiero(?: esa| esta| ese| este| comprar)?|c[oó]mo (?:compro|hago|puedo pagar|le hago|le hago para pagar|pago)|quiero pagar|proceder|concretar|compralo|c[oó]mpralo|reservar|apartar|d[áa]le|confirmo compra|ya lo quiero|me gusta(?: esa| esta| ese| el| la)?|esa me gusta|esta me gusta|si continuemos|si sigamos|sigamos adelante|seguimos|continuemos)\b|\bcompr(?:o|ar)\s+(?:esa|esta|este|ese|eso|esas|esos|estes)\b|\b(?:el de \d+|la de \d+|el primero|el segundo|la primera|la segunda|me quedo con|me interesa(?!\s+(?:saber|conocer|verificar|preguntar|consultar))(?: el| la)?|prefiero(?: el| la)?|lo compro|la compro|eso quiero|eso me sirve|eso me gusta|me llevo(?: el| la)?)\b|\b(?:el (?:de \d+|primero|segundo)|la (?:de \d+|primera|segunda))\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
+		const quiereComprarRaw = /\b(?:comprar(?:lo|la)?|lo quiero|la quiero|quiero(?: esa| esta| ese| este| comprar)?|c[oó]mo (?:compro|hago|puedo pagar|le hago|le hago para pagar|pago)|quiero pagar|proceder|concretar|compralo|c[oó]mpralo|reservar|apartar|d[áa]le|confirmo compra|ya lo quiero|me gusta(?: esa| esta| ese| el| la)?|esa me gusta|esta me gusta|si continuemos|si sigamos|sigamos adelante|seguimos|continuemos)\b|\bcompr(?:o|ar)\s+(?:esa|esta|este|ese|eso|esas|esos|estes)\b|\b(?:el de \d+|la de \d+|el primero|el segundo|la primera|la segunda|me quedo con|me interesa(?!\s+(?:saber|conocer|verificar|preguntar|consultar))(?: el| la)?|prefiero(?: el| la)?|lo compro|la compro|eso quiero|eso me sirve|eso me gusta|me llevo(?: el| la)?)\b|\b(?:el (?:de \d+|primero|segundo)|la (?:de \d+|primera|segunda))\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
+
+		// Si el mensaje es una pregunta sobre medidas/specs, NO es intención de compra
+		// aunque mencione "la 3" o "prefiero" — primero hay que responder la duda.
+		const quiereComprar = quiereComprarRaw && !esPreguntaEspecificacion(message);
 
 		const puedeComprar = context?.modalidad === 'contado' || 
 			(context?.ultimaBusqueda?.results?.length > 0 && context?.modalidad !== 'credito');
@@ -1228,58 +1246,70 @@ export class VentasAgent implements IAgent {
 			const ultimosProductos = context?.ultimaBusqueda?.results ?? [];
 			const productoURL = context?.productoURL ?? ultimosProductos[0]?.permalink;
 
-			if (/1|transferencia|medios de pago|medios autorizados/i.test(opcion)) {
+			// PRIORIDAD: si el cliente hace una pregunta (medidas, specs, etc.)
+			// en vez de elegir, salir del flujo de pago y responder la pregunta.
+			if (esPreguntaEspecificacion(message) && context?.ultimaBusqueda?.results?.length > 0) {
+				// Dejar que caiga al bloque de preguntaSeguimiento más abajo
+				context = { ...context, flujo: null };
+			} else {
+				// Matching ANCLADO: la opción debe SER el número/palabra, no contenerlo.
+				const esOpcion1 = /^\s*1\s*[.)]?\s*$/.test(opcion) || /^(?:transferencia|medios?\s*(?:de\s*pago|autorizados?)|consignaci[oó]n)\b/i.test(opcion);
+				const esOpcion2 = /^\s*2\s*[.)]?\s*$/.test(opcion) || /^(?:p[aá]gina\s*web|web|en\s*l[íi]nea|online|pse|tarjeta|nequi)\b/i.test(opcion);
+				const esOpcion3 = /^\s*3\s*[.)]?\s*$/.test(opcion) || /^(?:punto\s*f[íi]sico|f[íi]sico|tienda|presencial)\b/i.test(opcion);
+
+				if (esOpcion1) {
+					return {
+						response: `Estos son nuestros medios de pago autorizados:\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\nAhí verás todas las cuentas disponibles (Bancolombia, Davivienda, Nequi, etc.). Una vez realices la transferencia, por favor compárteme tu nombre completo, número de cédula y el comprobante de pago${context?.tieneCobertura ? ' para programar tu envío gratis' : ' y coordinamos el despacho por transportadora'} de inmediato.\n\n¿Pudiste completar el pago o te surgió alguna duda? 😊`,
+						nextStage: 'PROPOSAL',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'pago_medios',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							productoURL,
+						},
+					};
+				}
+				if (esOpcion2) {
+					const productLink = productoURL
+						? `\n\nLink del producto:\n${productoURL}`
+						: '';
+					return {
+						response: `Puedes pagar directamente en nuestra página web.${productLink}\n\n¿Quieres que te acompañe paso a paso con el proceso?`,
+						nextStage: 'PROPOSAL',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'pago_web',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							productoURL,
+						},
+					};
+				}
+				if (context?.tieneCobertura && esOpcion3) {
+					return {
+						response: `¡Claro! Para reservarte el producto en el punto más cercano, necesito tu nombre completo y número de cédula. 😊`,
+						nextStage: 'PROPOSAL',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'pago_fisico',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							notificarPuntoFisico: true,
+						},
+					};
+				}
 				return {
-					response: `Estos son nuestros medios de pago autorizados:\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\nAhí verás todas las cuentas disponibles (Bancolombia, Davivienda, Nequi, etc.). Una vez realices la transferencia, por favor compárteme tu nombre completo, número de cédula y el comprobante de pago${context?.tieneCobertura ? ' para programar tu envío gratis' : ' y coordinamos el despacho por transportadora'} de inmediato.\n\n¿Pudiste completar el pago o te surgió alguna duda? 😊`,
-					nextStage: 'PROPOSAL',
+					response: `Por favor elige una opción:\n1️⃣ Medios de pago autorizados\n2️⃣ Paga directamente en nuestra página web${context?.tieneCobertura ? '\n3️⃣ Paga en un punto físico' : ''}\n¿Cuál prefieres?`,
 					metadata: {
 						agentType: 'ventas',
-						flujo: 'pago_medios',
+						flujo: 'seleccion_pago',
 						ciudad: context?.ciudad,
 						ciudadValidada: true,
-						productoURL,
+						tieneCobertura: context?.tieneCobertura,
 					},
 				};
 			}
-			if (/2|p[aá]gina web|web|en l[íi]nea|online/i.test(opcion)) {
-				const productLink = productoURL
-					? `\n\nLink del producto:\n${productoURL}`
-					: '';
-				return {
-					response: `Puedes pagar directamente en nuestra página web.${productLink}\n\n¿Quieres que te acompañe paso a paso con el proceso?`,
-					nextStage: 'PROPOSAL',
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'pago_web',
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						productoURL,
-					},
-				};
-			}
-			if (context?.tieneCobertura && /3|punto físico|físico|tienda/i.test(opcion)) {
-				return {
-					response: `¡Claro! Para reservarte el producto en el punto más cercano, necesito tu nombre completo y número de cédula. 😊`,
-					nextStage: 'PROPOSAL',
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'pago_fisico',
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						notificarPuntoFisico: true,
-					},
-				};
-			}
-			return {
-				response: `Por favor elige una opción:\n1️⃣ Medios de pago autorizados\n2️⃣ Paga directamente en nuestra página web${context?.tieneCobertura ? '\n3️⃣ Paga en un punto físico' : ''}\n¿Cuál prefieres?`,
-				metadata: {
-					agentType: 'ventas',
-					flujo: 'seleccion_pago',
-					ciudad: context?.ciudad,
-					ciudadValidada: true,
-					tieneCobertura: context?.tieneCobertura,
-				},
-			};
 		}
 
 		// ── PASO 6: Detectar datos personales del cliente ──────────────────
@@ -1431,6 +1461,27 @@ export class VentasAgent implements IAgent {
 				const shortcuts = detectarShortcuts(message, cat);
 				const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
 				const campos = camposPerfilCompletados(shortcuts);
+
+				// Si el cliente está preguntando por medidas/specs, NO perfilar por
+				// presupuesto — mostrar los productos de una vez para poder responder.
+				if (esPreguntaEspecificacion(message)) {
+					const lista = productosDisponibles.slice(0, 5).map((p: any, i: number) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+					return {
+						response: `¡Claro! Estas son las opciones que tenemos:\n\n${lista}\n\nDime cuál te interesa (por número) y te paso las medidas y detalles exactos 😊`,
+						metadata: {
+							agentType: 'ventas',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							modalidad: context?.modalidad,
+							terminoBusqueda: terminoParaBuscar,
+							productoSolicitado: terminoParaBuscar,
+							ultimaBusqueda: { results: productosDisponibles, categoria: cat, productoIndex: 0 },
+							flujo: null,
+							...datosPersonales,
+						},
+					};
+				}
 
 				if (campos >= pasos.length) {
 					const terminoBusqueda = terminoParaBuscar;
