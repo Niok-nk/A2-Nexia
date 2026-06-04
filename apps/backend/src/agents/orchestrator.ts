@@ -327,7 +327,8 @@ Categoría:`;
 
 		// Si fue interrumpido, ofrecer retomar el flujo anterior y guardarlo como pausado
 		// Solo si el agente NO inició un flujo nuevo (no pisa metadata.flujo)
-		const agenteYaCambioFlujo = metadata?.flujo && metadata.flujo !== flujoOriginal;
+		// flujo: null significa que el agente finalizó el flujo intencionalmente, también es cambio
+		const agenteYaCambioFlujo = metadata != null && 'flujo' in metadata && metadata.flujo !== flujoOriginal;
 		if (fueInterrumpido && flujoOriginal && !agenteYaCambioFlujo) {
 			if (/^credito/.test(flujoOriginal)) {
 				response += `\n\n¿Seguimos con tu solicitud de crédito? 😊`;
@@ -439,7 +440,10 @@ function esInterrupcionFlujo(message: string, flujo: string, context?: any): boo
 	if (/^(?:c[oó]mo|qu[eé]|cu[aá]nto|d[oó]nde|por\s*qu[eé]|cu[aá]l|tiene|tienen|venden|ayuda|info|informacion|asesor|humano|soporte)\b/.test(msg)) return true;
 
 	// Palabras clave de interrupción general (características del producto, etc.)
-	if (/\b(?:garant[ií]a|precio|costo|valor|cuanto cuesta|especificaciones|medidas|dimensiones|envio|flete|cobertura)\b/.test(msg)) return true;
+	// En flujos de ventas/perfilando, estas palabras son respuestas naturales, no interrupciones
+	if (flujo !== 'perfilando' && flujo !== 'perfilando_pausado') {
+		if (/\b(?:garant[ií]a|precio|costo|valor|cuanto cuesta|especificaciones|medidas|dimensiones|envio|flete|cobertura)\b/.test(msg)) return true;
+	}
 
 	// Si menciona palabras clave asociadas a otros agentes
 	if (/\b(distribuidor|distribuidores|ser distribuidor|al por mayor|mayorista|mayoreo)\b/.test(msg)) return true;

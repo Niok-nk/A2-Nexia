@@ -435,8 +435,14 @@ export class VentasAgent implements IAgent {
 
 		if (context?.flujo === 'perfilando_pausado') {
 			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			const mencionaProducto = context?.ultimaBusqueda?.results?.length > 0 && (
+				/\b(?:primero|primera|segundo|segunda|tercero|tercera|[1-3])\b/i.test(lower) ||
+				/(?:me (?:interesa|gusta|llama|llam[oó])|quiero|prefiero|ese|esa|este|esta|ese modelo|esa referencia)/i.test(lower)
+			);
 			if (quiereContinuar) {
 				context.flujo = 'perfilando';
+			} else if (mencionaProducto) {
+				context.flujo = null;
 			} else {
 				context.flujo = null;
 				return {
