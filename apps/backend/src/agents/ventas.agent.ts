@@ -1463,27 +1463,62 @@ export class VentasAgent implements IAgent {
 				const campos = camposPerfilCompletados(shortcuts);
 
 				// Si el cliente está preguntando por medidas/specs, NO perfilar por
-				// presupuesto — mostrar los productos de una vez para poder responder.
+				// presupuesto.
 				if (esPreguntaEspecificacion(message)) {
-					const lista = productosDisponibles.slice(0, 5).map((p: any, i: number) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
-					return {
-						response: `¡Claro! Estas son las opciones que tenemos:\n\n${lista}\n\nDime cuál te interesa (por número) y te paso las medidas y detalles exactos 😊`,
-						metadata: {
-							agentType: 'ventas',
-							ciudad: context?.ciudad,
-							ciudadValidada: true,
-							tieneCobertura: context?.tieneCobertura,
-							modalidad: context?.modalidad,
-							terminoBusqueda: terminoParaBuscar,
-							productoSolicitado: terminoParaBuscar,
-							ultimaBusqueda: { results: productosDisponibles, categoria: cat, productoIndex: 0 },
+					// ¿Mencionó una referencia/SKU o producto específico?
+					const sku = extraerSKU(message);
+					const resultadoEspecifico = (sku || message.length > 25)
+						? await buscarProductoInteligente(message, cat)
+						: { products: [], estrategia: 'sin_resultados' };
+
+					// Identificar el producto exacto si lo encontramos
+					let productoExacto: any = null;
+					if (resultadoEspecifico.products.length > 0) {
+						if (sku) {
+							productoExacto = resultadoEspecifico.products.find((p: any) =>
+								(p.sku && p.sku.toUpperCase().includes(sku.replace(/^JLC-/, ''))) ||
+								(p.name && p.name.toUpperCase().includes(sku.replace(/^JLC-/, '')))
+							) || resultadoEspecifico.products[0];
+						} else {
+							productoExacto = resultadoEspecifico.products[0];
+						}
+					}
+
+					// Si identificamos el producto específico → responder sobre ÉL
+					if (productoExacto) {
+						context = {
+							...context,
 							flujo: null,
-							...datosPersonales,
-						},
-					};
+							ultimaBusqueda: { results: [productoExacto, ...resultadoEspecifico.products.filter((p: any) => p.id !== productoExacto.id)], categoria: cat, productoIndex: 0 },
+							terminoBusqueda: productoExacto.name,
+							productoSolicitado: productoExacto.name,
+						};
+						// Cae al bloque de preguntaSeguimiento/Gemma más abajo para
+						// responder las medidas usando los Detalles del catálogo.
+					} else {
+						// No identificó un producto específico → mostrar opciones
+						const lista = productosDisponibles.slice(0, 5).map((p: any, i: number) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+						return {
+							response: `¡Claro! Estas son las opciones que tenemos:\n\n${lista}\n\nDime cuál te interesa (por número) y te paso las medidas y detalles exactos 😊`,
+							metadata: {
+								agentType: 'ventas',
+								ciudad: context?.ciudad,
+								ciudadValidada: true,
+								tieneCobertura: context?.tieneCobertura,
+								modalidad: context?.modalidad,
+								terminoBusqueda: terminoParaBuscar,
+								productoSolicitado: terminoParaBuscar,
+								ultimaBusqueda: { results: productosDisponibles, categoria: cat, productoIndex: 0 },
+								flujo: null,
+								...datosPersonales,
+							},
+						};
+					}
 				}
 
-				if (campos >= pasos.length) {
+				if (esPreguntaEspecificacion(message)) {
+					// El producto ya fue identificado arriba; saltar el perfilamiento
+				} else if (campos >= pasos.length) {
 					const terminoBusqueda = terminoParaBuscar;
 					context = { ...context, terminoBusqueda };
 				} else {
@@ -1762,7 +1797,7 @@ REGLAS DE CATÁLOGO:
 - Si NO encontraste el producto exacto que busca, NO le recomiendes productos de otra categoría.
 - NUNCA recomiendes productos que el cliente NO pidió.
 - Si el cliente menciona una referencia/SKU (ej: "JLC-21215", "JLC-500W") o una potencia ("500W RMS") y SÍ está en el CATÁLOGO, confírmaselo y dale el enlace. Si NO está, dilo con naturalidad y ofrece mostrarle las opciones similares que sí tenemos (sin afirmar que "no existe", solo que no lo tienes disponible).
-- Si el cliente hace una pregunta técnica (compatibilidad, conexiones, adaptadores), responde con criterio según lo que sabes del producto del catálogo; si no tienes el dato exacto, dilo con honestidad y ofrece la info que sí tienes. No inventes especificaciones.`,
+- Si el cliente pregunta por las medidas/dimensiones de un producto específico que YA identificó (el #1 del catálogo), respóndele con los datos que aparezcan en sus "Detalles". Si los Detalles NO incluyen las medidas exactas, dilo con honestidad: di que vas a confirmar las medidas exactas con el equipo y ofrécele el enlace del producto donde puede verlas. NO vuelvas a mostrarle la lista completa de productos si ya eligió uno.`,
 			ejemplos: [
 				{
 					cliente: '¿Tienen el parlante JLC-21215 de 500W?',
