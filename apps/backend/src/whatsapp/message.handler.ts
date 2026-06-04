@@ -172,16 +172,6 @@ export async function processIncomingMessage(
 		take: 30,
 	});
 
-	// Guardamos INBOUND para persistencia; el routing usa `history` (sin este mensaje)
-	// para detectar correctamente hasHistory en isGreetingOrVague
-	await prisma.message.create({
-		data: {
-			contactId: contact.id,
-			direction: 'INBOUND',
-			body,
-		},
-	});
-
 	// 4. Detectar nueva sesión: cliente que ya tenía conversaciones previas y vuelve a saludar
 	//    Esto crea un nuevo Lead (instancia independiente) para preservar los datos anteriores.
 	const tieneHistorial = history.length > 0;
@@ -198,6 +188,16 @@ export async function processIncomingMessage(
 			where: { contactId: contact.id },
 			orderBy: { createdAt: 'desc' },
 		});
+
+	const stageInbound = !esNuevaSesion && lead?.stage ? lead.stage : 'INITIAL';
+	await prisma.message.create({
+		data: {
+			contactId: contact.id,
+			direction: 'INBOUND',
+			body,
+			extra: JSON.stringify({ stage: stageInbound }),
+		},
+	});
 
 	// 6. Cargar UserData persistido (datos recolectados por la IA progresivamente)
 	let userDataRecord = lead
@@ -324,12 +324,14 @@ export async function processIncomingMessage(
 	const { agentType, response, metadata } = await orchestrator.route(body, context);
 
 	// 8. Persistir respuesta OUTBOUND
+	const stageActual = !esNuevaSesion && lead?.stage ? lead.stage : 'INITIAL';
 	await prisma.message.create({
 		data: {
 			contactId: contact.id,
 			direction: 'OUTBOUND',
 			body: response,
 			agentType,
+			extra: JSON.stringify({ stage: stageActual }),
 		},
 	});
 

@@ -174,7 +174,19 @@ const { id } = Astro.params;
             Historial de mensajes (${messages.length})
           </div>
           <div class="msg-list" style="max-height:600px;overflow-y:auto;">
-            ${messages.length ? messages.map((m) => `
+            ${(() => {
+              let prevStage = '';
+              return messages.length ? messages.map((m) => {
+                let extra = {};
+                try { extra = JSON.parse(m.extra || '{}'); } catch {}
+                const stage = extra.stage || '';
+                let stageBadge = '';
+                if (stage && stage !== prevStage && prevStage !== '') {
+                  stageBadge = `<div class="stage-change"><span>${stageLabel(stage)}</span></div>`;
+                }
+                prevStage = stage;
+                return `
+              ${stageBadge}
               <div class="msg-item ${m.direction === 'INBOUND' ? 'msg-inbound' : 'msg-outbound'}">
                 <div class="msg-bubble ${m.direction === 'INBOUND' ? 'inbound' : 'outbound'}">
                   ${m.body}
@@ -182,8 +194,10 @@ const { id } = Astro.params;
                     ${m.agentType ? `${m.agentType} · ` : ''}${fmtTime(m.sentAt)}
                   </div>
                 </div>
-              </div>`).join('')
-            : '<div class="text-muted text-sm" style="text-align:center;padding:2rem;">Sin mensajes aún.</div>'}
+              </div>`;
+              }).join('')
+            : '<div class="text-muted text-sm" style="text-align:center;padding:2rem;">Sin mensajes aún.</div>';
+            })()}
           </div>
           <!-- Send Message -->
           <div style="padding:1rem;border-top:1px solid var(--color-border);display:flex;gap:0.5rem;">

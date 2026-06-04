@@ -23,7 +23,7 @@ export class PagosAgent implements IAgent {
 				: '';
 			const envioInfo = tieneCobertura
 				? `con envío gratis a ${ciudadStr}`
-				: ciudadStr ? `(envío por Coordinadora a ${ciudadStr})` : '';
+				: ciudadStr ? `(envío por transportadora a ${ciudadStr})` : '';
 
 			return {
 				response: `Para pagar tu *${productoNombre || 'producto'}* ${envioInfo}, estas son tus opciones:${linkProducto}\n\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te acompaño paso a paso. 😊`,
