@@ -1756,9 +1756,9 @@ export class VentasAgent implements IAgent {
 		const productListStr = products.length > 0
 			? products.slice(0, 6).map((p: any, i: number) => {
 				const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar precio';
-				// Limpiar descripción HTML y truncar a 200 chars para dar contexto al LLM
-				const rawDesc: string = (p.short_description || p.description || '').replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
-				const desc = rawDesc.length > 200 ? rawDesc.slice(0, 197) + '...' : rawDesc;
+				// Limpiar descripción HTML; usar description completo (ficha técnica) truncado a 1200 chars
+				const rawDesc: string = (p.description || p.short_description || '').replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
+				const desc = rawDesc.length > 1200 ? rawDesc.slice(0, 1197) + '...' : rawDesc;
 				// Incluir atributos estructurados (dimensiones, capacidad, etc.)
 				let attrs = '';
 				if (p.attributes?.length > 0) {
