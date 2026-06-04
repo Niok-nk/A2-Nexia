@@ -1367,6 +1367,14 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (products.length === 0) {
+			// Si ya hay resultados de una búsqueda anterior y el mensaje actual
+			// no contiene un término de producto claro, reusar los anteriores
+			if (context?.ultimaBusqueda?.results?.length > 0 && !/comprar|cotizar|busco|quiero|necesito|hay|venden|tienes/i.test(message)) {
+				products = context.ultimaBusqueda.results.slice(0, 6);
+				hayProductos = true;
+				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			}
+
 			const esConsultaProducto = /(?:tiene[ns]?|hay|venden|busco|quiero|necesito|me interesa|consulta|precio|cu[aá]nto)/i.test(message);
 
 			if (context?.productosPreCargados?.length > 0) {
