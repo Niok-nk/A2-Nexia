@@ -1040,7 +1040,7 @@ export class VentasAgent implements IAgent {
 
 			if (/1|transferencia|medios de pago|medios autorizados/i.test(opcion)) {
 				return {
-					response: `Estos son nuestros medios de pago autorizados:\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\nAhí verás todas las cuentas disponibles (Bancolombia, Davivienda, Nequi, etc.). Una vez realices la transferencia, por favor compárteme tu nombre completo, número de cédula y el comprobante de pago para programar tu envío gratis de inmediato.\n\n¿Pudiste completar el pago o te surgió alguna duda? 😊`,
+					response: `Estos son nuestros medios de pago autorizados:\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\nAhí verás todas las cuentas disponibles (Bancolombia, Davivienda, Nequi, etc.). Una vez realices la transferencia, por favor compárteme tu nombre completo, número de cédula y el comprobante de pago${context?.tieneCobertura ? ' para programar tu envío gratis' : ' y coordinamos el despacho por transportadora'} de inmediato.\n\n¿Pudiste completar el pago o te surgió alguna duda? 😊`,
 					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
@@ -1536,7 +1536,7 @@ REGLAS DE CATÁLOGO:
 				ciudad: context?.ciudad,
 				modalidad: context?.modalidad,
 				tieneCobertura: context?.tieneCobertura,
-				productoSolicitado: productoBuscado,
+				...(productoBuscado.length < 30 && productoBuscado.split(/\s+/).length <= 5 && !/[?¿]/.test(productoBuscado) ? { productoSolicitado: productoBuscado } : {}),
 				ultimaBusqueda: products.length > 0
 					? { results: products.slice(0, 6), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
 					: undefined,
