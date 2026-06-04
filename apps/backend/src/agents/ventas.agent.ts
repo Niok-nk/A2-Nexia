@@ -4,6 +4,7 @@ import {
 	PROFILING_STEPS,
 	resolverRespuestaPerfil,
 	detectarCategoria,
+	extraerProductoConIA,
 	detectarShortcuts,
 	obtenerTerminoBusquedaDesdePerfil,
 	camposPerfilCompletados,
@@ -157,15 +158,15 @@ async function generarMensajeSinCobertura(ciudad: string, mensajeUsuario: string
 	try {
 		return await generateResponse(
 			ctx,
-			`Eres un asesor de ventas amable y natural. El usuario es de ${ciudad}, donde NO tenemos cobertura directa pero podemos enviar por Coordinadora (el flete se cobra al hacer el pedido). Redacta un mensaje personalizado (máximo 2 oraciones) que:
+			`Eres un asesor de ventas amable y natural. El usuario es de ${ciudad}, donde NO tenemos cobertura directa pero podemos enviar por transportadora (el flete se cobra al hacer el pedido). Redacta un mensaje personalizado (máximo 2 oraciones) que:
 - NO diga "qué bien" ni "excelente" (porque no hay cobertura directa)
-- Informe amablemente que no tenemos cobertura directa pero que enviamos por Coordinadora (flete por pagar)
+- Informe amablemente que no tenemos cobertura directa pero que enviamos por transportadora (flete por pagar)
 - Pregunte qué producto o referencia busca
 - Use un tono natural, no robotizado
 NO incluyas saludos formales, solo el cuerpo del mensaje.`
 		);
 	} catch {
-		return `En ${ciudad.charAt(0).toUpperCase() + ciudad.slice(1)} no tenemos cobertura directa, pero podemos enviarte por Coordinadora (el flete se cobra al hacer el pedido). ¿Qué producto o referencia buscas?`;
+		return `En ${ciudad.charAt(0).toUpperCase() + ciudad.slice(1)} no tenemos cobertura directa, pero podemos enviarte por transportadora (el flete se cobra al hacer el pedido). ¿Qué producto o referencia buscas?`;
 	}
 }
 
@@ -347,16 +348,17 @@ export class VentasAgent implements IAgent {
 			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
 			if (quiereContinuar) {
 				context.flujo = 'esperando_modalidad';
-				return {
-					response: '¡Súper! Cuéntame, ¿la compra sería al *contado* o a *crédito*? 💙',
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'esperando_modalidad',
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						tieneCobertura: context?.tieneCobertura,
-					},
-				};
+			return {
+				response: '¡Súper! Cuéntame, ¿la compra sería al *contado* o a *crédito*? 💙',
+				metadata: {
+					agentType: 'ventas',
+					flujo: 'esperando_modalidad',
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					tieneCobertura: context?.tieneCobertura,
+					pendingMessage: context?.pendingMessage,
+				},
+			};
 			} else {
 				context.flujo = null;
 				return {
@@ -464,6 +466,7 @@ export class VentasAgent implements IAgent {
 				
 				return {
 					response: `¡Perfecto! El *${selected.name}*${precioStr}${ciudadStr}.${linkStr}\n\n¿Cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\n2️⃣ Directamente en nuestra página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te doy las instrucciones paso a paso. 😊`,
+					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'seleccion_pago',
@@ -550,16 +553,17 @@ export class VentasAgent implements IAgent {
 						},
 					};
 				}
-				return {
-					response: `¡Qué bien! A ${ciudadCap} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
-					metadata: {
-						agentType: 'ventas',
-						ciudad: ciudadDetectada,
-						ciudadValidada: true,
-						tieneCobertura: true,
-						flujo: 'esperando_modalidad',
-					},
-				};
+			return {
+				response: `¡Qué bien! A ${ciudadCap} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
+				metadata: {
+					agentType: 'ventas',
+					ciudad: ciudadDetectada,
+					ciudadValidada: true,
+					tieneCobertura: true,
+					flujo: 'esperando_modalidad',
+					pendingMessage: context?.pendingMessage,
+				},
+			};
 			}
 
 			const msgSinCobertura = (await generarMensajeSinCobertura(ciudadCap, context?.pendingMessage || '')).trim();
@@ -598,6 +602,52 @@ export class VentasAgent implements IAgent {
 			}
 
 			if (quiereContado) {
+				const msgOriginal = context?.pendingMessage || '';
+				const terminoIA = await extraerProductoConIA(msgOriginal);
+				if (terminoIA) {
+					let products: any[] = [];
+					try {
+						products = await wooCommerceService.searchProducts(terminoIA, 20);
+					} catch { /* continuar sin productos */ }
+					if (products.length > 0) {
+						const cat = detectarCategoria(msgOriginal) || 'otra';
+						const shortcuts = detectarShortcuts(msgOriginal, cat);
+						const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
+						const camposOk = camposPerfilCompletados(shortcuts);
+						if (camposOk < pasos.length) {
+							const primerPaso = pasos.find(p => !shortcuts[p.field]);
+							if (primerPaso) {
+								return {
+									response: `¡Perfecto! ${primerPaso.pregunta}`,
+									metadata: {
+										agentType: 'ventas',
+										flujo: 'perfilando',
+										perfilState: { categoria: cat, step: 1, answers: shortcuts, terminoOriginal: terminoIA },
+										ciudad: context?.ciudad,
+										ciudadValidada: true,
+										tieneCobertura: context?.tieneCobertura,
+										modalidad: 'contado',
+										productosPreCargados: products,
+									},
+								};
+							}
+						}
+						const lista = products.slice(0, 6).map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+						return {
+							response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
+							metadata: {
+								agentType: 'ventas',
+								modalidad: 'contado',
+								ciudad: context?.ciudad,
+								ciudadValidada: true,
+								tieneCobertura: context?.tieneCobertura,
+								terminoBusqueda: terminoIA,
+								ultimaBusqueda: { results: products, categoria: cat, productoIndex: 0 },
+								flujo: null,
+							},
+						};
+					}
+				}
 				return {
 					response: `¡Perfecto! Cuéntame, ¿qué estás buscando? 😊`,
 					metadata: {
@@ -619,6 +669,7 @@ export class VentasAgent implements IAgent {
 					ciudad: context?.ciudad,
 					ciudadValidada: true,
 					tieneCobertura: context?.tieneCobertura,
+					pendingMessage: context?.pendingMessage,
 				},
 			};
 		}
@@ -660,6 +711,7 @@ export class VentasAgent implements IAgent {
 						ciudadValidada: true,
 						tieneCobertura: true,
 						flujo: 'esperando_modalidad',
+						pendingMessage: message,
 					},
 				};
 			}
@@ -799,6 +851,7 @@ export class VentasAgent implements IAgent {
 			const tieneCobertura = context?.tieneCobertura;
 			return {
 				response: `Claro, estas son las opciones:\n1️⃣ Medios de pago autorizados\n2️⃣ Paga directamente en nuestra página web${tieneCobertura ? '\n3️⃣ Paga en un punto físico' : ''}\n¿Cuál prefieres?`,
+				nextStage: 'PROPOSAL',
 				metadata: {
 					agentType: 'ventas',
 					flujo: 'seleccion_pago',
@@ -980,6 +1033,7 @@ export class VentasAgent implements IAgent {
 			if (/1|transferencia|medios de pago|medios autorizados/i.test(opcion)) {
 				return {
 					response: `Estos son nuestros medios de pago autorizados:\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\nAhí verás todas las cuentas disponibles (Bancolombia, Davivienda, Nequi, etc.). Una vez realices la transferencia, por favor compárteme tu nombre completo, número de cédula y el comprobante de pago para programar tu envío gratis de inmediato.\n\n¿Pudiste completar el pago o te surgió alguna duda? 😊`,
+					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'pago_medios',
@@ -995,6 +1049,7 @@ export class VentasAgent implements IAgent {
 					: '';
 				return {
 					response: `Puedes pagar directamente en nuestra página web.${productLink}\n\n¿Quieres que te acompañe paso a paso con el proceso?`,
+					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'pago_web',
@@ -1007,6 +1062,7 @@ export class VentasAgent implements IAgent {
 			if (context?.tieneCobertura && /3|punto físico|físico|tienda/i.test(opcion)) {
 				return {
 					response: `¡Claro! Para reservarte el producto en el punto más cercano, necesito tu nombre completo y número de cédula. 😊`,
+					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
 						flujo: 'pago_fisico',
@@ -1061,6 +1117,24 @@ export class VentasAgent implements IAgent {
 
 			if (camposOk >= pasos.length || perfilState.step > pasos.length) {
 				const terminoBusqueda = (perfilState as any).terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
+				if (context?.productosPreCargados?.length > 0) {
+					const products = context.productosPreCargados;
+					const lista = products.slice(0, 6).map((p: any, i: number) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+					return {
+						response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
+						metadata: {
+							agentType: 'ventas',
+							modalidad: 'contado',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							terminoBusqueda,
+							ultimaBusqueda: { results: products, categoria: perfilState.categoria, productoIndex: 0 },
+							flujo: null,
+							presupuesto: perfilState.answers.presupuesto,
+						},
+					};
+				}
 				context = { ...context, flujo: null, terminoBusqueda };
 				if (perfilState.answers.presupuesto) {
 					datosPersonales.presupuesto = perfilState.answers.presupuesto;
@@ -1117,7 +1191,6 @@ export class VentasAgent implements IAgent {
 				if (productosDisponibles.length === 0) {
 					return {
 						response: `En este momento no tenemos ${terminoParaBuscar} disponible en nuestro catálogo. ¿Hay algo más en lo que te pueda ayudar? 😊`,
-						nextStage: 'PROPOSAL',
 						metadata: {
 							agentType: 'ventas',
 							ciudadValidada: context?.ciudadValidada,
@@ -1193,7 +1266,7 @@ export class VentasAgent implements IAgent {
 		const ciudadStr = context?.ciudad ? `En ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
 		const envioStr = context?.tieneCobertura
 			? 'tienes envío gratis'
-			: 'pago de contado (flete por Coordinadora a cargo del cliente)';
+			: 'pago de contado (flete por transportadora a cargo del cliente)';
 
 		const pideMas = /(?:tienes\s*mas|hay\s*m[áa]s|m[áa]s\s*opciones|otr[oa]s?\s*opciones|quiero\s*ver\s*m[áa]s|mu[ée]strame\s*m[áa]s|busco\s*otr[oa]|alg[úu]n\s*otr[oa]|otr[oa]s?\s*opciones|diferente)/i.test(message);
 		const pideMasEconomico = /(?:m[áa]s\s*(?:econ[oó]mic[oa]s?|barat[oa]s?|econ[oó]mic[oa])|algo\s*(?:m[áa]s\s*)?(?:econ[oó]mico|barato)|m[áa]s\s*barato|menos\s*costoso|de\s*menor\s*precio|hay\s*(?:algo\s*)?m[áa]s\s*barat)/i.test(message);
@@ -1288,13 +1361,20 @@ export class VentasAgent implements IAgent {
 			} else {
 				return {
 					response: `${ciudadStr} ${envioStr}. ¿Qué referencia o modelo buscas? Así te muestro lo que tenemos disponible 😊`,
-					nextStage: 'PROPOSAL',
 					metadata: { agentType: 'ventas', ciudad: context?.ciudad, ciudadValidada: context?.ciudadValidada },
 				};
 			}
 		}
 
 		if (products.length === 0) {
+			// Si ya hay resultados de una búsqueda anterior y el mensaje actual
+			// no contiene un término de producto claro, reusar los anteriores
+			if (context?.ultimaBusqueda?.results?.length > 0 && !/comprar|cotizar|busco|quiero|necesito|hay|venden|tienes/i.test(message)) {
+				products = context.ultimaBusqueda.results.slice(0, 6);
+				hayProductos = true;
+				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			}
+
 			const esConsultaProducto = /(?:tiene[ns]?|hay|venden|busco|quiero|necesito|me interesa|consulta|precio|cu[aá]nto)/i.test(message);
 
 			if (context?.productosPreCargados?.length > 0) {
@@ -1335,7 +1415,6 @@ export class VentasAgent implements IAgent {
 						const nombreProducto = busquedaMatch?.[1]?.trim().toLowerCase() || terminoBusqueda.toLowerCase();
 						return {
 							response: `En este momento no tenemos ${nombreProducto} disponible en nuestro catálogo. ¿Hay algo más en lo que te pueda ayudar? 😊`,
-							nextStage: 'PROPOSAL',
 							metadata: {
 								agentType: 'ventas',
 								ciudadValidada: context?.ciudadValidada,
@@ -1348,7 +1427,6 @@ export class VentasAgent implements IAgent {
 					if (!products || products.length === 0) {
 						return {
 							response: `Cuéntame, ¿qué producto te gustaría ver? Tenemos neveras, lavadoras, televisores, congeladores, parlantes, y más. 😊`,
-							nextStage: 'PROPOSAL',
 							metadata: {
 								agentType: 'ventas',
 								ciudadValidada: context?.ciudadValidada,
@@ -1433,7 +1511,7 @@ REGLAS DE CATÁLOGO:
 
 		return {
 			response,
-			nextStage: 'PROPOSAL',
+			...(preguntaSeguimiento ? { nextStage: 'PROPOSAL' } : {}),
 			metadata: {
 				agentType: 'ventas',
 				productosEncontrados: hayProductos,

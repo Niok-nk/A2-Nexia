@@ -41,6 +41,7 @@ model Message {
   body      String
   sentAt    DateTime @default(now())
   agentType String?
+  extra     String?
 }
 
 model Note {

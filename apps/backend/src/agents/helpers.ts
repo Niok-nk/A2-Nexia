@@ -195,6 +195,21 @@ export function detectarCategoria(msg: string): string | null {
 	return null;
 }
 
+export async function extraerProductoConIA(mensaje: string): Promise<string | null> {
+	const prompt = `Extrae ÚNICAMENTE el nombre del producto o electrodoméstico del siguiente mensaje. Ignora verbos (quiero, busco, necesito, comprar, etc.), artículos, preposiciones y palabras genéricas. Responde SOLO con el nombre del producto, máximo 5 palabras, sin puntuación ni explicaciones.
+
+Mensaje: "${mensaje}"
+Producto:`;
+	try {
+		const respuesta = await generateResponse(prompt);
+		const limpio = respuesta.replace(/[.,!?¡¿"'()\-:;]/g, '').trim().toLowerCase();
+		if (limpio && limpio.length >= 2 && !/(?:no se|no pude|ninguno|nada|error|producto)/i.test(limpio)) {
+			return limpio;
+		}
+	} catch { /* fallback silencioso */ }
+	return null;
+}
+
 export function detectarShortcuts(message: string, categoria: string): Record<string, string> {
 	const lower = message.toLowerCase();
 	const answers: Record<string, string> = {};

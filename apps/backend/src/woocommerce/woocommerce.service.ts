@@ -76,15 +76,16 @@ export const wooCommerceService = {
 			const q = query.toLowerCase();
 			return MOCK_CATALOG.filter(
 				(p) =>
-					p.name.toLowerCase().includes(q) ||
-					p.description.toLowerCase().includes(q) ||
-					p.categories.some((c) => c.name.toLowerCase().includes(q))
+					p.stock_status === 'instock' &&
+					(p.name.toLowerCase().includes(q) ||
+						p.description.toLowerCase().includes(q) ||
+						p.categories.some((c) => c.name.toLowerCase().includes(q)))
 			).slice(0, limit);
 		}
 		try {
 			logger.info({ query }, 'Searching products in WooCommerce...');
 			const { data } = await wcApi.get('wp-json/wc/v3/products', {
-				params: { search: query, per_page: limit },
+				params: { search: query, per_page: limit, stock_status: 'instock' },
 			});
 			logger.info({ query, count: data.length }, 'WooCommerce search results');
 			
@@ -93,20 +94,25 @@ export const wooCommerceService = {
 				const q = query.toLowerCase();
 				return MOCK_CATALOG.filter(
 					(p) =>
-						p.name.toLowerCase().includes(q) ||
-						p.description.toLowerCase().includes(q) ||
-						p.categories.some((c) => c.name.toLowerCase().includes(q))
+						p.stock_status === 'instock' &&
+						(p.name.toLowerCase().includes(q) ||
+							p.description.toLowerCase().includes(q) ||
+							p.categories.some((c) => c.name.toLowerCase().includes(q)))
 				).slice(0, limit);
 			}
 			
-			return data as WCProduct[];
+			const inStock = (data as WCProduct[]).filter(p => p.stock_status === 'instock');
+			if (inStock.length > 0) return inStock.slice(0, limit);
+			logger.warn({ query, total: data.length }, 'No in-stock WooCommerce results');
+			return (data as WCProduct[]).slice(0, limit);
 		} catch (error: any) {
 			logger.error({ error: error.message, query, status: error.response?.status, data: error.response?.data }, 'WooCommerce search error, falling back to mock');
 			const q = query.toLowerCase();
 			return MOCK_CATALOG.filter(
 				(p) =>
-					p.name.toLowerCase().includes(q) ||
-					p.description.toLowerCase().includes(q)
+					p.stock_status === 'instock' &&
+					(p.name.toLowerCase().includes(q) ||
+						p.description.toLowerCase().includes(q))
 			).slice(0, limit);
 		}
 	},

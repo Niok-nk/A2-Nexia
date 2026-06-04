@@ -172,16 +172,6 @@ export async function processIncomingMessage(
 		take: 30,
 	});
 
-	// Guardamos INBOUND para persistencia; el routing usa `history` (sin este mensaje)
-	// para detectar correctamente hasHistory en isGreetingOrVague
-	await prisma.message.create({
-		data: {
-			contactId: contact.id,
-			direction: 'INBOUND',
-			body,
-		},
-	});
-
 	// 4. Detectar nueva sesión: cliente que ya tenía conversaciones previas y vuelve a saludar
 	//    Esto crea un nuevo Lead (instancia independiente) para preservar los datos anteriores.
 	const tieneHistorial = history.length > 0;
@@ -198,6 +188,16 @@ export async function processIncomingMessage(
 			where: { contactId: contact.id },
 			orderBy: { createdAt: 'desc' },
 		});
+
+	const stageInbound = !esNuevaSesion && lead?.stage ? lead.stage : 'INITIAL';
+	await prisma.message.create({
+		data: {
+			contactId: contact.id,
+			direction: 'INBOUND',
+			body,
+			extra: JSON.stringify({ stage: stageInbound }),
+		},
+	});
 
 	// 6. Cargar UserData persistido (datos recolectados por la IA progresivamente)
 	let userDataRecord = lead
@@ -305,27 +305,33 @@ export async function processIncomingMessage(
 	if (extra?.pendingMessage) context.pendingMessage = extra.pendingMessage;
 	if (extra?.ultimaBusqueda) context.ultimaBusqueda = extra.ultimaBusqueda;
 	if (extra?.perfilState) context.perfilState = extra.perfilState;
+	if (extra?.productosPreCargados) context.productosPreCargados = extra.productosPreCargados;
 	if (typeof extra?.tieneCobertura === 'boolean') context.tieneCobertura = extra.tieneCobertura;
 	if (extra?.modalidad) context.modalidad = extra.modalidad;
 	if (extra?.flujoAnterior) context.flujoAnterior = extra.flujoAnterior;
 	if (extra?.creditoOptions) context.creditoOptions = extra.creditoOptions;
 	if (extra?.creditoData) context.creditoData = extra.creditoData;
 	if (extra?.repuestoData) context.repuestoData = extra.repuestoData;
+	if (extra?.distribuidorData) context.distribuidorData = extra.distribuidorData;
 	if (typeof extra?.creditoStep === 'number') context.creditoStep = extra.creditoStep;
 	if (extra?.productoURL) context.productoURL = extra.productoURL;
 	if (extra?.productoCompra) context.productoCompra = extra.productoCompra;
+	if (extra?.terminoBusqueda) context.terminoBusqueda = extra.terminoBusqueda;
+	if (extra?.productoPendiente) context.productoPendiente = extra.productoPendiente;
 	if (typeof extra?.pasoWeb === 'number') context.pasoWeb = extra.pasoWeb;
 
 	// 7. Enrutar al orquestador
 	const { agentType, response, metadata } = await orchestrator.route(body, context);
 
 	// 8. Persistir respuesta OUTBOUND
+	const stageActual = !esNuevaSesion && lead?.stage ? lead.stage : 'INITIAL';
 	await prisma.message.create({
 		data: {
 			contactId: contact.id,
 			direction: 'OUTBOUND',
 			body: response,
 			agentType,
+			extra: JSON.stringify({ stage: stageActual }),
 		},
 	});
 
@@ -371,7 +377,7 @@ export async function processIncomingMessage(
 			const producto = repuesto.productoEncontrado
 				? `${repuesto.productoEncontrado.nombre}`
 				: repuesto.referenciaManual || 'No especificado';
-			const notifMsg = `🔧 SOLICITUD DE REPUESTO\n\nProducto: ${producto}\nRepuesto solicitado: ${repuesto.repuesto || 'No especificado'}\n\nCliente: ${repuesto.nombreCliente || 'nombre pendiente'}\nCédula: ${repuesto.cedulaCliente || 'pendiente'}\nTeléfono: ${phone}\nCiudad: ${userData.ciudad || 'No especificada'}\n\nFecha: ${new Date().toLocaleDateString('es-CO')}`;
+			const notifMsg = `🔧 SOLICITUD DE REPUESTO\n\nProducto: ${producto}\nRepuesto solicitado: ${repuesto.repuesto || 'No especificado'}\n\nCliente: ${repuesto.nombreCliente || 'nombre pendiente'}\nCédula: ${repuesto.cedulaCliente || 'pendiente'}\nTeléfono: ${realPhone}\nCiudad: ${userData.ciudad || 'No especificada'}\n\nFecha: ${new Date().toLocaleDateString('es-CO')}`;
 			try {
 				const { sendMessage: sendWADirect } = await import('./whatsapp.js');
 				await sendWADirect(WA_REPUESTOS, notifMsg);
@@ -386,7 +392,7 @@ export async function processIncomingMessage(
 			const WA_PROBLEMA_WEB = process.env.WA_ESCALAMIENTO || '573187408190';
 			const pd = metadata?.problemaWebData || {};
 			const notaJson = metadata?.notaJson || '{}';
-			const notifMsg = `🌐 REPORTE DE PROBLEMA EN PÁGINA WEB\n\nCliente: ${pd.nombreCliente || 'nombre pendiente'}\nCédula: ${pd.cedulaCliente || 'pendiente'}\nTeléfono: ${phone}\nCiudad: ${pd.ciudad || userData.ciudad || 'No especificada'}\n\nDetalle: ${pd.detalle || 'No especificado'}\nCausa: ${pd.causa || 'No especificada'}\n\nFecha: ${new Date().toLocaleDateString('es-CO')}`;
+			const notifMsg = `🌐 REPORTE DE PROBLEMA EN PÁGINA WEB\n\nCliente: ${pd.nombreCliente || 'nombre pendiente'}\nCédula: ${pd.cedulaCliente || 'pendiente'}\nTeléfono: ${realPhone}\nCiudad: ${pd.ciudad || userData.ciudad || 'No especificada'}\n\nDetalle: ${pd.detalle || 'No especificado'}\nCausa: ${pd.causa || 'No especificada'}\n\nFecha: ${new Date().toLocaleDateString('es-CO')}`;
 			try {
 				const { sendMessage: sendWADirect } = await import('./whatsapp.js');
 				await sendWADirect(WA_PROBLEMA_WEB, notifMsg);
@@ -407,6 +413,22 @@ export async function processIncomingMessage(
 			}
 		}
 
+		if (metadata?.notificarDistribuidores) {
+			const WA_DISTRIBUIDOR_1 = process.env.WA_DISTRIBUIDOR_1 || '573216450110';
+			const WA_DISTRIBUIDOR_2 = process.env.WA_DISTRIBUIDOR_2 || '573207881141';
+			const dd = metadata?.distribuidorData || {};
+			const fecha = new Date().toLocaleDateString('es-CO');
+			const notifMsg = `🤝 SOLICITUD DE DISTRIBUIDOR\n\nNIT: ${dd.nit || '—'}\nNombre: ${dd.nombre || '—'}\nTeléfono: ${dd.telefono || '—'}\nCorreo: ${dd.correo || '—'}\nRango de ventas: ${dd.rangoVentas || '—'}\nUbicación: ${dd.ciudad || '—'}, ${dd.departamento || '—'}\n\nWhatsApp del interesado: ${realPhone}\nFecha: ${fecha}`;
+			try {
+				const { sendMessage: sendWADirect } = await import('./whatsapp.js');
+				await sendWADirect(WA_DISTRIBUIDOR_1, notifMsg);
+				await sendWADirect(WA_DISTRIBUIDOR_2, notifMsg);
+				logger.info({ phone, tipo: 'distribuidor' }, 'Notificación de distribuidor enviada a ambos números');
+			} catch (e) {
+				logger.error({ error: e }, 'Error enviando notificación de distribuidor');
+			}
+		}
+
 		if (metadata?.notificarPuntoFisico || metadata?.escalado) {
 			const WA_ESCALAMIENTO = process.env.WA_ESCALAMIENTO || '573187408190';
 			const ciudadInfo = metadata?.ciudad || userData.ciudad || 'ciudad no especificada';
@@ -415,9 +437,9 @@ export async function processIncomingMessage(
 
 			let notifMsg = '';
 			if (metadata?.notificarPuntoFisico) {
-				notifMsg = `🏪 PUNTO FÍSICO\nCliente: ${nombreInfo}\nCiudad: ${ciudadInfo}\nProducto: ${productoInfo}\nTeléfono: ${phone}\nQuiere pagar en punto físico. Requiere asistencia.`;
+				notifMsg = `🏪 PUNTO FÍSICO\nCliente: ${nombreInfo}\nCiudad: ${ciudadInfo}\nProducto: ${productoInfo}\nTeléfono: ${realPhone}\nQuiere pagar en punto físico. Requiere asistencia.`;
 			} else if (metadata?.escalado) {
-				notifMsg = `⚠️ ESCALAMIENTO\nCliente: ${nombreInfo}\nCiudad: ${ciudadInfo}\nProducto: ${productoInfo}\nTeléfono: ${phone}\nNo pudo completar el pago web. Requiere asistencia.`;
+				notifMsg = `⚠️ ESCALAMIENTO\nCliente: ${nombreInfo}\nCiudad: ${ciudadInfo}\nProducto: ${productoInfo}\nTeléfono: ${realPhone}\nNo pudo completar el pago web. Requiere asistencia.`;
 			}
 
 			if (notifMsg) {
