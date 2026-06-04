@@ -158,15 +158,16 @@ async function generarMensajeSinCobertura(ciudad: string, mensajeUsuario: string
 	try {
 		return await generateResponse(
 			ctx,
-			`Eres un asesor de ventas amable y natural. El usuario es de ${ciudad}, donde NO tenemos cobertura directa pero podemos enviar por transportadora (el flete se cobra al hacer el pedido). Redacta un mensaje personalizado (máximo 2 oraciones) que:
+			`Eres un asesor de ventas amable y natural. El usuario es de ${ciudad}, donde NO tenemos cobertura directa pero podemos enviar por transportadora (el flete va incluido en el precio total, el cliente paga de contado todo incluido). Redacta un mensaje personalizado (máximo 2 oraciones) que:
 - NO diga "qué bien" ni "excelente" (porque no hay cobertura directa)
-- Informe amablemente que no tenemos cobertura directa pero que enviamos por transportadora (flete por pagar)
+- Informe amablemente que no tenemos cobertura directa pero que enviamos por transportadora (flete a cargo del cliente dentro del pago total)
+- NO menciones "pago contra entrega", "contra entrega" ni "pagar al recibir"
 - Pregunte qué producto o referencia busca
 - Use un tono natural, no robotizado
 NO incluyas saludos formales, solo el cuerpo del mensaje.`
 		);
 	} catch {
-		return `En ${ciudad.charAt(0).toUpperCase() + ciudad.slice(1)} no tenemos cobertura directa, pero podemos enviarte por transportadora (el flete se cobra al hacer el pedido). ¿Qué producto o referencia buscas?`;
+		return `En ${ciudad.charAt(0).toUpperCase() + ciudad.slice(1)} no tenemos cobertura directa, pero podemos enviarte por transportadora (el flete va incluido en el pago total). ¿Qué producto o referencia buscas? 😊`;
 	}
 }
 
@@ -1266,7 +1267,7 @@ export class VentasAgent implements IAgent {
 		const ciudadStr = context?.ciudad ? `En ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
 		const envioStr = context?.tieneCobertura
 			? 'tienes envío gratis'
-			: 'pago de contado (flete por transportadora a cargo del cliente)';
+			: 'pago de contado (flete por transportadora incluido en el pago total)';
 
 		const pideMas = /(?:tienes\s*mas|hay\s*m[áa]s|m[áa]s\s*opciones|otr[oa]s?\s*opciones|quiero\s*ver\s*m[áa]s|mu[ée]strame\s*m[áa]s|busco\s*otr[oa]|alg[úu]n\s*otr[oa]|otr[oa]s?\s*opciones|diferente)/i.test(message);
 		const pideMasEconomico = /(?:m[áa]s\s*(?:econ[oó]mic[oa]s?|barat[oa]s?|econ[oó]mic[oa])|algo\s*(?:m[áa]s\s*)?(?:econ[oó]mico|barato)|m[áa]s\s*barato|menos\s*costoso|de\s*menor\s*precio|hay\s*(?:algo\s*)?m[áa]s\s*barat)/i.test(message);
