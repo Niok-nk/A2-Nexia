@@ -114,10 +114,30 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 		''
 	).trim();
 
-	// Si no hay texto pero es imagen/video, interpretar como comprobante si hay flujo de pago
+	// Tipos de medios no soportados: responder que no se pueden procesar
 	if (!body) {
-		const esMedia = !!msg.message?.imageMessage || !!msg.message?.videoMessage;
-		if (esMedia) {
+		const esAudio = !!msg.message?.audioMessage || !!msg.message?.ptvMessage;
+		const esDoc = !!msg.message?.documentMessage;
+		const esSticker = !!msg.message?.stickerMessage;
+		const esImagenOVideo = !!msg.message?.imageMessage || !!msg.message?.videoMessage;
+
+		if (esAudio) {
+			const sendTo = realPhone || phone;
+			try {
+				await sendMessage(sendTo, 'No puedo procesar mensajes de audio. Por favor, escríbeme tu consulta en texto 📝');
+			} catch { /* fallback silencioso */ }
+			logger.info({ phone }, 'Audio message received, replied with text-only notice');
+			return;
+		}
+		if (esDoc || esSticker) {
+			const sendTo = realPhone || phone;
+			try {
+				await sendMessage(sendTo, 'No puedo procesar este tipo de archivos. Por favor, escríbeme tu consulta en texto 📝');
+			} catch { /* fallback silencioso */ }
+			logger.info({ phone }, 'Document/sticker message received, replied with text-only notice');
+			return;
+		}
+		if (esImagenOVideo) {
 			logger.info({ phone }, 'Media message without caption, treating as comprobante');
 			body = 'ya pague';
 		} else {
