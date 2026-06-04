@@ -15,21 +15,16 @@ function determinarPipelineStage(userData: Record<string, any>, ultimaRespuesta:
 	const tienePresupuesto = !!userData?.presupuesto;
 	const tieneCiudad = !!userData?.ciudad;
 
-	// VENTA_CERRADA opción A: el asistente dio instrucciones de pago (con o sin números)
-	if (/(?:transferencia|consignaci[oó]n|PSE|tarjeta|cuenta de ahorros|cuenta corriente|Nequi|DaviPlata|Banco|medios de pago autorizados|medios autorizados)/i.test(ultimaRespuesta)) {
+	// VENTA_CERRADA: solo cuando el cliente confirma que YA pagó o va a pagar
+	if (
+		tieneProducto &&
+		/\b(?:ya pagu[eé]|pago realizado|ya hice el pago|ya transfer[ií]|comprobante enviado|ya consign[ué]|voy a pagar|estoy pagando|ya pagando|acabo de pagar|ya hice la transferencia|ya hice el pago|listo el pago|pago listo|pago confirmado)\b/i.test(historial.slice(-300))
+	) {
 		return 'VENTA_CERRADA';
 	}
 
 	// VENTA_CERRADA opción B: el asistente confirmó recibo de pago o comprobante
-	if (/\b(?:recib[ií] tu comprobante|confirmar el pago|verificar[áa] el pago|n[uú]mero de gu[ií]a|pago confirmado|ya qued[oó] reservado?|pago verificado)\b/i.test(ultimaRespuesta)) {
-		return 'VENTA_CERRADA';
-	}
-
-	// VENTA_CERRADA opción C: el cliente ya dijo que pagó y hay producto conocido
-	if (
-		tieneProducto &&
-		/(?:comprar|pagar|transferencia|consignaci[oó]n|confirmo|confirmar|listo el pago|ya pagu[eé]|comprobante|transacci[oó]n)/i.test(historial.slice(-300))
-	) {
+	if (/\b(?:recib[ií] tu comprobante|confirm[ée] el pago|pago verificado|n[uú]mero de gu[ií]a|gu[ií]a de env[ií]o)\b/i.test(ultimaRespuesta)) {
 		return 'VENTA_CERRADA';
 	}
 
