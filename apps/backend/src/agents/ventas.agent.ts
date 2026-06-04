@@ -1753,12 +1753,27 @@ export class VentasAgent implements IAgent {
 			}
 		}
 
+		function htmlToCleanText(html: string, isPrimary: boolean): string {
+			if (!html) return '';
+			// Preservar tablas: convertir <tr> en saltos de línea y <td>/<th> en pipe
+			let txt = html
+				.replace(/<\/tr>/gi, '\n')
+				.replace(/<\/td>/gi, ' | ')
+				.replace(/<\/th>/gi, ' | ')
+				.replace(/<br\s*\/?>/gi, '\n')
+				.replace(/<li>/gi, '\n- ')
+				.replace(/<\/li>/gi, '')
+				.replace(/<\/?(?:ul|ol)>/gi, '\n');
+			// Remover el resto de etiquetas HTML
+			txt = txt.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
+			const maxLen = isPrimary ? 5000 : 1200;
+			return txt.length > maxLen ? txt.slice(0, maxLen - 3) + '...' : txt;
+		}
+
 		const productListStr = products.length > 0
 			? products.slice(0, 6).map((p: any, i: number) => {
 				const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar precio';
-				// Limpiar descripción HTML; usar description completo (ficha técnica) truncado a 1200 chars
-				const rawDesc: string = (p.description || p.short_description || '').replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
-				const desc = rawDesc.length > 1200 ? rawDesc.slice(0, 1197) + '...' : rawDesc;
+				const desc = htmlToCleanText(p.description || p.short_description || '', i === 0);
 				// Incluir atributos estructurados (dimensiones, capacidad, etc.)
 				let attrs = '';
 				if (p.attributes?.length > 0) {
