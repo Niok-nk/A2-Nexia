@@ -82,14 +82,14 @@ export class Orchestrator {
 		const cleaned = m.replace(/[.,!?¡¿…]+$/g, '').trim();
 		if (greetings.includes(cleaned)) return true;
 
-		// Saludos con coma o con algo después
-		const firstWord = cleaned.split(/[\s,]+/)[0];
-		if (greetings.includes(firstWord) && cleaned.length < 30) return true;
-
 		// En modo NO estricto (primer mensaje, sin historial):
+		//   - Saludos con coma o algo después corto
 		//   - Patrones de presentación: "me llamo...", "soy...", etc.
 		//   - Catch-all para mensajes muy cortos (< 5 chars) sin intención clara
 		if (!strict) {
+			const firstWord = cleaned.split(/[\s,]+/)[0];
+			if (greetings.includes(firstWord) && cleaned.length < 30) return true;
+
 			const presentationPatterns = [
 				/^me\s+llamo/i, /^soy\s+[a-z]/i, /^mi\s+nombre/i,
 				/^vengo\s+por/i, /^quisiera\s+info/i, /^busco\s+info/i,
@@ -408,6 +408,13 @@ function esInterrupcionFlujo(message: string, flujo: string, context?: any): boo
 	if (/^\s*\d+\s*$/.test(msg)) return false; // opciones numéricas
 	if (/^(?:si|sí|no|ok|vale|listo|entendido|dale|bueno|por favor|gracias)\s*$/i.test(msg)) return false; // respuestas simples
 
+	// Si el flujo espera una ubicación y el usuario menciona una ciudad, no es interrupción
+	if (flujo === 'esperando_ciudad' || flujo === 'esperando_ciudad_pausado') {
+		if (/(?:desde|soy de|vivo en|estoy en|escribo desde|ubicado en|me encuentro en)\s+[a-záéíóúñ]{3,}/i.test(msg)) {
+			return false;
+		}
+	}
+
 	// Saludos explícitos (no deben interpretarse como respuestas de formulario, sino como interrupción para saludar)
 	const greetings = [
 		'hola', 'holaa', 'holaaa', 'holi', 'oli', 'ola', 'hello', 'hi', 'hey',
@@ -415,8 +422,14 @@ function esInterrupcionFlujo(message: string, flujo: string, context?: any): boo
 		'buenas tardes', 'buenas noches', 'que tal', 'qué tal'
 	];
 	const cleaned = msg.replace(/[.,!?¡¿…]+$/g, '').trim();
-	if (greetings.includes(cleaned) || greetings.includes(cleaned.split(/[\s,]+/)[0])) {
-		return true;
+	if (greetings.includes(cleaned)) return true;
+	if (greetings.includes(cleaned.split(/[\s,]+/)[0])) {
+		// Si el mensaje empieza con un saludo pero podría ser respuesta al flujo actual,
+		// verificamos que no tenga contenido relevante más allá del saludo
+		const sinSaludo = cleaned.replace(/^(?:hola|holaa|holaaa|holi|oli|ola|hello|hi|hey|buenas)\s*,?\s*/i, '').trim();
+		if (sinSaludo.length < 5) return true;
+		// Si hay contenido después del saludo, no es interrupción
+		return false;
 	}
 
 	// Si es una pregunta explícita (tiene signos de interrogación)
