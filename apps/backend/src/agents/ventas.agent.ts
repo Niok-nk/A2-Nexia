@@ -1788,6 +1788,7 @@ Personalidad y Estilo:
 ${ciudadStr ? `Ciudad del cliente: ${ciudadStr}.` : ''} ${envioStr ? `Condición de envío: ${envioStr}.` : ''}
 ${userDataStr}
 POLÍTICA DE ENTREGA: NO menciones que la entrega es en primer piso a menos que el cliente pregunte específicamente por condiciones de entrega o envío.
+- El precio del producto NO incluye flete ni costo de envío. Si el cliente pregunta cuánto cuesta el envío, NUNCA digas que ya está incluido. Dale el enlace del producto y explícale que lo agregue al carrito de compras en la web, y desde el carrito puede calcular el valor del envío a su ciudad.
 REGLAS DE CATÁLOGO:
 - Si el cliente pregunta por detalles, especificaciones, características o diferencias de un producto que YA está en el CATÁLOGO, respóndele usando la información de "Detalles" del catálogo. NO hagas una nueva búsqueda.
 - Si el cliente menciona "la primera opción", "el de 55", "el primero", o algo similar, identifica a qué producto del catálogo se refiere y dale la información pedida.
