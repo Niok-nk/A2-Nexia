@@ -589,8 +589,8 @@ export class VentasAgent implements IAgent {
 
 		// ── SI ESTAMOS ESPERANDO MODALIDAD (contado / crédito) ─────────────
 		if (context?.flujo === 'esperando_modalidad') {
-			const quiereCredito = /cr[eé]dito|a cr[eé]dito|financiar|financiaci[oó]n|cuotas|pagar a cuotas|1/i.test(lower);
-			const quiereContado = /contado|efectivo|pago inmediato|precio de contado|contadito|2/i.test(lower);
+			const quiereCredito = /cr[eé]dito|a cr[eé]dito|financiar|financiaci[oó]n|cuotas|pagar a cuotas|^\s*1\s*$/i.test(lower);
+			const quiereContado = /contado|efectivo|pago inmediato|precio de contado|contadito|^\s*2\s*$/i.test(lower);
 
 			if (quiereCredito) {
 				return {
