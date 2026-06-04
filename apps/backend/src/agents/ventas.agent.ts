@@ -1759,7 +1759,17 @@ export class VentasAgent implements IAgent {
 				// Limpiar descripción HTML y truncar a 200 chars para dar contexto al LLM
 				const rawDesc: string = (p.short_description || p.description || '').replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
 				const desc = rawDesc.length > 200 ? rawDesc.slice(0, 197) + '...' : rawDesc;
-				return `${i + 1}. ${p.name} - ${precio}\n   Enlace: ${p.permalink}${desc ? `\n   Detalles: ${desc}` : ''}`;
+				// Incluir atributos estructurados (dimensiones, capacidad, etc.)
+				let attrs = '';
+				if (p.attributes?.length > 0) {
+					const relevantes = p.attributes.filter((a: any) =>
+						a.options?.length && ['alto', 'ancho', 'largo', 'profundidad', 'fondo', 'capacidad', 'peso', 'volumen', 'medidas', 'dimensiones', 'tamaño', 'color', 'material', 'potencia', 'voltaje', 'consumo', 'garantía'].some(k => a.name?.toLowerCase().includes(k.toLowerCase()))
+					);
+					if (relevantes.length > 0) {
+						attrs = '\n   ' + relevantes.map((a: any) => `${a.name}: ${a.options.join(', ')}`).join('\n   ');
+					}
+				}
+				return `${i + 1}. ${p.name} - ${precio}\n   Enlace: ${p.permalink}${desc ? `\n   Detalles: ${desc}` : ''}${attrs}`;
 			}).join('\n\n')
 			: 'No se encontraron productos.';
 

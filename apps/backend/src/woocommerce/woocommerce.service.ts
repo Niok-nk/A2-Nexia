@@ -1,6 +1,16 @@
 import axios from 'axios';
 import logger from '../utils/logger.js';
 
+export interface WCProductAttribute {
+	id: number;
+	name: string;
+	slug: string;
+	position: number;
+	visible: boolean;
+	variation: boolean;
+	options: string[];
+}
+
 export interface WCProduct {
 	id: number;
 	name: string;
@@ -12,6 +22,7 @@ export interface WCProduct {
 	stock_status: string;
 	categories: Array<{ name: string }>;
 	permalink: string;
+	attributes?: WCProductAttribute[];
 }
 
 // Catálogo de vehículos de ejemplo (usado si WooCommerce no está configurado)
