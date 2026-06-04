@@ -563,6 +563,9 @@ export class VentasAgent implements IAgent {
 					tieneCobertura: true,
 					flujo: 'esperando_modalidad',
 					pendingMessage: context?.pendingMessage,
+					productoSolicitado: context?.userData?.productoSolicitado || context?.pendingMessage || undefined,
+					ultimaBusqueda: context?.ultimaBusqueda,
+					terminoBusqueda: context?.terminoBusqueda,
 				},
 			};
 			}
@@ -577,6 +580,9 @@ export class VentasAgent implements IAgent {
 					tieneCobertura: false,
 					modalidad: 'contado',
 					flujo: null,
+					productoSolicitado: context?.userData?.productoSolicitado || context?.pendingMessage || undefined,
+					ultimaBusqueda: context?.ultimaBusqueda,
+					terminoBusqueda: context?.terminoBusqueda,
 				},
 			};
 		}
@@ -598,6 +604,7 @@ export class VentasAgent implements IAgent {
 						ciudad: context?.ciudad,
 						ciudadValidada: true,
 						tieneCobertura: context?.tieneCobertura,
+						productoSolicitado: context?.userData?.productoSolicitado || context?.pendingMessage || undefined,
 					},
 				};
 			}
@@ -1133,6 +1140,7 @@ export class VentasAgent implements IAgent {
 							ultimaBusqueda: { results: products, categoria: perfilState.categoria, productoIndex: 0 },
 							flujo: null,
 							presupuesto: perfilState.answers.presupuesto,
+							productoSolicitado: terminoBusqueda,
 						},
 					};
 				}
@@ -1198,6 +1206,7 @@ export class VentasAgent implements IAgent {
 							ciudad: context?.ciudad,
 							modalidad: context?.modalidad,
 							tieneCobertura: context?.tieneCobertura,
+							productoSolicitado: terminoParaBuscar,
 							...datosPersonales,
 						},
 					};
@@ -1230,6 +1239,8 @@ export class VentasAgent implements IAgent {
 								tieneCobertura: context?.tieneCobertura,
 								modalidad: context?.modalidad,
 								productosPreCargados: productosDisponibles,
+								productoSolicitado: terminoParaBuscar,
+								ultimaBusqueda: { results: productosDisponibles, categoria: cat, productoIndex: 0 },
 								...datosPersonales,
 							},
 						};
