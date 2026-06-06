@@ -33,7 +33,7 @@ import { sendMessage as sendWA } from '../whatsapp/whatsapp.js';
 // Intenta múltiples estrategias en orden de especificidad y devuelve el
 // primer conjunto de resultados que coincida.
 
-const CATEGORIAS_PRODUCTO = ['nevera', 'nevecon', 'lavadora', 'televisor', 'tv', 'congelador', 'parlante', 'sonido', 'licuadora', 'horno', 'microondas', 'estufa', 'ventilador', 'aire', 'plancha', 'aspiradora', 'cafetera', 'freidora', 'minibar', 'exhibidor', 'hervidor', 'arrocera'];
+const CATEGORIAS_PRODUCTO = ['nevera', 'nevecon', 'refrigerador', 'refri', 'lavadora', 'televisor', 'tv', 'congelador', 'parlante', 'sonido', 'licuadora', 'horno', 'microondas', 'estufa', 'ventilador', 'aire', 'plancha', 'aspiradora', 'cafetera', 'freidora', 'minibar', 'exhibidor', 'hervidor', 'arrocera'];
 
 /** Extrae un SKU/referencia tipo "JLC-21215" o "JLC-55A71SGO" del texto. */
 function extraerSKU(texto: string): string | null {
@@ -62,6 +62,7 @@ function detectarCategoriaTexto(texto: string): string | null {
 			// Normalizar sinónimos
 			if (cat === 'tv') return 'televisor';
 			if (cat === 'sonido') return 'parlante';
+			if (cat === 'refrigerador' || cat === 'refri') return 'nevera';
 			return cat;
 		}
 	}
