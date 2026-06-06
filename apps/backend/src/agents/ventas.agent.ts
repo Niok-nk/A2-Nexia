@@ -336,16 +336,16 @@ async function generarMensajeSinCobertura(ciudad: string, mensajeUsuario: string
 	try {
 		return await generateResponse(
 			ctx,
-			`Eres un asesor de ventas amable y natural. El usuario es de ${ciudad}, donde NO tenemos cobertura directa pero podemos enviar por transportadora (el flete va incluido en el precio total, el cliente paga de contado todo incluido). Redacta un mensaje personalizado (máximo 2 oraciones) que:
+			`Eres un asesor de ventas amable y natural. El usuario es de ${ciudad}, donde NO tenemos cobertura directa. Redacta un mensaje personalizado (máximo 2 oraciones) que:
 - NO diga "qué bien" ni "excelente" (porque no hay cobertura directa)
-- Informe amablemente que no tenemos cobertura directa pero que enviamos por transportadora (flete a cargo del cliente dentro del pago total)
+- Informe amablemente que no tenemos cobertura directa pero que enviamos por transportadora (el flete NO está incluido en el precio, se calcula al agregar el producto al carrito en la web)
 - NO menciones "pago contra entrega", "contra entrega" ni "pagar al recibir"
 - Pregunte qué producto o referencia busca
 - Use un tono natural, no robotizado
 NO incluyas saludos formales, solo el cuerpo del mensaje.`
 		);
 	} catch {
-		return `En ${ciudad.charAt(0).toUpperCase() + ciudad.slice(1)} no tenemos cobertura directa, pero podemos enviarte por transportadora (el flete va incluido en el pago total). ¿Qué producto o referencia buscas? 😊`;
+		return `En ${ciudad.charAt(0).toUpperCase() + ciudad.slice(1)} no tenemos cobertura directa, pero podemos enviarte por transportadora (el flete se calcula en la web al agregar el producto al carrito). ¿Qué producto o referencia buscas? 😊`;
 	}
 }
 
@@ -1580,7 +1580,7 @@ export class VentasAgent implements IAgent {
 		const ciudadStr = context?.ciudad ? `En ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
 		const envioStr = context?.tieneCobertura
 			? 'tienes envío gratis'
-			: 'pago de contado (flete por transportadora incluido en el pago total)';
+			: 'envío por transportadora (el flete se calcula en la web al agregar el producto al carrito)';
 
 		const pideMas = /(?:tienes\s*mas|hay\s*m[áa]s|m[áa]s\s*opciones|otr[oa]s?\s*opciones|quiero\s*ver\s*m[áa]s|mu[ée]strame\s*m[áa]s|busco\s*otr[oa]|alg[úu]n\s*otr[oa]|otr[oa]s?\s*opciones|diferente)/i.test(message);
 		const pideMasEconomico = /(?:m[áa]s\s*(?:econ[oó]mic[oa]s?|barat[oa]s?|econ[oó]mic[oa])|algo\s*(?:m[áa]s\s*)?(?:econ[oó]mico|barato)|m[áa]s\s*barato|menos\s*costoso|de\s*menor\s*precio|hay\s*(?:algo\s*)?m[áa]s\s*barat)/i.test(message);
@@ -1818,7 +1818,10 @@ REGLAS DE CATÁLOGO:
 - PROHIBIDO confirmar envío o despacho si el cliente no ha pagado. Di "tan pronto se confirme el pago".
 - Si el cliente dice que ya pagó, pide el comprobante o número de transacción.
 - Cuando el cliente confirma que quiere un producto ("sí", "dalo", "resérvalo", etc.), ofrécele ayuda con el pago: pregúntale si necesita asesoramiento para pagar o si quiere que le expliques las opciones de pago.
-- NUNCA compartas números de WhatsApp de cartera, correos de facturación ni números de soporte de pago.
+- Si el cliente pregunta por las opciones de pago, NO las enumeres. Interprétalo como que necesita guía: pregúntale si quiere que le expliques cómo funciona el pago en la web o si tiene alguna duda específica.
+- Si el cliente necesita ayuda más detallada para pagar, ofrécete a enviarle un mensaje a un asesor de soporte. NO muestres el número. Di algo como "déjame enviar tu información a nuestro equipo de soporte para que te ayuden con el pago".
+- Solo si el cliente INSISTE en que necesita ayuda porque no puede pagar, dile "con gusto, te paso el número de nuestro asesor de soporte +57 318 740 8190 para que te ayuden directamente".
+- NUNCA menciones cartera ni compartas números de cartera para temas de compra o pago. Cartera solo es para consultas de pagos ya realizados o estados de cuenta, no antes de comprar.
 - NUNCA digas "generé tu orden de compra" ni "tu orden quedó lista". Di que el producto queda reservado pendiente a su pago.
 - Si NO encontraste el producto exacto que busca, NO le recomiendes productos de otra categoría.
 - NUNCA recomiendes productos que el cliente NO pidió.
