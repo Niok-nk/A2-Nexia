@@ -8,10 +8,11 @@ export class ServicioTecnicoAgent implements IAgent {
 	async handle(message: string, context: any): Promise<AgentResponse> {
 		const userDataCtx = buildUserDataContext(context?.userData);
 		const datos = `Canales de servicio técnico JLC:${userDataCtx}
-- WhatsApp técnico: +57 320 788 1151
-- WhatsApp técnico (Diego): +57 320 788 1110
+- WhatsApp técnico: +57 320 7881151
+- WhatsApp Postventa: +57 320 7881110
+- WhatsApp Postventa: +57 314 8028482
 - Web: https://jlc-electronics.com/servicio-tecnico/
-- Horario: lunes a sábado, 8:00 a.m. a 5:00 p.m.
+- O escríbenos al correo: analistapostventa@electromillonaria.co
 Para garantías, el cliente debe tener factura de compra y el producto en buen estado externo.`;
 
 		const { system, user } = buildGemmaPrompt({
