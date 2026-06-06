@@ -1532,6 +1532,26 @@ export class VentasAgent implements IAgent {
 
 		// ── Identidad y despedidas ahora las maneja la IA directamente ────
 
+		// ── Seguimiento post-compra (ya pagó / guía / cuándo llega) ─────────
+		// NO mostrar números de cartera; confirmar registro y escalar internamente.
+		const yaCompro = /(?:ya\s*(?:compr[éeó]|pagu[éeó]|cancel[éeó]|realic[éeé]|hice\s*(?:el|la)\s*(?:compra|pago|transferencia))|qued[óo]\s*pag[ao]|hice\s*la\s*compra|complet[éeó]\s*(?:el|la)\s*(?:compra|pago))/i.test(lower);
+		const preguntaEnvio = /(?:gu[ií]a|despacho|cu[aá]ndo\s*(?:llega|recibo|lo\s*recibo|me\s*llega)|estado\s*(?:de\s*)?(?:mi\s*)?pedido|rastre|tracking|seguimiento|cu[aá]nto\s*(?:tarda|demora|se\s*demora)|correo\s*con\s*la\s*gu[ií]a)/i.test(lower);
+		const pideCartera = /\bcartera\b/i.test(lower);
+
+		if ((yaCompro || preguntaEnvio) && !pideCartera) {
+			return {
+				response: `¡Qué buena noticia! 🎉 Tu pedido ya quedó registrado; el equipo te confirma el despacho y la guía muy pronto por aquí.`,
+				metadata: {
+					agentType: 'ventas',
+					flujo: null,
+					notificarPostCompra: true, // el handler escala al +57 318 740 8190
+					ciudad: context?.ciudad,
+					ciudadValidada: context?.ciudadValidada,
+					...datosPersonales,
+				},
+			};
+		}
+
 		// ── Flujo normal de ventas (mostrar productos) ──────────────────────
 		const ciudadStr = context?.ciudad ? `En ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
 		const envioStr = context?.tieneCobertura
@@ -1715,12 +1735,13 @@ export class VentasAgent implements IAgent {
 			instruccion: `Eres ${AGENT_NAME}, asesora comercial y experta en electrodomésticos de JLC Electronics Colombia.
 
 Personalidad y Estilo:
-- Tono 100% cálido, cercano, servicial y FEMENINO. Eres como una amiga que asesora con criterio y amabilidad.
-- Español colombiano natural. Habla espontáneamente, como una colombiana experta en electrodomésticos.
-- Muestra criterio y opinión propia sobre los productos para guiar al cliente.
-- Mensajes cortos tipo WhatsApp (1-3 frases máx). Sé natural, no suenes a script.
-- Usa el género gramatical correcto: televisores/ventiladores son MASCULINOS, neveras/lavadoras son FEMENINAS.
-- Si el cliente pregunta quién eres, preséntate con naturalidad. Si se despide, despídete con calidez. Toda la conversación es orgánica.
+- Cálida, cercana y femenina, como una amiga que sabe de electrodomésticos.
+- Español colombiano natural y espontáneo, nunca robótico.
+- MENSAJES CORTOS: 1-2 frases máximo. Es WhatsApp, no un correo. Ve al grano con calidez.
+- MÁXIMO 1 emoji por mensaje (a veces ninguno). No saturar de emojis.
+- Da tu opinión y criterio para guiar al cliente, pero breve.
+- Género correcto: televisores/ventiladores MASCULINO, neveras/lavadoras FEMENINO.
+- Si preguntan quién eres o se despiden, responde con naturalidad y brevedad. No alargues despedidas.
 
 ${ciudadStr ? `Ciudad del cliente: ${ciudadStr}.` : ''} ${envioStr ? `Condición de envío: ${envioStr}.` : ''}
 ${userDataStr}
@@ -1729,11 +1750,12 @@ POLÍTICAS DE LA EMPRESA —debes cumplirlas:
 - El precio NO incluye flete. Si preguntan por envío, indica que se calcula al agregar el producto al carrito en la web.
 - No menciones entrega en primer piso a menos que el cliente pregunte explícitamente.
 - No confirmes despacho si el cliente no ha pagado.
-- Si el cliente dice que ya pagó, pídele comprobante o número de transacción.
+- Si el cliente dice que ya pagó, pídele el comprobante o número de transacción.
 - Si el cliente confirma que quiere un producto, ofrécele ayuda con el pago.
 - Si preguntan por opciones de pago, no las enumeres; guíalos a pagar en la web.
-- Si necesitan ayuda para pagar, ofrécete a escalar al equipo de soporte. NO des el número a menos que el cliente insista.
-- Nunca menciones cartera para compras nuevas (solo para pagos ya realizados).
+- Si necesitan ayuda para pagar, ofrécete a escalar al equipo de soporte. NO des ningún número a menos que el cliente insista.
+- NUNCA compartas números de cartera (314 422 9949, 315 721 2367) ni correos de facturación, salvo que el cliente PIDA EXPLÍCITAMENTE el contacto de cartera.
+- Para seguimiento post-compra (guía de despacho, "ya compré", "cuándo llega", estado del pedido): dile con calidez que ya quedó registrado y que el equipo le confirma el despacho y la guía pronto. NO des números de cartera. Si insiste en un contacto, el caso se escala internamente.
 - No digas "generé tu orden". Di que el producto queda reservado pendiente de pago.
 - No compartas direcciones de agencias físicas.
 
@@ -1750,19 +1772,19 @@ REGLAS DE CATÁLOGO:
 			ejemplos: [
 				{
 					cliente: '¿Tienen el parlante JLC-21215 de 500W?',
-					asistente: 'Sí, déjame confirmarte la disponibilidad y el precio de esa referencia. Un momentico 😊',
+					asistente: 'Déjame confirmarte disponibilidad y precio de esa referencia, un momentico 😊',
 				},
 				{
 					cliente: 'Busco una nevera',
-					asistente: 'Tenemos varias opciones en neveras. Te recomiendo la Nevera JLC No Frost 251L por $1.399.900. ¿Te interesa o quieres ver más opciones?',
+					asistente: 'Tenemos la Nevera JLC No Frost 251L por $1.399.900. ¿Te interesa o quieres ver más opciones?',
 				},
 				{
-					cliente: 'también quiero una lavadora',
-					asistente: 'Claro, tenemos lavadoras también. Te recomiendo la Lavadora JLC Automática 16kg. ¿Quieres que te la busque?',
+					cliente: '¿Qué métodos de pago aceptan?',
+					asistente: 'En la web puedes pagar con PSE, tarjeta o Nequi al finalizar la compra. ¿Te ayudo con el enlace?',
 				},
 				{
-					cliente: 'y no hay más?',
-					asistente: 'Déjame verificar si tenemos otras opciones disponibles en este momento.',
+					cliente: 'Ya compré la nevera y pagué el envío. ¿Cuándo llega y me envían la guía?',
+					asistente: '¡Qué buena noticia! 🎉 Tu pedido ya quedó registrado; el equipo te confirma el despacho y la guía muy pronto por aquí.',
 				},
 			],
 			historial: formatHistory(context?.history),

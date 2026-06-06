@@ -449,6 +449,21 @@ export async function processIncomingMessage(
 			}
 		}
 
+		if (metadata?.notificarPostCompra) {
+			const WA_POSTCOMPRA = process.env.WA_ESCALAMIENTO || '573187408190';
+			const ciudadInfo = metadata?.ciudad || userData.ciudad || 'ciudad no especificada';
+			const productoInfo = metadata?.productoCompra || userData.productoSolicitado || 'producto pendiente';
+			const nombreInfo = userData.nombre || 'nombre pendiente';
+			const notifMsg = `📦 POST-COMPRA\nCliente: ${nombreInfo}\nCiudad: ${ciudadInfo}\nProducto: ${productoInfo}\nTeléfono: ${realPhone}\nSolicita seguimiento de despacho/guía. Requiere asistencia.`;
+			try {
+				const { sendMessage: sendWADirect } = await import('./whatsapp.js');
+				await sendWADirect(WA_POSTCOMPRA, notifMsg);
+				logger.info({ phone, tipo: 'post_compra' }, 'Notificación post-compra enviada');
+			} catch (e) {
+				logger.error({ error: e }, 'Error enviando notificación post-compra');
+			}
+		}
+
 		if (metadata?.notificarPuntoFisico || metadata?.escalado) {
 			const WA_ESCALAMIENTO = process.env.WA_ESCALAMIENTO || '573187408190';
 			const ciudadInfo = metadata?.ciudad || userData.ciudad || 'ciudad no especificada';
