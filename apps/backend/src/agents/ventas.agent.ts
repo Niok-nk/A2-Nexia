@@ -897,13 +897,16 @@ export class VentasAgent implements IAgent {
 				const intro = esPrimeraVez
 					? `${saludo} 👋 Soy ${AGENT_NAME}, tu asesora en JLC Electronics, la marca de los colombianos.\n\n`
 					: '';
+				const productoDetectado = detectarCategoria(message);
+				const meta: any = {
+					agentType: 'ventas',
+					flujo: 'esperando_ciudad',
+					pendingMessage: message,
+				};
+				if (productoDetectado) meta.productoSolicitado = productoDetectado;
 				return {
 					response: `${intro}¿Desde dónde nos escribes? 📍`,
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'esperando_ciudad',
-						pendingMessage: message,
-					},
+					metadata: meta,
 				};
 			}
 
@@ -916,6 +919,7 @@ export class VentasAgent implements IAgent {
 					ciudad: ciudadDetectada,
 					tieneCobertura: true,
 				};
+				const productoDetectado = detectarCategoria(message);
 				return {
 					response: `¡Qué bien! A ${ciudadDetectada.charAt(0).toUpperCase() + ciudadDetectada.slice(1)} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
 					metadata: {
@@ -925,6 +929,7 @@ export class VentasAgent implements IAgent {
 						tieneCobertura: true,
 						flujo: 'esperando_modalidad',
 						pendingMessage: message,
+						...(productoDetectado && { productoSolicitado: productoDetectado }),
 					},
 				};
 			}
@@ -936,6 +941,7 @@ export class VentasAgent implements IAgent {
 				tieneCobertura: false,
 			};
 			const msgSinCobertura = (await generarMensajeSinCobertura(ciudadDetectada, context?.pendingMessage || '')).trim();
+			const productoDetectado = context?.pendingMessage ? detectarCategoria(context.pendingMessage) : null;
 			return {
 				response: msgSinCobertura,
 				metadata: {
@@ -945,6 +951,8 @@ export class VentasAgent implements IAgent {
 					tieneCobertura: false,
 					modalidad: 'contado',
 					flujo: null,
+					pendingMessage: context?.pendingMessage,
+					...(productoDetectado && { productoSolicitado: productoDetectado }),
 				},
 			};
 		}
@@ -1505,6 +1513,7 @@ export class VentasAgent implements IAgent {
 					} else {
 						// No identificó un producto específico → mostrar opciones
 						const lista = productosDisponibles.slice(0, 5).map((p: any, i: number) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+						const terminoLegible = (context?.pendingMessage && detectarCategoria(context.pendingMessage)) || cat;
 						return {
 							response: `¡Claro! Estas son las opciones que tenemos:\n\n${lista}\n\nDime cuál te interesa (por número) y te paso las medidas y detalles exactos 😊`,
 							metadata: {
@@ -1513,8 +1522,8 @@ export class VentasAgent implements IAgent {
 								ciudadValidada: true,
 								tieneCobertura: context?.tieneCobertura,
 								modalidad: context?.modalidad,
-								terminoBusqueda: terminoParaBuscar,
-								productoSolicitado: terminoParaBuscar,
+								terminoBusqueda: terminoLegible,
+								productoSolicitado: terminoLegible,
 								ultimaBusqueda: { results: productosDisponibles, categoria: cat, productoIndex: 0 },
 								flujo: null,
 								...datosPersonales,
@@ -1800,7 +1809,7 @@ export class VentasAgent implements IAgent {
 		const { system, user } = buildGemmaPrompt({
 			instruccion: `Eres ${AGENT_NAME}, asesora comercial y experta en electrodomésticos de JLC Electronics Colombia.
 Personalidad y Estilo:
-- Tono 100% cálido, cercano, servicial y FEMENINO. Eres como una amiga que asesora con criterio y cariño.
+- Tono 100% cálido, cercano, servicial y FEMENINO. Eres como una amiga que asesora con criterio y amabilidad.
 - Español colombiano natural (usa expresiones como "¡Ay, qué chévere!", "Te cuento que...", "Mira, te recomiendo...", "Qué pena pero...", "¡Ay, me alegra!").
 - EVITA palabras masculinas o de jerga: NO uses "bacano", "buenazo", "genial" — usa "chévere", "qué maravilla", "ideal", "perfecto".
 - Muestra criterio y opinión propia sobre los productos para guiar al cliente.
