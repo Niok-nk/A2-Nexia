@@ -1381,25 +1381,7 @@ export class VentasAgent implements IAgent {
 					}
 				}
 
-				if (products.length > 0) {
-					const lista = products.slice(0, 6).map((p: any, i: number) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
-					return {
-						response: `¡Listo! Mira lo que encontré para ti:\n\n${lista}\n\n¿Cuál te llama la atención? Dime el número y te doy más detalles 😊`,
-						metadata: {
-							agentType: 'ventas',
-							modalidad: 'contado',
-							ciudad: context?.ciudad,
-							ciudadValidada: true,
-							tieneCobertura: context?.tieneCobertura,
-							terminoBusqueda,
-							ultimaBusqueda: { results: products, categoria: perfilState.categoria, productoIndex: 0 },
-							flujo: null,
-							presupuesto: perfilState.answers.presupuesto,
-							productoSolicitado: terminoBusqueda,
-						},
-					};
-				}
-				context = { ...context, flujo: null, terminoBusqueda };
+				context = { ...context, flujo: null, terminoBusqueda, ultimaBusqueda: products.length > 0 ? { results: products, categoria: perfilState.categoria, productoIndex: 0 } : context?.ultimaBusqueda };
 				if (perfilState.answers.presupuesto) {
 					datosPersonales.presupuesto = perfilState.answers.presupuesto;
 				}
@@ -1459,18 +1441,8 @@ export class VentasAgent implements IAgent {
 				} catch { /* continuar sin productos */ }
 
 				if (productosDisponibles.length === 0) {
-					return {
-						response: `En este momento no tenemos ${terminoParaBuscar} disponible en nuestro catálogo. ¿Hay algo más en lo que te pueda ayudar? 😊`,
-						metadata: {
-							agentType: 'ventas',
-							ciudadValidada: context?.ciudadValidada,
-							ciudad: context?.ciudad,
-							modalidad: context?.modalidad,
-							tieneCobertura: context?.tieneCobertura,
-							productoSolicitado: terminoParaBuscar,
-							...datosPersonales,
-						},
-					};
+					// Sin resultados → la IA responde naturalmente según el contexto
+					context = { ...context, flujo: null, terminoBusqueda: terminoParaBuscar, ultimaBusqueda: undefined };
 				}
 
 				const shortcuts = detectarShortcuts(message, cat);
@@ -1511,23 +1483,14 @@ export class VentasAgent implements IAgent {
 						// Cae al bloque de preguntaSeguimiento/Gemma más abajo para
 						// responder las medidas usando los Detalles del catálogo.
 					} else {
-						// No identificó un producto específico → mostrar opciones
-						const lista = productosDisponibles.slice(0, 5).map((p: any, i: number) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+						// No identificó producto exacto → pasar productos disponibles a la IA
 						const terminoLegible = (context?.pendingMessage && detectarCategoria(context.pendingMessage)) || cat;
-						return {
-							response: `¡Claro! Estas son las opciones que tenemos:\n\n${lista}\n\nDime cuál te interesa (por número) y te paso las medidas y detalles exactos 😊`,
-							metadata: {
-								agentType: 'ventas',
-								ciudad: context?.ciudad,
-								ciudadValidada: true,
-								tieneCobertura: context?.tieneCobertura,
-								modalidad: context?.modalidad,
-								terminoBusqueda: terminoLegible,
-								productoSolicitado: terminoLegible,
-								ultimaBusqueda: { results: productosDisponibles, categoria: cat, productoIndex: 0 },
-								flujo: null,
-								...datosPersonales,
-							},
+						context = {
+							...context,
+							flujo: null,
+							ultimaBusqueda: { results: productosDisponibles, categoria: cat, productoIndex: 0 },
+							terminoBusqueda: terminoLegible,
+							productoSolicitado: terminoLegible,
 						};
 					}
 				}
@@ -1567,30 +1530,7 @@ export class VentasAgent implements IAgent {
 			}
 		}
 
-		// ── Preguntas sobre la identidad del agente ─────────────────────────
-		if (/c[oó]mo te llamas|qui[eé]n eres|te llamas|como te llam|como es tu nombre|cu[aá]l es tu nombre|eres humana|eres robot|eres inteligencia|qui[eé]n soy|qui[eé]n es sara|sara qui[eé]n|presentate|pres[eé]ntate/i.test(message)) {
-			return {
-				response: `Soy ${AGENT_NAME}, tu asesora virtual de JLC Electronics, la marca de los colombianos. 😊 ¿En qué te puedo ayudar?`,
-				metadata: {
-					agentType: 'ventas',
-					ciudadValidada: context?.ciudadValidada,
-					ciudad: context?.ciudad,
-				},
-			};
-		}
-
-		// ── Despedidas ───────────────────────────────────────────────────────
-		if (/^(?:chao|adi[oó]s|bye|nos vemos|hasta luego|hasta pronto|cuídese|cuídate|gracias.*(?:chao|adi[oó]s|bye)|ya me voy|me retiro|buenas noches|buen día|buena tarde|que tengas buen|que est[eé]s bien|fue un placer|un placer|nos hablamos|luego|despu[eé]s te escribo|quedo atenta|quedo atento|gracias por todo|muchas gracias.*(?:adi[oó]s|bye|chao)|me voy|chao gracias|adi[oó]s gracias)\s*$/i.test(message.trim().toLowerCase())) {
-			return {
-				response: `¡Hasta luego! ${context?.userData?.nombre ? `Fue un placer ayudarte, ${context.userData.nombre.split(/\s+/)[0]}. ` : ''}Cuando necesites algo más, aquí estaré. ¡Cuídate mucho! 😊`,
-				metadata: {
-					agentType: 'ventas',
-					flujo: null,
-					ciudadValidada: context?.ciudadValidada,
-					ciudad: context?.ciudad,
-				},
-			};
-		}
+		// ── Identidad y despedidas ahora las maneja la IA directamente ────
 
 		// ── Flujo normal de ventas (mostrar productos) ──────────────────────
 		const ciudadStr = context?.ciudad ? `En ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
@@ -1689,10 +1629,8 @@ export class VentasAgent implements IAgent {
 					}
 				}
 			} else {
-				return {
-					response: `${ciudadStr} ${envioStr}. ¿Qué referencia o modelo buscas? Así te muestro lo que tenemos disponible 😊`,
-					metadata: { agentType: 'ventas', ciudad: context?.ciudad, ciudadValidada: context?.ciudadValidada },
-				};
+				// Sin búsqueda previa → la IA responde naturalmente
+				products = [];
 			}
 		}
 
@@ -1709,8 +1647,6 @@ export class VentasAgent implements IAgent {
 				productoBuscado = productoPrevio;
 				terminoBusqueda = productoPrevio;
 			}
-
-			const esConsultaProducto = /(?:tiene[ns]?|hay|venden|busco|quiero|necesito|me interesa|consulta|precio|cu[aá]nto)/i.test(message);
 
 			if (context?.productosPreCargados?.length > 0 && !extraerSKU(message) && !extraerPotencia(message)) {
 				// Solo usar pre-cargados si el mensaje NO trae SKU ni potencia específica
@@ -1729,37 +1665,6 @@ export class VentasAgent implements IAgent {
 						if (resultado.estrategia.startsWith('sku') || resultado.estrategia.startsWith('potencia') || resultado.estrategia.startsWith('categoria_potencia')) {
 							terminoBusqueda = resultado.sku || extraerPotencia(message) || terminoBusqueda;
 						}
-					}
-
-					if ((!products || products.length === 0) && esConsultaProducto) {
-						const sku = extraerSKU(message);
-						const potencia = extraerPotencia(message);
-						let nombreProducto = busquedaMatch?.[1]?.trim().toLowerCase() || terminoBusqueda.toLowerCase();
-						if (sku) nombreProducto = `la referencia ${sku}`;
-						else if (potencia) nombreProducto = `un producto de ${potencia}`;
-						return {
-							response: `Qué pena, en este momento no encuentro ${nombreProducto} en el catálogo. ¿Quieres que te muestre las opciones que sí tenemos disponibles? 😊`,
-							metadata: {
-								agentType: 'ventas',
-								ciudadValidada: context?.ciudadValidada,
-								ciudad: context?.ciudad,
-								...datosPersonales,
-							},
-						};
-					}
-
-					if (!products || products.length === 0) {
-						return {
-							response: `Cuéntame, ¿qué producto te gustaría ver? Tenemos neveras, lavadoras, televisores, congeladores, parlantes, y más. 😊`,
-							metadata: {
-								agentType: 'ventas',
-								ciudadValidada: context?.ciudadValidada,
-								ciudad: context?.ciudad,
-								modalidad: context?.modalidad,
-								tieneCobertura: context?.tieneCobertura,
-								...datosPersonales,
-							},
-						};
 					}
 
 					hayProductos = products?.length > 0;
@@ -1808,41 +1713,40 @@ export class VentasAgent implements IAgent {
 
 		const { system, user } = buildGemmaPrompt({
 			instruccion: `Eres ${AGENT_NAME}, asesora comercial y experta en electrodomésticos de JLC Electronics Colombia.
+
 Personalidad y Estilo:
 - Tono 100% cálido, cercano, servicial y FEMENINO. Eres como una amiga que asesora con criterio y amabilidad.
-- Español colombiano natural (usa expresiones como "¡Ay, qué chévere!", "Te cuento que...", "Mira, te recomiendo...", "Qué pena pero...", "¡Ay, me alegra!").
-- EVITA palabras masculinas o de jerga: NO uses "bacano", "buenazo", "genial" — usa "chévere", "qué maravilla", "ideal", "perfecto".
+- Español colombiano natural. Habla espontáneamente, como una colombiana experta en electrodomésticos.
 - Muestra criterio y opinión propia sobre los productos para guiar al cliente.
-- Mensajes cortos tipo WhatsApp (máximo 1-3 frases por respuesta). Nada de listados enormes.
-- IMPORTANTE: Usa el género gramatical correcto según el producto. Televisores y ventiladores son MASCULINOS ("el de 55 pulgadas", "el ventilador"). Neveras y lavadoras son FEMENINAS ("la nevera de 20 pies"). NO digas "la de 55 pulgadas" para un televisor.
+- Mensajes cortos tipo WhatsApp (1-3 frases máx). Sé natural, no suenes a script.
+- Usa el género gramatical correcto: televisores/ventiladores son MASCULINOS, neveras/lavadoras son FEMENINAS.
+- Si el cliente pregunta quién eres, preséntate con naturalidad. Si se despide, despídete con calidez. Toda la conversación es orgánica.
 
 ${ciudadStr ? `Ciudad del cliente: ${ciudadStr}.` : ''} ${envioStr ? `Condición de envío: ${envioStr}.` : ''}
 ${userDataStr}
-POLÍTICA DE ENTREGA: NO menciones que la entrega es en primer piso a menos que el cliente pregunte específicamente por condiciones de entrega o envío.
-- El precio del producto NO incluye flete ni costo de envío. Si el cliente pregunta cuánto cuesta el envío, NUNCA digas que ya está incluido. Dale el enlace del producto y explícale que lo agregue al carrito de compras en la web, y desde el carrito puede calcular el valor del envío a su ciudad.
+
+POLÍTICAS DE LA EMPRESA —debes cumplirlas:
+- El precio NO incluye flete. Si preguntan por envío, indica que se calcula al agregar el producto al carrito en la web.
+- No menciones entrega en primer piso a menos que el cliente pregunte explícitamente.
+- No confirmes despacho si el cliente no ha pagado.
+- Si el cliente dice que ya pagó, pídele comprobante o número de transacción.
+- Si el cliente confirma que quiere un producto, ofrécele ayuda con el pago.
+- Si preguntan por opciones de pago, no las enumeres; guíalos a pagar en la web.
+- Si necesitan ayuda para pagar, ofrécete a escalar al equipo de soporte. NO des el número a menos que el cliente insista.
+- Nunca menciones cartera para compras nuevas (solo para pagos ya realizados).
+- No digas "generé tu orden". Di que el producto queda reservado pendiente de pago.
+- No compartas direcciones de agencias físicas.
+
 REGLAS DE CATÁLOGO:
-- Si el cliente pregunta por detalles, especificaciones, características o diferencias de un producto que YA está en el CATÁLOGO, respóndele usando la información de "Detalles" del catálogo. NO hagas una nueva búsqueda.
-- Si el cliente menciona "la primera opción", "el de 55", "el primero", o algo similar, identifica a qué producto del catálogo se refiere y dale la información pedida.
-- Recomienda máximo 1-2 productos del CATÁLOGO con nombre, precio y enlace.
-- Si hay productos, preséntalos de forma natural y breve.
-- Si NO hay productos en el catálogo, dilo honestamente.
-- NUNCA inventes productos, precios ni disponibilidad.
-- NUNCA compartas direcciones de agencias físicas.
-- NUNCA contradigas la condición de envío ya comunicada al cliente.
-- Si el cliente ya dio datos (nombre, cédula, ciudad, presupuesto), úsalos sin pedirlos de nuevo.
-- Si el cliente pide un producto NUEVO o diferente al anterior, ayúdale con eso.
-- PROHIBIDO confirmar envío o despacho si el cliente no ha pagado. Di "tan pronto se confirme el pago".
-- Si el cliente dice que ya pagó, pide el comprobante o número de transacción.
-- Cuando el cliente confirma que quiere un producto ("sí", "dalo", "resérvalo", etc.), ofrécele ayuda con el pago: pregúntale si necesita asesoramiento para pagar o si quiere que le expliques las opciones de pago.
-- Si el cliente pregunta por las opciones de pago, NO las enumeres. Interprétalo como que necesita guía: pregúntale si quiere que le expliques cómo funciona el pago en la web o si tiene alguna duda específica.
-- Si el cliente necesita ayuda más detallada para pagar, ofrécete a enviarle un mensaje a un asesor de soporte. NO muestres el número. Di algo como "déjame enviar tu información a nuestro equipo de soporte para que te ayuden con el pago".
-- Solo si el cliente INSISTE en que necesita ayuda porque no puede pagar, dile "con gusto, te paso el número de nuestro asesor de soporte +57 318 740 8190 para que te ayuden directamente".
-- NUNCA menciones cartera ni compartas números de cartera para temas de compra o pago. Cartera solo es para consultas de pagos ya realizados o estados de cuenta, no antes de comprar.
-- NUNCA digas "generé tu orden de compra" ni "tu orden quedó lista". Di que el producto queda reservado pendiente a su pago.
-- Si NO encontraste el producto exacto que busca, NO le recomiendes productos de otra categoría.
-- NUNCA recomiendes productos que el cliente NO pidió.
-- Si el cliente menciona una referencia/SKU (ej: "JLC-21215", "JLC-500W") o una potencia ("500W RMS") y SÍ está en el CATÁLOGO, confírmaselo y dale el enlace. Si NO está, dilo con naturalidad y ofrece mostrarle las opciones similares que sí tenemos (sin afirmar que "no existe", solo que no lo tienes disponible).
-- Si el cliente pregunta por las medidas/dimensiones de un producto específico que YA identificó (el #1 del catálogo), respóndele con los datos que aparezcan en sus "Detalles". Si los Detalles NO incluyen las medidas exactas, dilo con honestidad: di que vas a confirmar las medidas exactas con el equipo y ofrécele el enlace del producto donde puede verlas. NO vuelvas a mostrarle la lista completa de productos si ya eligió uno.`,
+- Usa el CATÁLOGO de productos para responder. Si hay productos, preséntalos de forma natural (máx 1-2 recomendaciones).
+- Si el cliente pregunta detalles/especificaciones de un producto del catálogo, responde usando su información de "Detalles".
+- Si el cliente ya identificó un producto (por nombre, número o SKU), concéntrate en ese producto.
+- Si no hay productos en el catálogo, dilo con honestidad y pregunta qué busca.
+- Si el cliente pide un producto nuevo o diferente, ayúdale con eso.
+- Si menciona un SKU o referencia que SÍ está en el catálogo, confírmaselo y dale el enlace.
+- Si menciona un SKU o referencia que NO está, dilo naturalmente sin afirmar que "no existe".
+- No inventes productos, precios ni disponibilidad.
+- No recomiendes productos de otra categoría si no encontraste lo que busca.`,
 			ejemplos: [
 				{
 					cliente: '¿Tienen el parlante JLC-21215 de 500W?',
