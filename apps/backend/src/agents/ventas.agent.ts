@@ -1431,7 +1431,13 @@ export class VentasAgent implements IAgent {
 				};
 			}
 		}
-		const catDetectada = detectarCategoria(message);
+		let catDetectada = detectarCategoria(message);
+		// Si el mensaje actual no tiene categoría pero es pregunta de medidas/specs,
+		// inferir categoría desde el pendingMessage o productoSolicitado anterior
+		if (!catDetectada && esPreguntaEspecificacion(message)) {
+			const textoAnterior = context?.pendingMessage || context?.userData?.productoSolicitado || '';
+			if (textoAnterior) catDetectada = detectarCategoria(textoAnterior);
+		}
 		if ((categoriaGeneral || catDetectada) && context?.flujo !== 'perfilando') {
 			const cat = catDetectada;
 			if (cat) {
