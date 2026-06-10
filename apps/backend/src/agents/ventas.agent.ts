@@ -1555,10 +1555,37 @@ export class VentasAgent implements IAgent {
 		// ── Detectar intención de compra ("me gusta", "cómo pago", "lo quiero") ─
 		const tieneProductos = context?.ultimaBusqueda?.results?.length > 0;
 		const compraIntencion = /(?:me\s*gusta|lo\s*quiero|lo\s*compro|c[oó]mo\s*(?:pago|compro|adquiero)|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|ese)|dalo|res[eé]rvalo|lo\s*reservo|comprar|pagar)/i.test(message);
+
+		// Intentar emparejar el precio mencionado en el mensaje con un producto de la búsqueda anterior
+		function extraerPrecio(texto: string): number | null {
+			const colMatch = texto.match(/\d{1,3}\.\d{3}(?:\.\d{3})*/);
+			if (colMatch) return parseInt(colMatch[0].replace(/\./g, ''), 10);
+			const nums = texto.match(/\d{4,9}/g);
+			if (nums) {
+				for (const n of nums) {
+					const val = parseInt(n, 10);
+					if (val >= 100000 && val <= 50000000) return val;
+				}
+			}
+			return null;
+		}
+
+		const precioMencionado = extraerPrecio(message);
+		let productoPorPrecio: any = null;
+		if (precioMencionado && context?.ultimaBusqueda?.results) {
+			productoPorPrecio = context.ultimaBusqueda.results.find((p: any) => {
+				const pp = parseFloat(p.price || '0');
+				return pp > 0 && Math.abs(pp - precioMencionado) / precioMencionado < 0.1;
+			}) || null;
+		}
+
 		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago') {
-			const productoURL = context?.ultimaBusqueda?.results?.[0]?.permalink || context?.productoURL;
+			const prod = productoPorPrecio || context?.ultimaBusqueda?.results?.[0];
+			const productoURL = prod?.permalink || context?.productoURL;
+			const nombreProducto = prod?.name || context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			const ref = prod?.sku ? ` (ref. ${prod.sku})` : '';
 			return {
-				response: `¡Claro! Con gusto te ayudo con el pago. ¿Cómo prefieres pagar?\n\n1️⃣ Transferencia bancaria (medios autorizados)\n2️⃣ En nuestra página web (PSE, Tarjeta, Nequi)${context?.tieneCobertura ? '\n3️⃣ En un punto físico' : ''}\n\nDime el número de tu opción y te doy los pasos 😊`,
+				response: `¡Con gusto! Te ayudo con el pago de ${nombreProducto}${ref} 😊 ¿Cómo prefieres pagar?\n\n1️⃣ Transferencia bancaria\n2️⃣ En la web (PSE, Tarjeta, Nequi)${context?.tieneCobertura ? '\n3️⃣ En un punto físico' : ''}`,
 				nextStage: 'PROPOSAL',
 				metadata: {
 					agentType: 'ventas',
@@ -1567,7 +1594,7 @@ export class VentasAgent implements IAgent {
 					ciudadValidada: true,
 					tieneCobertura: context?.tieneCobertura,
 					productoURL,
-					productoSolicitado: context?.ultimaBusqueda?.categoria || context?.ultimaBusqueda?.results?.[0]?.name || context?.terminoBusqueda,
+					productoSolicitado: nombreProducto,
 					ultimaBusqueda: context?.ultimaBusqueda,
 					...datosPersonales,
 				},
