@@ -1552,6 +1552,28 @@ export class VentasAgent implements IAgent {
 			};
 		}
 
+		// ── Detectar intención de compra ("me gusta", "cómo pago", "lo quiero") ─
+		const tieneProductos = context?.ultimaBusqueda?.results?.length > 0;
+		const compraIntencion = /(?:me\s*gusta|lo\s*quiero|lo\s*compro|c[oó]mo\s*(?:pago|compro|adquiero)|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|ese)|dalo|res[eé]rvalo|lo\s*reservo|comprar|pagar)/i.test(message);
+		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago') {
+			const productoURL = context?.ultimaBusqueda?.results?.[0]?.permalink || context?.productoURL;
+			return {
+				response: `¡Claro! Con gusto te ayudo con el pago. ¿Cómo prefieres pagar?\n\n1️⃣ Transferencia bancaria (medios autorizados)\n2️⃣ En nuestra página web (PSE, Tarjeta, Nequi)${context?.tieneCobertura ? '\n3️⃣ En un punto físico' : ''}\n\nDime el número de tu opción y te doy los pasos 😊`,
+				nextStage: 'PROPOSAL',
+				metadata: {
+					agentType: 'ventas',
+					flujo: 'seleccion_pago',
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					tieneCobertura: context?.tieneCobertura,
+					productoURL,
+					productoSolicitado: context?.ultimaBusqueda?.categoria || context?.ultimaBusqueda?.results?.[0]?.name || context?.terminoBusqueda,
+					ultimaBusqueda: context?.ultimaBusqueda,
+					...datosPersonales,
+				},
+			};
+		}
+
 		// ── Flujo normal de ventas (mostrar productos) ──────────────────────
 		const ciudadStr = context?.ciudad ? `En ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
 		const envioStr = context?.tieneCobertura
