@@ -1167,7 +1167,7 @@ export class VentasAgent implements IAgent {
 				} catch { /* no bloquear */ }
 
 				return {
-					response: `No te preocupes, ya le notifiqué a nuestro equipo comercial para que te ayude directamente. Un asesor te va a escribir por aquí en un momentico. 💪`,
+					response: `No te preocupes, ya le notifiqué a nuestro equipo comercial para que te ayude directamente. Un asesor te va a escribir por aquí en un momentico. 😊`,
 					metadata: {
 						agentType: 'ventas',
 						flujo: null,
@@ -1552,6 +1552,14 @@ export class VentasAgent implements IAgent {
 			};
 		}
 
+		// ── Si está en flujo de pago pero pide un producto nuevo, reiniciar ──
+		let resetFlujo = false;
+		const esNuevoProductoEnPago = context?.flujo === 'seleccion_pago' && /(?:y\s*(?:de|en|para)\s*(?:los|las|un|una)?|qu[e\u00e9]\s*(?:tal|hay\s*de|me\s*recomiendas|otr[oa]s?\s*opciones)|recomiendas|recomi[e\u00e9]ndame|tienes?\s*(?:televisores?|neveras?|lavadoras?|congeladores?|tvs?|licuadoras?|parlantes?|aires?\s*(?:acondicionado)?|ventiladores?|estufas?|hornos?|microondas?|equipos?\s*de\s*sonido|monitores?|pantallas?|aspiradoras?|planchas?)|(?:y\s*)?(?:en\s*)?(?:televisores|neveras|lavadoras|congeladores|tvs|licuadoras|parlantes|sonido|aire|ventiladores|electrodom[e\u00e9]sticos))/i.test(message);
+		if (esNuevoProductoEnPago) {
+			context = { ...context, flujo: null, ultimaBusqueda: undefined, terminoBusqueda: message };
+			resetFlujo = true;
+		}
+
 		// ── Detectar intención de compra ("me gusta", "cómo pago", "lo quiero") ─
 		const tieneProductos = context?.ultimaBusqueda?.results?.length > 0;
 		const compraIntencion = /(?:me\s*gusta|lo\s*quiero|lo\s*compro|c[oó]mo\s*(?:pago|compro|adquiero)|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|ese)|dalo|res[eé]rvalo|lo\s*reservo|comprar|pagar)/i.test(message);
@@ -1579,7 +1587,7 @@ export class VentasAgent implements IAgent {
 			}) || null;
 		}
 
-		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago') {
+		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago' && !resetFlujo) {
 			const prod = productoPorPrecio || context?.ultimaBusqueda?.results?.[0];
 			const productoURL = prod?.permalink || context?.productoURL;
 			const nombreProducto = prod?.name || context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
@@ -1855,6 +1863,7 @@ REGLAS DE CATÁLOGO:
 				ciudad: context?.ciudad,
 				modalidad: context?.modalidad,
 				tieneCobertura: context?.tieneCobertura,
+				...(resetFlujo ? { flujo: null } : {}),
 				...(productoBuscado.length < 30 && productoBuscado.split(/\s+/).length <= 5 && !/[?¿]/.test(productoBuscado) ? { productoSolicitado: productoBuscado } : {}),
 				ultimaBusqueda: products.length > 0
 					? { results: products.slice(0, 6), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }

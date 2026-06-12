@@ -573,7 +573,7 @@ FORMATO DE RESPUESTA OBLIGATORIO:
 - Si no estás seguro de algo, di "déjame verificar" en vez de inventar.
 - Tu respuesta empieza directamente con el mensaje al cliente.
 	- Usa un tono cálido como si fueras una amiga que trabaja en la tienda.
-	- Incluye emojis de forma natural y variada para hacer la conversación más cálida e interactiva (😊💪🎉✨💙🔥👌📋📦🚚✅❄️📺🔧🛒💳).`;
+	- Incluye emojis de forma natural y variada para hacer la conversación más cálida e interactiva (😊🎉✨💙🔥👌📋📦🚚✅❄️📺🔧🛒💳).`;
 
 	const ejemplosTexto = opts.ejemplos
 		.map((e) => `Cliente: ${e.cliente}\nAsistente: ${e.asistente}`)
