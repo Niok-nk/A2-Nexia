@@ -811,7 +811,10 @@ export class VentasAgent implements IAgent {
 
 			if (quiereContado) {
 				const msgOriginal = context?.pendingMessage || '';
-				const terminoIA = await extraerProductoConIA(msgOriginal);
+				let terminoIA = await extraerProductoConIA(msgOriginal);
+				if (!terminoIA && msgOriginal.length > 3) {
+					terminoIA = msgOriginal;
+				}
 				if (terminoIA) {
 					let products: any[] = [];
 					try {
@@ -875,6 +878,25 @@ export class VentasAgent implements IAgent {
 							},
 						};
 					}
+				}
+				// Sin resultados de WooCommerce → iniciar perfilado con la categoría detectada
+				const cat = detectarCategoria(msgOriginal) || 'otra';
+				const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
+				const primerPaso = pasos[0];
+				if (primerPaso) {
+					return {
+						response: `¡Perfecto! ${primerPaso.pregunta}`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'perfilando',
+							perfilState: { categoria: cat, step: 1, answers: {}, terminoOriginal: msgOriginal },
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							modalidad: 'contado',
+							productoSolicitado: msgOriginal,
+						},
+					};
 				}
 				return {
 					response: `¡Perfecto! Cuéntame, ¿qué estás buscando? 😊`,
