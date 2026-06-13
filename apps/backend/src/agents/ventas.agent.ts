@@ -334,6 +334,7 @@ async function generarMensajeSinCobertura(ciudad: string, mensajeUsuario: string
 	const ctx = mensajeUsuario
 		? `El usuario mencionó su ciudad (${ciudad}) y previamente dijo: "${mensajeUsuario}".`
 		: `El usuario dijo que es de ${ciudad}.`;
+	const yaMencionoProducto = mensajeUsuario?.length > 5;
 	try {
 		return await generateResponse(
 			ctx,
@@ -341,12 +342,12 @@ async function generarMensajeSinCobertura(ciudad: string, mensajeUsuario: string
 - NO diga "qué bien" ni "excelente" (porque no hay cobertura directa)
 - Informe amablemente que no tenemos cobertura directa pero que enviamos por transportadora (el flete NO está incluido en el precio, se calcula al agregar el producto al carrito en la web)
 - NO menciones "pago contra entrega", "contra entrega" ni "pagar al recibir"
-- Pregunte qué producto o referencia busca
+${yaMencionoProducto ? '- El usuario YA mencionó su producto. NO preguntes qué producto busca. Refiérete al producto que ya mencionó.' : '- Pregunte qué producto o referencia busca'}
 - Use un tono natural, no robotizado
 NO incluyas saludos formales, solo el cuerpo del mensaje.`
 		);
 	} catch {
-		return `En ${ciudad.charAt(0).toUpperCase() + ciudad.slice(1)} no tenemos cobertura directa, pero podemos enviarte por transportadora (el flete se calcula en la web al agregar el producto al carrito). ¿Qué producto o referencia buscas? 😊`;
+		return `En ${ciudad.charAt(0).toUpperCase() + ciudad.slice(1)} no tenemos cobertura directa, pero podemos enviarte por transportadora (el flete se calcula en la web al agregar el producto al carrito). ${yaMencionoProducto ? 'Podemos confirmar la referencia de ese producto para revisar disponibilidad. 😊' : '¿Qué producto o referencia buscas? 😊'}`;
 	}
 }
 
@@ -1851,7 +1852,11 @@ REGLAS DE CATÁLOGO:
 		const catalogPrompt = `\n\nCATÁLOGO DE PRODUCTOS:\n${productListStr}\n\n---\nResponde al cliente según las reglas anteriores.`;
 
 		const raw = await generateResponse(user + catalogPrompt, system);
-		const response = cleanResponse(raw);
+		let response = cleanResponse(raw);
+		// Bloquear números de cartera; usar siempre el número de ventas por defecto
+		if (/3(?:14|15)\s*(?:4\s*2\s*2\s*9\s*9\s*4\s*9|7\s*2\s*1\s*2\s*3\s*6\s*7)/.test(response)) {
+			response = response.replace(/3(?:14|15)\s*\d{3}\s*\d{4}/g, '+57 318 7408190');
+		}
 
 		return {
 			response,
