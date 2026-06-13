@@ -3,6 +3,7 @@ import prisma from '../db/index.js';
 import { orchestrator } from '../agents/orchestrator.js';
 import { extractAndSaveData } from '../agents/data-extractor.js';
 import { sendMessage, resolvePhoneFromJid } from './whatsapp.js';
+import { verificarCobertura } from '../agents/helpers.js';
 import logger from '../utils/logger.js';
 
 function safeParseJson(str: string | null | undefined): any {
@@ -326,7 +327,6 @@ export async function processIncomingMessage(
 	if (extra?.ultimaBusqueda) context.ultimaBusqueda = extra.ultimaBusqueda;
 	if (extra?.perfilState) context.perfilState = extra.perfilState;
 	if (extra?.productosPreCargados) context.productosPreCargados = extra.productosPreCargados;
-	if (typeof extra?.tieneCobertura === 'boolean') context.tieneCobertura = extra.tieneCobertura;
 	if (extra?.modalidad) context.modalidad = extra.modalidad;
 	if (extra?.flujoAnterior) context.flujoAnterior = extra.flujoAnterior;
 	if (extra?.creditoOptions) context.creditoOptions = extra.creditoOptions;
@@ -339,6 +339,13 @@ export async function processIncomingMessage(
 	if (extra?.terminoBusqueda) context.terminoBusqueda = extra.terminoBusqueda;
 	if (extra?.productoPendiente) context.productoPendiente = extra.productoPendiente;
 	if (typeof extra?.pasoWeb === 'number') context.pasoWeb = extra.pasoWeb;
+
+	// Re-verificar cobertura contra la ciudad actual (no usar valor guardado en extra)
+	// para cubrir cambios de ciudad como "corrigo es para Bucaramanga"
+	if (context.ciudad) {
+		const cov = await verificarCobertura(context.ciudad);
+		context.tieneCobertura = cov === 'cobertura';
+	}
 
 	// 7. Enrutar al orquestador
 	const { agentType, response, metadata } = await orchestrator.route(body, context);
