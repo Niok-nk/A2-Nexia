@@ -45,6 +45,23 @@ function extraerSKU(texto: string): string | null {
 	return null;
 }
 
+/** Extrae una spec de capacidad (litros, kilos, pulgadas) del texto: { valor, unidad } */
+function extraerCapacidad(mensaje: string): { valor: number; unidad: string; query: string } | null {
+	const t = mensaje.toLowerCase();
+	const patrones = [
+		{ regex: /(\d{2,4})\s*(?:kilos|kilogramos|kg)\b/, unidad: 'kg', label: 'kilos' },
+		{ regex: /(\d{2,4})\s*(?:litros|lt|l)\b/, unidad: 'L', label: 'litros' },
+		{ regex: /(\d{2,4})\s*(?:pulgadas|pulg)\b/, unidad: '"', label: 'pulgadas' },
+	];
+	for (const p of patrones) {
+		const match = t.match(p.regex);
+		if (match) {
+			return { valor: parseInt(match[1], 10), unidad: p.unidad, query: `${match[1]} ${p.label}` };
+		}
+	}
+	return null;
+}
+
 /** Extrae una spec de potencia tipo "500W", "2600W RMS" del texto. */
 function extraerPotencia(texto: string): string | null {
 	const match = texto.match(/(\d{2,5})\s*w(?:\s*rms)?/i);
@@ -99,7 +116,22 @@ export async function buscarProductoInteligente(
 		} catch { /* continuar */ }
 	}
 
-	// ── Estrategia 2: Categoría + potencia (ej: "parlante 500W") ────────
+	// ── Estrategia 2: Categoría + capacidad (ej: "nevera 254 litros", "lavadora 19 kilos") ──
+	if (categoria) {
+		const capacidad = extraerCapacidad(mensaje);
+		if (capacidad) {
+			try {
+				const query = `${categoria} ${capacidad.query}`;
+				const results = await wooCommerceService.searchProducts(query, 20);
+				if (results?.length > 0) return { products: results, estrategia: 'categoria_capacidad' };
+				// Fallback: solo buscar por capacidad
+				const results2 = await wooCommerceService.searchProducts(capacidad.query, 20);
+				if (results2?.length > 0) return { products: results2, estrategia: 'capacidad' };
+			} catch { /* continuar */ }
+		}
+	}
+
+	// ── Estrategia 3: Categoría + potencia (ej: "parlante 500W") ────────
 	if (potencia && categoria) {
 		try {
 			const query = `${categoria} ${potencia}`;
@@ -115,7 +147,7 @@ export async function buscarProductoInteligente(
 		} catch { /* continuar */ }
 	}
 
-	// ── Estrategia 3: Solo potencia, buscar en toda la tienda ───────────
+	// ── Estrategia 4: Solo potencia / solo capacidad, buscar en toda la tienda ──
 	if (potencia && !categoria) {
 		try {
 			const results = await wooCommerceService.searchProducts(potencia, 20);
@@ -128,8 +160,17 @@ export async function buscarProductoInteligente(
 			}
 		} catch { /* continuar */ }
 	}
+	if (!categoria) {
+		const capacidad = extraerCapacidad(mensaje);
+		if (capacidad) {
+			try {
+				const results = await wooCommerceService.searchProducts(capacidad.query, 20);
+				if (results?.length > 0) return { products: results, estrategia: 'capacidad_solo' };
+			} catch { /* continuar */ }
+		}
+	}
 
-	// ── Estrategia 4: Categoría sola ────────────────────────────────────
+	// ── Estrategia 5: Categoría sola ────────────────────────────────────
 	if (categoria) {
 		try {
 			const results = await wooCommerceService.searchProducts(categoria, 20);
@@ -137,7 +178,7 @@ export async function buscarProductoInteligente(
 		} catch { /* continuar */ }
 	}
 
-	// ── Estrategia 5: Texto libre (limpiar palabras de relleno) ─────────
+	// ── Estrategia 6: Texto libre (limpiar palabras de relleno) ─────────
 	const textoLimpio = mensaje
 		.toLowerCase()
 		.replace(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa|info de|informacion de|el|la|los|las|un|una|este|esta|ese|esa)\s*/gi, '')
@@ -169,11 +210,13 @@ export async function buscarProductoInteligente(
  */
 export function esPreguntaEspecificacion(texto: string): boolean {
 	const t = texto.toLowerCase();
-	// Palabras de especificación técnica
-	const tieneSpec = /(?:medida|medidas|mide|miden|cu[aá]nto mide|dimensi[oó]n|dimensiones|alto|ancho|largo|profundidad|fondo|altura|anchura|cent[ií]metro|cm\b|metro|pulgada|tama[ñn]o|capacidad|litro|litros|pies|peso|consumo|voltaje|potencia|watt|vatio|color|colores|garant[ií]a|especificaci|caracter[ií]stica|ficha t[eé]cnica|cabe|caben|entra|cu[aá]nto pesa|material|funci[oó]n|funciones|programa)/i.test(t);
+	// Palabras de especificación técnica (incluye capacidad: kilos, litros, pulgadas)
+	const tieneSpec = /(?:medida|medidas|mide|miden|cu[aá]nto mide|dimensi[oó]n|dimensiones|alto|ancho|largo|profundidad|fondo|altura|anchura|cent[ií]metro|cm\b|metro|pulgada|tama[ñn]o|capacidad|litro|litros|lt\b|kilo|kilogramo|kg\b|pies|peso|consumo|voltaje|potencia|watt|vatio|color|colores|garant[ií]a|especificaci|caracter[ií]stica|ficha t[eé]cnica|cabe|caben|entra|cu[aá]nto pesa|material|funci[oó]n|funciones|programa)/i.test(t);
+	// Capacidad numérica (ej: "19 kilos", "254 litros", "50 pulgadas", "18kg") como pregunta implícita
+	const tieneCapacidadNumerica = /\b\d{2,4}\s*(?:kilos|kilogramos|kg|litros|lt|pulgadas|pulg)\b/i.test(t);
 	// Forma interrogativa
 	const esPregunta = /[?¿]/.test(t) || /^(?:cu[aá]l|cu[aá]nto|cu[aá]nta|qu[eé]|c[oó]mo|d[oó]nde|tiene|tienen|me\s+(?:das|pasas|dices|confirmas|puedes)|podr[ií]as|sabes)/i.test(t);
-	return tieneSpec && esPregunta;
+	return (tieneSpec && esPregunta) || tieneCapacidadNumerica;
 }
 
 /** Convierte texto de presupuesto a un techo numérico en pesos. */
@@ -232,19 +275,18 @@ export const CREDITO_STEPS: CreditoStep[] = [
 	{ field: 'ingresosMensuales',  pregunta: '¿Cuánto ganas al mes aproximadamente?' },
 	{ field: 'gastosMensuales',    pregunta: '¿Y cuánto gastas al mes más o menos?' },
 	{ field: 'otrosIngresos',      pregunta: '¿Tienes otros ingresos? Si no, escribe "No".' },
-	{
-		field: 'reportadoDataCredito',
-		pregunta: '¿Estás reportado en DataCrédito?\n1️⃣ Sí\n2️⃣ No\n3️⃣ No sé',
-		opciones: ['Sí', 'No', 'No sé'],
-	},
-	{
-		field: 'dispuestoSaldarDeuda',
-		pregunta: '¿Estarías dispuesto/a a saldar esa deuda para aspirar a un nuevo crédito?\n1️⃣ Sí\n2️⃣ No',
-		opciones: ['Sí', 'No'],
-	},
 	{ field: 'producto',           pregunta: '¿Qué producto te gustaría financiar?' },
 	{ field: 'skuProducto',        pregunta: 'Por último, ¿tienes el código o referencia del producto? Lo ves debajo del nombre en la página. Si no lo tienes, escribe "No sé".' },
 ];
+
+function sanitizarNumerosVentas(texto: string): string {
+	const AUTORIZADO = '3187408190';
+	return texto.replace(/\+?57\s*\d{3}\s*\d{3}\s*\d{2,4}/g, (match) => {
+		const soloDigitos = match.replace(/\D/g, '').replace(/^57/, '');
+		if (soloDigitos === AUTORIZADO) return match;
+		return '+57 318 740 8190';
+	});
+}
 
 export function formatearResumenCredito(data: CreditoData): string {
 	return `
@@ -270,8 +312,6 @@ export function formatearResumenCredito(data: CreditoData): string {
 - Ingresos mensuales: ${data.ingresosMensuales}
 - Gastos mensuales: ${data.gastosMensuales}
 - Otros ingresos: ${data.otrosIngresos}
-- Reportado en DataCrédito: ${data.reportadoDataCredito}
-- Dispuesto a saldar deuda: ${data.dispuestoSaldarDeuda}
 
 🛒 Producto de interés
 - Producto: ${data.producto}
@@ -280,8 +320,8 @@ export function formatearResumenCredito(data: CreditoData): string {
 }
 
 export async function enviarResumenWhatsApp(resumen: string): Promise<void> {
-	const WHATSAPP_CARTERA = process.env.WA_CARTERA || '573007215438';
-	await sendWA(WHATSAPP_CARTERA, resumen);
+	const WHATSAPP_CREDITO = process.env.WA_CREDITO || process.env.WA_ESCALAMIENTO || '573187408190';
+	await sendWA(WHATSAPP_CREDITO, resumen);
 }
 
 /**
@@ -373,6 +413,41 @@ export class VentasAgent implements IAgent {
 		message: string,
 		context: any
 	): Promise<AgentResponse> {
+		const DEPARTAMENTOS_COLOMBIA = [
+			'amazonas', 'antioquia', 'arauca', 'atlántico', 'atlantico', 'bolívar', 'bolivar',
+			'boyacá', 'boyaca', 'caldas', 'caquetá', 'caqueta', 'casanare', 'cauca', 'césar', 'cesar',
+			'chocó', 'choco', 'córdoba', 'cordoba', 'cundinamarca', 'guainía', 'guainia',
+			'guaviare', 'huila', 'la guajira', 'magdalena', 'meta', 'nariño', 'narino',
+			'norte de santander', 'putumayo', 'quindío', 'quindio', 'risaralda', 'san andrés',
+			'santander', 'sucre', 'tolima', 'valle del cauca', 'valle', 'vaupés', 'vaupes', 'vichada',
+		];
+
+		function esDepartamentoValido(v: string): boolean {
+			return DEPARTAMENTOS_COLOMBIA.some((d) => v.toLowerCase().includes(d));
+		}
+
+		// Pre-poblar departamento si ya se conoce la ciudad
+		if (context?.ciudad && context?.userData && !context.userData.departamento) {
+			const CIUDAD_A_DEPARTAMENTO: Record<string, string> = {
+				pasto: 'Nariño', tumaco: 'Nariño', ipiales: 'Nariño', samaniego: 'Nariño',
+				barbacoas: 'Nariño', sandoná: 'Nariño', sandona: 'Nariño',
+				popayán: 'Cauca', popayan: 'Cauca', quilichao: 'Cauca', miranda: 'Cauca',
+				'puerto tejada': 'Cauca', piendamó: 'Cauca', piendamo: 'Cauca',
+				mocoa: 'Putumayo', 'puerto asís': 'Putumayo', 'puerto asis': 'Putumayo',
+				orito: 'Putumayo', sibundoy: 'Putumayo', villagarzón: 'Putumayo', villagarzon: 'Putumayo',
+				neiva: 'Huila', pitalito: 'Huila', garzón: 'Huila', garzon: 'Huila', campoalegre: 'Huila',
+				cali: 'Valle del Cauca', buenaventura: 'Valle del Cauca', palmira: 'Valle del Cauca',
+				tuluá: 'Valle del Cauca', tulua: 'Valle del Cauca', buga: 'Valle del Cauca',
+				cartago: 'Valle del Cauca', jamundí: 'Valle del Cauca', jamundi: 'Valle del Cauca',
+				yumbo: 'Valle del Cauca',
+				'bogotá': 'Cundinamarca', 'bogota': 'Cundinamarca',
+			};
+			const ciudadLower = context.ciudad.toLowerCase().trim();
+			if (CIUDAD_A_DEPARTAMENTO[ciudadLower]) {
+				context.userData = { ...context.userData, departamento: CIUDAD_A_DEPARTAMENTO[ciudadLower] };
+			}
+		}
+
 		const creditoData: CreditoData = {
 			...context?.creditoData,
 			...(context?.userData?.nombre ? { nombres: context.userData.nombre } : {}),
@@ -427,6 +502,68 @@ export class VentasAgent implements IAgent {
 				const valor = stepAnterior.opciones
 					? resolverOpcion(message, stepAnterior.opciones)
 					: message.trim();
+
+				// Validación específica por campo
+				if (stepAnterior.field === 'departamento' && !esDepartamentoValido(valor)) {
+					const pista = creditoData.ciudad ? ` (recuerda que ${creditoData.ciudad} queda en el departamento del Cauca, Nariño, etc.)` : '';
+					return {
+						response: `Mmm, "${valor}" no me suena a un departamento de Colombia 😅 ¿En qué departamento queda tu ciudad?${pista}`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'credito',
+							creditoData,
+							creditoStep: stepIndex,
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+						},
+					};
+				}
+				if (stepAnterior.field === 'personasACargo' && valor === '0') {
+					return {
+						response: '¿Seguro que no tienes ninguna persona a cargo? Puede ser hijos, padres u otros familiares que dependan de ti. 😊',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'credito',
+							creditoData,
+							creditoStep: stepIndex,
+						},
+					};
+				}
+				if (stepAnterior.field === 'ingresosMensuales') {
+					const num = parseInt(valor.replace(/\D/g, ''), 10);
+					if (isNaN(num) || num <= 0) {
+						return {
+							response: '¿Me puedes decir cuánto ganas al mes aproximadamente? Un valor numérico, por favor 😊',
+							metadata: { agentType: 'ventas', flujo: 'credito', creditoData, creditoStep: stepIndex },
+						};
+					}
+				}
+				if (stepAnterior.field === 'cedula') {
+					const dig = valor.replace(/\D/g, '');
+					if (dig.length < 6 || dig.length > 12) {
+						return {
+							response: 'La cédula debe tener entre 6 y 12 dígitos. ¿Me la confirmas? 😊',
+							metadata: { agentType: 'ventas', flujo: 'credito', creditoData, creditoStep: stepIndex },
+						};
+					}
+				}
+				if (stepAnterior.field === 'celular') {
+					const dig = valor.replace(/\D/g, '');
+					if (dig.length < 10) {
+						return {
+							response: 'El celular debe tener al menos 10 dígitos. ¿Me lo escribes completo? 😊',
+							metadata: { agentType: 'ventas', flujo: 'credito', creditoData, creditoStep: stepIndex },
+						};
+					}
+				}
+				if (stepAnterior.field === 'direccion' && valor.length < 5) {
+					return {
+						response: '¿Me das la dirección más completa? Incluye barrio, calle y número si es posible 😊',
+						metadata: { agentType: 'ventas', flujo: 'credito', creditoData, creditoStep: stepIndex },
+					};
+				}
+
 				creditoData[stepAnterior.field] = valor;
 			}
 		}
@@ -443,9 +580,10 @@ export class VentasAgent implements IAgent {
 			let transicion = '';
 			if (completados === 1) transicion = '¡Gracias! ';
 			else if (completados === 3) transicion = 'Vamos muy bien 💪 ';
-			else if (completados === 6) transicion = 'Ya casi terminamos la parte personal. ';
+			else if (completados === 5) transicion = 'Seguimos con la información. ';
+			else if (completados === 8) transicion = 'Ya casi terminamos la parte personal. ';
 			else if (completados === 11) transicion = 'Casi listo, solo faltan unos pocos datos más. ';
-			else if (completados >= 15) transicion = '¡Ya casi terminamos! ';
+			else if (completados >= 13) transicion = '¡Ya casi terminamos! ';
 			else if (completados > 0 && completados % 3 === 0) transicion = 'Perfecto. ';
 
 			if (siguientePaso.field === 'skuProducto') {
@@ -509,6 +647,7 @@ export class VentasAgent implements IAgent {
 				flujo: 'credito_completado',
 				modalidad: null,
 				creditoData,
+				notificarCredito: true,
 			},
 		};
 	}
@@ -1358,6 +1497,31 @@ export class VentasAgent implements IAgent {
 			}
 		}
 
+		// ── Continuación pago físico: usuario ya dio nombre + cédula ────
+		if (context?.flujo === 'pago_fisico') {
+			const cedulaMatch = message.match(/\b\d{5,12}\b/);
+			const nombre = message.replace(/\b\d{5,12}\b/g, '').trim();
+			const tieneNombre = nombre.length >= 3;
+			const tieneCedula = !!cedulaMatch;
+
+			if (tieneNombre || tieneCedula) {
+				return {
+					response: `¡Gracias! Tu solicitud de compra en punto físico quedó registrada. Un asesor se comunicará contigo para coordinar la entrega. Si necesitas algo más, acá estoy para ayudarte 😊💙`,
+					nextStage: 'TRANSFER',
+					metadata: {
+						agentType: 'ventas',
+						flujo: null,
+						nombreCliente: nombre.length >= 3 ? nombre : undefined,
+						cedulaCliente: cedulaMatch ? cedulaMatch[0] : undefined,
+					},
+				};
+			}
+			return {
+				response: `¿Me confirmas tu nombre completo y número de cédula para la reserva? 😊`,
+				metadata: { agentType: 'ventas', flujo: 'pago_fisico' },
+			};
+		}
+
 		// ── PASO 6: Detectar datos personales del cliente ──────────────────
 		const datosPersonales: Record<string, string> = {};
 		const cedulaMatch = message.match(/\b\d{5,12}\b/);
@@ -1589,6 +1753,23 @@ export class VentasAgent implements IAgent {
 			};
 		}
 
+		// ── Preguntas de stock/disponibilidad → escalar a Cris ─────────────
+		const preguntaStock = /(?:hay\s*(?:en\s*)?stock|disponible|disponibilidad|cu[aá]ndo\s*(?:llega|llegar[aá]|est[aá]|hay)|tiempo\s*(?:de\s*)?entrega|demora|cu[aá]nto\s*(?:demora|tarda)|lo\s*tiene\s*(?:en\s*)?stock|est[aá]\s*(?:disponible|en\s*stock)|fecha\s*(?:de\s*)?entrega|llega\s*(?:a\s*)?(?:mi\s*)?ciudad)/i.test(message);
+		if (preguntaStock && !context?.flujo) {
+			const ciudad = context?.ciudad || context?.userData?.ciudad || '';
+			const producto = context?.ultimaBusqueda?.results?.[0]?.name || context?.productoSolicitado || context?.terminoBusqueda || '';
+			return {
+				response: `Déjame confirmar disponibilidad y tiempo de entrega${ciudad ? ` para ${ciudad}` : ''}${producto ? ` del producto ${producto}` : ''} con el equipo; te confirmamos por aquí muy pronto 😊`,
+				metadata: {
+					agentType: 'ventas',
+					flujo: null,
+					notificarPostCompra: true,
+					ciudad: context?.ciudad,
+					ciudadValidada: context?.ciudadValidada,
+				},
+			};
+		}
+
 		// ── Si está en flujo de pago pero pide un producto nuevo, reiniciar ──
 		let resetFlujo = false;
 		const esNuevoProductoEnPago = context?.flujo === 'seleccion_pago' && /(?:y\s*(?:de|en|para)\s*(?:los|las|un|una)?|qu[e\u00e9]\s*(?:tal|hay\s*de|me\s*recomiendas|otr[oa]s?\s*opciones)|recomiendas|recomi[e\u00e9]ndame|tienes?\s*(?:televisores?|neveras?|lavadoras?|congeladores?|tvs?|licuadoras?|parlantes?|aires?\s*(?:acondicionado)?|ventiladores?|estufas?|hornos?|microondas?|equipos?\s*de\s*sonido|monitores?|pantallas?|aspiradoras?|planchas?)|(?:y\s*)?(?:en\s*)?(?:televisores|neveras|lavadoras|congeladores|tvs|licuadoras|parlantes|sonido|aire|ventiladores|electrodom[e\u00e9]sticos))/i.test(message);
@@ -1599,7 +1780,8 @@ export class VentasAgent implements IAgent {
 
 		// ── Detectar intención de compra ("me gusta", "cómo pago", "lo quiero") ─
 		const tieneProductos = context?.ultimaBusqueda?.results?.length > 0;
-		const compraIntencion = /(?:me\s*gusta|lo\s*quiero|lo\s*compro|c[oó]mo\s*(?:pago|compro|adquiero)|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|ese)|dalo|res[eé]rvalo|lo\s*reservo|comprar|pagar)/i.test(message);
+		const esNegacion = /^(?:no\s+|tampoco|nunca|jam[aá]s|ni\s*lo\s*quiero)/i.test(message);
+		const compraIntencion = !esNegacion && /(?:me\s*gusta|lo\s*quiero|lo\s*compro|c[oó]mo\s*(?:pago|compro|adquiero)|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|ese)|dalo|res[eé]rvalo|lo\s*reservo|comprar|pagar)/i.test(message);
 
 		// Intentar emparejar el precio mencionado en el mensaje con un producto de la búsqueda anterior
 		function extraerPrecio(texto: string): number | null {
@@ -1852,7 +2034,8 @@ POLÍTICAS DE LA EMPRESA —debes cumplirlas:
 - Para seguimiento post-compra (guía de despacho, "ya compré", "cuándo llega", estado del pedido): dile con calidez que ya quedó registrado y que el equipo le confirma el despacho y la guía pronto. NO des números de cartera. Si insiste en un contacto, el caso se escala internamente.
 - No digas "generé tu orden". Di que el producto queda reservado pendiente de pago.
 - No compartas direcciones de agencias físicas.
-
+- Si el cliente dice "no me gusta esa marca" o algo similar, explícale que todos los electrodomésticos son JLC, marca propia colombiana, y ofrécele mostrarle otros modelos del mismo tipo (nunca sugerir otras marcas ni saltar a pago).
+ 
 REGLAS DE CATÁLOGO:
 - Usa el CATÁLOGO de productos para responder. Si hay productos, preséntalos de forma natural (máx 1-2 recomendaciones).
 - Si el cliente pregunta detalles/especificaciones de un producto del catálogo, responde usando su información de "Detalles".
@@ -1889,10 +2072,7 @@ REGLAS DE CATÁLOGO:
 
 		const raw = await generateResponse(user + catalogPrompt, system);
 		let response = cleanResponse(raw);
-		// Bloquear números de cartera; usar siempre el número de ventas por defecto
-		if (/3(?:14|15)\s*(?:4\s*2\s*2\s*9\s*9\s*4\s*9|7\s*2\s*1\s*2\s*3\s*6\s*7)/.test(response)) {
-			response = response.replace(/3(?:14|15)\s*\d{3}\s*\d{4}/g, '+57 318 7408190');
-		}
+		response = sanitizarNumerosVentas(response);
 
 		return {
 			response,

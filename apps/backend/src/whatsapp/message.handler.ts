@@ -474,6 +474,20 @@ export async function processIncomingMessage(
 			}
 		}
 
+		// ── Notificación de crédito completado ─────────────────────────────
+		if (metadata?.notificarCredito) {
+			const WA_CREDITO = process.env.WA_CREDITO || process.env.WA_ESCALAMIENTO || '573187408190';
+			const cd = metadata?.creditoData || {};
+			const notifMsg = `📋 SOLICITUD DE CRÉDITO\n\nNombre: ${cd.nombres || '?'}\nCédula: ${cd.cedula || '?'}\nCelular: ${cd.celular || '?'}\nDirección: ${cd.direccion || '?'}\nVivienda: ${cd.tipoVivienda || '?'}\nDepartamento: ${cd.departamento || '?'}\nCiudad: ${cd.ciudad || '?'}\nPersonas a cargo: ${cd.personasACargo || '?'}\nActividad: ${cd.empresa || '?'}\nTiempo: ${cd.experienciaLaboral || '?'}\nEstado civil: ${cd.estadoCivil || '?'}\nIngresos: ${cd.ingresosMensuales || '?'}\nGastos: ${cd.gastosMensuales || '?'}\nOtros ingresos: ${cd.otrosIngresos || '?'}\nProducto: ${cd.producto || '?'}\nTeléfono WhatsApp: ${realPhone}\nFecha: ${new Date().toLocaleDateString('es-CO')}`;
+			try {
+				const { sendMessage: sendWADirect } = await import('./whatsapp.js');
+				await sendWADirect(WA_CREDITO, notifMsg);
+				logger.info({ phone, tipo: 'credito' }, 'Notificación de crédito enviada');
+			} catch (e) {
+				logger.error({ error: e }, 'Error enviando notificación de crédito');
+			}
+		}
+
 		if (metadata?.notificarPuntoFisico || metadata?.escalado) {
 			const WA_ESCALAMIENTO = process.env.WA_ESCALAMIENTO || '573187408190';
 			const ciudadInfo = metadata?.ciudad || userData.ciudad || 'ciudad no especificada';
