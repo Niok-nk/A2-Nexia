@@ -34,14 +34,17 @@ model Lead {
 }
 
 model Message {
-  id        String  @id @default(cuid())
-  contactId String
-  contact   Contact @relation(fields: [contactId], references: [id])
-  direction String  @default("INBOUND")
-  body      String
-  sentAt    DateTime @default(now())
-  agentType String?
-  extra     String?
+  id             String   @id @default(cuid())
+  contactId      String
+  contact        Contact  @relation(fields: [contactId], references: [id])
+  direction      String   @default("INBOUND")
+  body           String
+  sentAt         DateTime @default(now())
+  agentType      String?
+  extra          String?
+  mediaType      String?
+  mediaMimeType  String?
+  mediaFileName  String?
 }
 
 model Note {

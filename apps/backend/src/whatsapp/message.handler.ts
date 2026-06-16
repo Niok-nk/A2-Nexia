@@ -4,6 +4,7 @@ import { orchestrator } from '../agents/orchestrator.js';
 import { extractAndSaveData } from '../agents/data-extractor.js';
 import { sendMessage, resolvePhoneFromJid } from './whatsapp.js';
 import { verificarCobertura } from '../agents/helpers.js';
+import { downloadMedia } from './media.service.js';
 import logger from '../utils/logger.js';
 
 function safeParseJson(str: string | null | undefined): any {
@@ -115,7 +116,17 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 		''
 	).trim();
 
-	// Tipos de medios no soportados: responder que no se pueden procesar
+	// Descargar media si el mensaje contiene imagen, audio, video o documento
+	let mediaInfo: { mediaType: string; mediaMimeType: string; mediaFileName: string } | null = null;
+	const hasMedia = !!msg.message?.imageMessage || !!msg.message?.audioMessage ||
+		!!msg.message?.videoMessage || !!msg.message?.documentMessage ||
+		!!msg.message?.stickerMessage || !!msg.message?.ptvMessage;
+
+	if (hasMedia) {
+		mediaInfo = await downloadMedia(msg);
+	}
+
+	// Si no hay texto, determinar el tipo de medio y asignar un body por defecto
 	if (!body) {
 		const esAudio = !!msg.message?.audioMessage || !!msg.message?.ptvMessage;
 		const esDoc = !!msg.message?.documentMessage;
@@ -123,22 +134,12 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 		const esImagenOVideo = !!msg.message?.imageMessage || !!msg.message?.videoMessage;
 
 		if (esAudio) {
-			const sendTo = realPhone || phone;
-			try {
-				await sendMessage(sendTo, 'No puedo procesar mensajes de audio. Por favor, escríbeme tu consulta en texto 📝');
-			} catch { /* fallback silencioso */ }
-			logger.info({ phone }, 'Audio message received, replied with text-only notice');
-			return;
-		}
-		if (esDoc || esSticker) {
-			const sendTo = realPhone || phone;
-			try {
-				await sendMessage(sendTo, 'No puedo procesar este tipo de archivos. Por favor, escríbeme tu consulta en texto 📝');
-			} catch { /* fallback silencioso */ }
-			logger.info({ phone }, 'Document/sticker message received, replied with text-only notice');
-			return;
-		}
-		if (esImagenOVideo) {
+			body = '[🎵 Mensaje de audio]';
+			logger.info({ phone }, 'Audio message received, body set to placeholder');
+		} else if (esDoc || esSticker) {
+			body = '[📄 Documento]';
+			logger.info({ phone }, 'Document/sticker message received, body set to placeholder');
+		} else if (esImagenOVideo) {
 			logger.info({ phone }, 'Media message without caption, treating as comprobante');
 			body = 'ya pague';
 		} else {
@@ -149,8 +150,8 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 
 	logger.info({ phone, realPhone, body: body.slice(0, 80) }, 'Incoming WA message');
 
-	try {
-		const { response, agentType } = await processIncomingMessage(phone, body, realPhone);
+		try {
+		const { response, agentType } = await processIncomingMessage(phone, body, realPhone, mediaInfo ?? undefined);
 		if (!response) return;
 
 		// 10. Enviar respuesta por WhatsApp (intentar aunque el status no sea 'connected')
@@ -170,7 +171,8 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 export async function processIncomingMessage(
 	phone: string,
 	body: string,
-	realPhone: string | null = null
+	realPhone: string | null = null,
+	mediaInfo?: { mediaType: string; mediaMimeType: string; mediaFileName: string }
 ): Promise<{ response: string; agentType: string; contactId?: string; leadId?: string }> {
 	try {
 	// 1. Upsert del contacto
@@ -217,6 +219,7 @@ export async function processIncomingMessage(
 			direction: 'INBOUND',
 			body,
 			extra: JSON.stringify({ stage: stageInbound }),
+			...mediaInfo,
 		},
 	});
 
