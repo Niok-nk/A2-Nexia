@@ -1574,14 +1574,16 @@ export class VentasAgent implements IAgent {
 			if (camposOk >= pasos.length || perfilState.step > pasos.length) {
 				const terminoBusqueda = (perfilState as any).terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
 
-				// Re-buscar con el término real (no usar pre-cargados genéricos si el
-				// cliente especificó algo concreto como "500W RMS" o un SKU)
-				let products = context?.productosPreCargados || [];
-				const terminoOriginal = (perfilState as any).terminoOriginal;
-				if (terminoOriginal && (extraerSKU(terminoOriginal) || extraerPotencia(terminoOriginal))) {
-					const resultado = await buscarProductoInteligente(terminoOriginal, perfilState.categoria);
+			// Consultar WooCommerce fresco con el término del perfil
+			let products: any[] = [];
+			const terminoOriginal = (perfilState as any).terminoOriginal;
+			const terminoBusquedaPerfil = terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
+			if (terminoBusquedaPerfil) {
+				try {
+					const resultado = await buscarProductoInteligente(terminoBusquedaPerfil, perfilState.categoria);
 					if (resultado.products.length > 0) products = resultado.products;
-				}
+				} catch { /* fall through */ }
+			}
 
 				// Aplicar filtro de presupuesto si el cliente lo dio
 				const presupuestoRaw = perfilState.answers.presupuesto;
@@ -1876,74 +1878,46 @@ export class VentasAgent implements IAgent {
 		const preguntaSeguimiento = /(?:especificaciones?|caracter[ií]sticas?|detalles?|d[ée]tal|cu[aá]nto cuesta|cu[aá]nto vale|cu[aá]l es|en qu[eé] se diferencia|diferencia|c[oó]mo es|descr[ií]belo|dimensiones|medidas|capacidad|color|modelo|referencia|precio|m[aá]s info|m[aá]s informaci[oó]n|primero|segunda?|tercero|este|ese|aquel|me gusta|prefiero|quiero|detalles|garantia|la primera opci[oó]n|el primero|la primera)/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
 
 		if (preguntaSeguimiento) {
-			products = context.ultimaBusqueda.results.slice(0, 6);
-			hayProductos = true;
-			// Conservar el término y categoría de búsqueda originales
-			productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			// Re-consultar WooCommerce fresco en vez de reusar cache
+			try {
+				const termino = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || terminoBusqueda || message;
+				const categoriaCtx = context?.ultimaBusqueda?.categoria || detectarCategoria(termino);
+				const resultado = await buscarProductoInteligente(termino, categoriaCtx);
+				products = resultado.products?.slice(0, 6) || [];
+				hayProductos = products.length > 0;
+				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			} catch {
+				products = context?.ultimaBusqueda?.results?.slice(0, 6) || [];
+				hayProductos = products.length > 0;
+				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			}
 		}
 
 		if (pideMas || pideMasEconomico) {
 			const busquedaGuardada = context?.ultimaBusqueda;
-			if (busquedaGuardada?.results?.length > 0) {
-				products = busquedaGuardada.results;
-
-				if (pideMasEconomico) {
-					products = [...products].sort((a: any, b: any) => {
-						const pa = parseFloat(a.price || '999999999');
-						const pb = parseFloat(b.price || '999999999');
-						return pa - pb;
-					});
-					productoIndex = 0;
-					
-					const catBusqueda = busquedaGuardada.categoria || context?.terminoBusqueda || '';
-					if (catBusqueda) {
-						try {
-							const masProductos = await wooCommerceService.searchProducts(catBusqueda, 20);
-							if (masProductos?.length > 0) {
-								const idsExistentes = new Set(products.map((p: any) => p.id));
-								const nuevos = masProductos.filter((p: any) => !idsExistentes.has(p.id));
-								products = [...products, ...nuevos].sort((a: any, b: any) => {
-									const pa = parseFloat(a.price || '999999999');
-									const pb = parseFloat(b.price || '999999999');
-									return pa - pb;
-								});
-							}
-						} catch { /* continuar con lo que tenemos */ }
-					}
-				} else {
-					productoIndex = (busquedaGuardada.productoIndex ?? 0) + 1;
-					if (productoIndex >= products.length) {
-						let terminoReSearch = busquedaGuardada.categoria || context?.terminoBusqueda || '';
-						if (!terminoReSearch) {
-							const primerProd = products[0]?.name || '';
-							const catMatch = primerProd.match(/(?:Nevera|Lavadora|Televisor|TV|Congelador|Parlante|Licuadora|Horno|Microondas|Estufa|Ventilador|Aire|Plancha|Aspiradora)/i);
-							if (catMatch) terminoReSearch = catMatch[0].toLowerCase();
-						}
-						if (terminoReSearch) {
-							try {
-								const masProductos = await wooCommerceService.searchProducts(terminoReSearch, 20);
-								if (masProductos?.length > 0) {
-									const idsExistentes = new Set(products.map((p: any) => p.id));
-									const nuevos = masProductos.filter((p: any) => !idsExistentes.has(p.id));
-									if (nuevos.length > 0) {
-										products = [...products, ...nuevos];
-										productoIndex = busquedaGuardada.productoIndex ?? 0;
-									} else {
-										productoIndex = products.length;
-									}
-								} else {
-									productoIndex = products.length;
-								}
-							} catch {
-								productoIndex = products.length;
-							}
+			const catBusqueda = busquedaGuardada?.categoria || context?.terminoBusqueda || '';
+			
+			if (catBusqueda) {
+				try {
+					const masProductos = await wooCommerceService.searchProducts(catBusqueda, pideMasEconomico ? 40 : 30);
+					if (masProductos?.length > 0) {
+						products = masProductos;
+						if (pideMasEconomico) {
+							products = [...products].sort((a: any, b: any) => {
+								const pa = parseFloat(a.price || '999999999');
+								const pb = parseFloat(b.price || '999999999');
+								return pa - pb;
+							});
+							productoIndex = 0;
 						} else {
-							productoIndex = products.length;
+							productoIndex = (busquedaGuardada?.productoIndex ?? 0) + 1;
 						}
+						hayProductos = true;
+						productoBuscado = catBusqueda;
 					}
-				}
-			} else {
-				// Sin búsqueda previa → la IA responde naturalmente
+				} catch { /* fall through */ }
+			}
+			if (!hayProductos) {
 				products = [];
 			}
 		}
@@ -2005,41 +1979,26 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (!esTamanoRelativo && products.length === 0) {
-			// Si ya hay resultados de una búsqueda anterior y el mensaje actual
-			// no contiene un término de producto claro, reusar los anteriores
+			// Si el mensaje referencia un producto guardado previamente, ajustar el término
 			const productoPrevio = context?.userData?.productoSolicitado || context?.productoSolicitado;
-			if (context?.ultimaBusqueda?.results?.length > 0 && !/comprar|cotizar|busco|quiero|necesito|hay|venden|tienes/i.test(message)) {
-				products = context.ultimaBusqueda.results.slice(0, 6);
-				hayProductos = true;
-				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
-			} else if (productoPrevio && !productoBuscado.includes(productoPrevio) && productoBuscado === terminoBusqueda && terminoBusqueda === message) {
+			if (productoPrevio && !productoBuscado.includes(productoPrevio) && productoBuscado === terminoBusqueda && terminoBusqueda === message) {
 				productoBuscado = productoPrevio;
 				terminoBusqueda = productoPrevio;
 			}
 
-			if (context?.productosPreCargados?.length > 0 && !extraerSKU(message) && !extraerPotencia(message)) {
-				// Solo usar pre-cargados si el mensaje NO trae SKU ni potencia específica
-				// (si trae spec específica, hay que re-buscar con ella)
-				products = context.productosPreCargados;
-				hayProductos = true;
-			} else {
-				try {
-					if (!products || products.length === 0) {
-						// BÚSQUEDA INTELIGENTE: detecta SKU, potencia, categoría
-						const categoriaCtx = context?.ultimaBusqueda?.categoria || detectarCategoria(terminoBusqueda);
-						const resultado = await buscarProductoInteligente(message, categoriaCtx);
-						products = resultado.products;
+			// Siempre consultar WooCommerce fresco (sin reusar cache)
+			try {
+				const categoriaCtx = context?.ultimaBusqueda?.categoria || detectarCategoria(terminoBusqueda);
+				const resultado = await buscarProductoInteligente(message, categoriaCtx);
+				products = resultado.products;
 
-						// Si encontró por SKU o potencia, refinar el término guardado
-						if (resultado.estrategia.startsWith('sku') || resultado.estrategia.startsWith('potencia') || resultado.estrategia.startsWith('categoria_potencia')) {
-							terminoBusqueda = resultado.sku || extraerPotencia(message) || terminoBusqueda;
-						}
-					}
-
-					hayProductos = products?.length > 0;
-				} catch {
-					// products = []
+				if (resultado.estrategia.startsWith('sku') || resultado.estrategia.startsWith('potencia') || resultado.estrategia.startsWith('categoria_potencia')) {
+					terminoBusqueda = resultado.sku || extraerPotencia(message) || terminoBusqueda;
 				}
+
+				hayProductos = products?.length > 0;
+			} catch {
+				// products = []
 			}
 		}
 
