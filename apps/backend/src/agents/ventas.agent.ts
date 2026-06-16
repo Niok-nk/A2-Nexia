@@ -757,7 +757,20 @@ export class VentasAgent implements IAgent {
 				}
 			}
 			if (context.flujo === 'credito') {
-				return this.manejarFlujoCredito(message, context);
+				// Si el usuario ya inició el formulario y el mensaje es una consulta no
+				// relacionada, salir del flujo para que el procesamiento normal la maneje
+				const stepActual = context?.creditoStep ?? 0;
+				if (stepActual > 0) {
+					const esConsulta = /[¿?]|quiero (?:ver|que me muestre|saber|comprar|buscar)|muestra|hay.*(?:m[aá]s|otro|alguna)|no\s+(?:me gusta|quiero|gracias)|tienes.*(?:de |con )|capacidad|kilos|kg\b|litros|lt\b|pulgadas|potencia|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|presupuesto|cu[aá]nto|precio|especificaciones?|caracter[ií]sticas?|detalles?|modelo|referencia|garant[ií]a|dimensiones|medidas|venden|tienen|busco|necesito|cat[aá]logo/i.test(message);
+					if (esConsulta) {
+						context.flujo = 'credito_pausado';
+						// No se retorna — el flujo normal procesa el mensaje
+					} else {
+						return this.manejarFlujoCredito(message, context);
+					}
+				} else {
+					return this.manejarFlujoCredito(message, context);
+				}
 			}
 		}
 
@@ -965,6 +978,27 @@ export class VentasAgent implements IAgent {
 				};
 			}
 
+			// Si el mensaje es una consulta no relacionada, salir del flujo
+			if (!quiereContado) {
+				const esConsulta = /[¿?]|quiero (?:ver|que me muestre|saber|comprar|pagar|adquirir)|muestra|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|tienes.*(?:de |con )|capacidad|kilos|kg\b|litros|lt\b|pulgadas|potencia|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|presupuesto|cu[aá]nto|precio|especificaciones?|caracter[ií]sticas?|detalles?|[¿¡]+\s*(?:contado|cr[eé]dito|efectivo|transferencia|tarjeta|nequi|pago)/i.test(message);
+				if (esConsulta) {
+					context.flujo = null;
+					// No se retorna — el flujo normal procesa el mensaje
+				} else {
+					return {
+						response: `Disculpa, no entendí. ¿La compra sería al *contado* o a *crédito*?\n\nResponde *1* o *contado* si pagas de contado, o *2* o *crédito* si deseas financiar.`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'esperando_modalidad',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							pendingMessage: context?.pendingMessage,
+						},
+					};
+				}
+			}
+
 			if (quiereContado) {
 				const msgOriginal = context?.pendingMessage || '';
 				let terminoIA = await extraerProductoConIA(msgOriginal);
@@ -1067,17 +1101,6 @@ export class VentasAgent implements IAgent {
 				};
 			}
 
-			return {
-				response: `Disculpa, no entendí. ¿La compra sería al *contado* o a *crédito*?\n\nResponde *1* o *contado* si pagas de contado, o *2* o *crédito* si deseas financiar.`,
-				metadata: {
-					agentType: 'ventas',
-					flujo: 'esperando_modalidad',
-					ciudad: context?.ciudad,
-					ciudadValidada: true,
-					tieneCobertura: context?.tieneCobertura,
-					pendingMessage: context?.pendingMessage,
-				},
-			};
 		}
 
 		// ── PASO 1: Validar cobertura si aún no se hizo (mejoras #2 y #4) ─────
@@ -1452,7 +1475,6 @@ export class VentasAgent implements IAgent {
 			// PRIORIDAD: si el cliente hace una pregunta (medidas, specs, etc.)
 			// en vez de elegir, salir del flujo de pago y responder la pregunta.
 			if (esPreguntaEspecificacion(message) && context?.ultimaBusqueda?.results?.length > 0) {
-				// Dejar que caiga al bloque de preguntaSeguimiento más abajo
 				context = { ...context, flujo: null };
 			} else {
 				// Matching ANCLADO: la opción debe SER el número/palabra, no contenerlo.
@@ -1502,16 +1524,21 @@ export class VentasAgent implements IAgent {
 						},
 					};
 				}
-				return {
-					response: `Por favor elige una opción:\n1️⃣ Medios de pago autorizados\n2️⃣ Paga directamente en nuestra página web${context?.tieneCobertura ? '\n3️⃣ Paga en un punto físico' : ''}\n¿Cuál prefieres?`,
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'seleccion_pago',
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						tieneCobertura: context?.tieneCobertura,
-					},
-				};
+				// Si el mensaje es una consulta no relacionada con pago, salir del flujo
+				if (/[¿?]|quiero (?:ver|que me muestre|saber|comprar|buscar)|muestra|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|tienes.*(?:de |con )|capacidad|kilos|kg\b|litros|lt\b|pulgadas|potencia|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|presupuesto|cu[aá]nto|precio|especificaciones?|caracter[ií]sticas?|detalles?|modelo|referencia|garant[ií]a|dimensiones|medidas/i.test(message)) {
+					context = { ...context, flujo: null };
+				} else {
+					return {
+						response: `Por favor elige una opción:\n1️⃣ Medios de pago autorizados\n2️⃣ Paga directamente en nuestra página web${context?.tieneCobertura ? '\n3️⃣ Paga en un punto físico' : ''}\n¿Cuál prefieres?`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'seleccion_pago',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+						},
+					};
+				}
 			}
 		}
 
