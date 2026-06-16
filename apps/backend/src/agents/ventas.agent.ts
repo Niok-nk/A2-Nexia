@@ -829,21 +829,29 @@ export class VentasAgent implements IAgent {
 					},
 				};
 			} else {
-				const listaNombres = ultimosProductos.slice(0, 3).map((p: any, i: number) => {
-					const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
-					return `${i + 1}️⃣ *${p.name}* (${precio})`;
-				}).join('\n');
-				return {
-					response: `Disculpa, no logré captar tu elección. Por favor escríbeme el número de la opción que prefieres:\n\n${listaNombres}`,
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'seleccion_pago_ambiguo',
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						tieneCobertura: context?.tieneCobertura,
-						ultimaBusqueda: context?.ultimaBusqueda,
-					},
-				};
+				// Si el mensaje es una consulta sobre otros productos (no un intento de selección fallido),
+				// salir del flujo para que el procesamiento normal lo maneje
+				const esConsultaProducto = /[¿?]|quiero (?:ver|que me muestre|saber)|muestra|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|tienes.*(?:de |con )|capacidad|kilos|kg\b|litros|lt\b|pulgadas|potencia|m[aá]s (?:grande|peque|chico|barato|caro)|m[aá]s grande|m[aá]s peque|otro modelo|otra opcion|otras opciones|no tiene|b[uú]sca|b[uú]squeda|recomiend|presupuesto/i.test(message);
+				if (esConsultaProducto) {
+					context.flujo = null;
+					// No se retorna — el flujo normal procesa el mensaje
+				} else {
+					const listaNombres = ultimosProductos.slice(0, 3).map((p: any, i: number) => {
+						const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
+						return `${i + 1}️⃣ *${p.name}* (${precio})`;
+					}).join('\n');
+					return {
+						response: `Disculpa, no logré captar tu elección. Por favor escríbeme el número de la opción que prefieres:\n\n${listaNombres}`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'seleccion_pago_ambiguo',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							ultimaBusqueda: context?.ultimaBusqueda,
+						},
+					};
+				}
 			}
 		}
 
@@ -1186,7 +1194,8 @@ export class VentasAgent implements IAgent {
 		const puedeComprar = context?.modalidad === 'contado' || 
 			(context?.ultimaBusqueda?.results?.length > 0 && context?.modalidad !== 'credito');
 
-		if (quiereComprar && puedeComprar) {
+		const esNegacionLocal = /^(?:no\s+|tampoco|nunca|jam[aá]s|ni\s*lo\s*quiero)/i.test(message);
+		if (quiereComprar && puedeComprar && !esNegacionLocal) {
 			const tieneCobertura = context?.tieneCobertura;
 			const opcionPuntoFisico = tieneCobertura
 				? '\n3️⃣ Paga en un punto físico'
