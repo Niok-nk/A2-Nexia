@@ -281,7 +281,10 @@ export const CREDITO_STEPS: CreditoStep[] = [
 
 function sanitizarNumerosVentas(texto: string): string {
 	const AUTORIZADO = '3187408190';
-	return texto.replace(/\+?57\s*\d{3}\s*\d{3}\s*\d{2,4}/g, (match) => {
+	// Captura: con prefijo +57 (ej "+57 320 788 1151") o celular pelado de 10
+	// dígitos que empiece por 3 (ej "3207881151", "320 788 1151").
+	const patron = /(\+?57[\s-]*)?\b3\d{2}[\s-]*\d{3}[\s-]*\d{4}\b/g;
+	return texto.replace(patron, (match) => {
 		const soloDigitos = match.replace(/\D/g, '').replace(/^57/, '');
 		if (soloDigitos === AUTORIZADO) return match;
 		return '+57 318 740 8190';
@@ -519,9 +522,10 @@ export class VentasAgent implements IAgent {
 						},
 					};
 				}
-				if (stepAnterior.field === 'personasACargo' && valor === '0') {
+				if (stepAnterior.field === 'personasACargo' && valor === '0' && !context?._personas0ok) {
+					context._personas0ok = true;
 					return {
-						response: '¿Seguro que no tienes ninguna persona a cargo? Puede ser hijos, padres u otros familiares que dependan de ti. 😊',
+						response: '¿Seguro que no tienes ninguna persona a cargo? Puede ser hijos, padres u otros familiares que dependan de ti. Si es así, escribe "0" de nuevo. 😊',
 						metadata: {
 							agentType: 'ventas',
 							flujo: 'credito',
@@ -632,10 +636,12 @@ export class VentasAgent implements IAgent {
 
 		const resumen = formatearResumenCredito(creditoData);
 
+		let creditoNotificado = false;
 		try {
 			await enviarResumenWhatsApp(resumen);
-		} catch {
-			console.error('Error enviando resumen de crédito por WhatsApp');
+			creditoNotificado = true;
+		} catch (e) {
+			console.error('Error enviando resumen de crédito por WhatsApp', e);
 		}
 
 		return {
@@ -647,7 +653,10 @@ export class VentasAgent implements IAgent {
 				flujo: 'credito_completado',
 				modalidad: null,
 				creditoData,
-				notificarCredito: true,
+				// Solo pedir al handler que reintente si el envío directo falló
+				// (evita doble notificación al +57 318 740 8190)
+				notificarCredito: !creditoNotificado,
+				creditoResumen: resumen,
 			},
 		};
 	}
@@ -1316,7 +1325,7 @@ export class VentasAgent implements IAgent {
 				mensajeCliente: message,
 			});
 			const rawWp = await generateResponse(usr2, sys2);
-			const respWp = cleanResponse(rawWp);
+			const respWp = sanitizarNumerosVentas(cleanResponse(rawWp));
 			return {
 				response: `${respWp}\n\n_(Paso ${pasoActual} de ${PASOS_WEB.length}: ${PASOS_WEB[pasoActual - 1]} — dime “listo” cuando termines 😊)_`,
 				metadata: {
@@ -2125,7 +2134,7 @@ REGLAS DE CATÁLOGO:
 		});
 
 		const raw = await generateResponse(user, system);
-		const response = cleanResponse(raw);
+		const response = sanitizarNumerosVentas(cleanResponse(raw));
 
 		return {
 			response,
