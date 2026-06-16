@@ -1939,7 +1939,63 @@ export class VentasAgent implements IAgent {
 			}
 		}
 
-		if (products.length === 0) {
+		// ── Tamaños relativos: "el más pequeño", "el más grande", "mediano" ──
+		let esTamanoRelativo = false;
+		const tamanoRelativo = (() => {
+			if (!context?.ultimaBusqueda?.categoria) return null;
+			if (/\b(m[áa]s\s*peque[ñn]o|m[áa]s\s*chico|el\s*menor|el\s*m[íi]nimo)\b/i.test(message)) return 'menor';
+			if (/\b(m[áa]s\s*grande|m[áa]s\s*capacidad|el\s*mayor|el\s*m[áa]ximo)\b/i.test(message)) return 'mayor';
+			if (/\b(mediano|intermedio|un\s*mediano)\b/i.test(message)) return 'mediano';
+			return null;
+		})();
+
+		if (tamanoRelativo && context?.ultimaBusqueda?.categoria) {
+			esTamanoRelativo = true;
+			const categoria = context.ultimaBusqueda.categoria;
+			try {
+				const masProductos = await wooCommerceService.searchProducts(categoria, 30);
+				if (masProductos?.length > 1) {
+					function extraerCapacidadProducto(p: any): number {
+						// Buscar en el nombre: "251L", "254 Litros", "19kg", "50 Pulgadas"
+						const nameCap = extraerCapacidad(p.name || '');
+						if (nameCap) return nameCap.valor;
+						// Buscar en atributos
+						if (p.attributes?.length > 0) {
+							for (const attr of p.attributes) {
+								const val = attr.options?.[0] || '';
+								const cap = extraerCapacidad(`${attr.name}: ${val}`);
+								if (cap) return cap.valor;
+							}
+						}
+						// Buscar en descripción corta
+						if (p.short_description) {
+							const cap = extraerCapacidad(p.short_description);
+							if (cap) return cap.valor;
+						}
+						// Fallback a precio
+						return parseFloat(p.price || '0') || 0;
+					}
+
+					const conCapacidad = masProductos
+						.map((p: any) => ({ ...p, _cap: extraerCapacidadProducto(p) }))
+						.sort((a: any, b: any) => a._cap - b._cap);
+
+					if (tamanoRelativo === 'menor') {
+						products = [conCapacidad[0]];
+					} else if (tamanoRelativo === 'mayor') {
+						products = [conCapacidad[conCapacidad.length - 1]];
+					} else {
+						const mid = Math.floor(conCapacidad.length / 2);
+						products = [conCapacidad[mid]];
+					}
+					hayProductos = true;
+					productoIndex = 0;
+					productoBuscado = products[0]?.name || categoria;
+				}
+			} catch { /* fall through */ }
+		}
+
+		if (!esTamanoRelativo && products.length === 0) {
 			// Si ya hay resultados de una búsqueda anterior y el mensaje actual
 			// no contiene un término de producto claro, reusar los anteriores
 			const productoPrevio = context?.userData?.productoSolicitado || context?.productoSolicitado;
@@ -1948,7 +2004,6 @@ export class VentasAgent implements IAgent {
 				hayProductos = true;
 				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
 			} else if (productoPrevio && !productoBuscado.includes(productoPrevio) && productoBuscado === terminoBusqueda && terminoBusqueda === message) {
-				// El mensaje actual no parece contener un producto, usar el producto previo de UserData
 				productoBuscado = productoPrevio;
 				terminoBusqueda = productoPrevio;
 			}
