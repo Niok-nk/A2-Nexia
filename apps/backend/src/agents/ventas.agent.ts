@@ -816,10 +816,10 @@ export class VentasAgent implements IAgent {
 				const precioStr = selected.price ? ` tiene un valor de *$${Number(selected.price).toLocaleString('es-CO')}*` : '';
 				const linkStr = selected.permalink ? `\nAquí tienes el enlace del producto:\n${selected.permalink}` : '';
 				const ciudadStr = context?.ciudad ? ` con envío gratis a ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
-				const opcionPuntoFisico = context?.tieneCobertura ? '\n3️⃣ Paga en un punto físico' : '';
+				const opcionPuntoFisico = context?.tieneCobertura ? '\n3️⃣ Pagar en un punto físico (solo necesito tu nombre y cédula para reservarlo)' : '';
 				
 				return {
-					response: `¡Perfecto! El *${selected.name}*${precioStr}${ciudadStr}.${linkStr}\n\n¿Cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\n2️⃣ Directamente en nuestra página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te doy las instrucciones paso a paso. 😊`,
+					response: `¡Perfecto! El *${selected.name}*${precioStr}${ciudadStr}.${linkStr}\n\n¿Cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te acompaño paso a paso. 😊`,
 					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
@@ -1213,7 +1213,7 @@ export class VentasAgent implements IAgent {
 		if (quiereComprar && puedeComprar && !esNegacionLocal) {
 			const tieneCobertura = context?.tieneCobertura;
 			const opcionPuntoFisico = tieneCobertura
-				? '\n3️⃣ Paga en un punto físico'
+				? '\n3️⃣ Pagar en un punto físico (solo necesito tu nombre y cédula para reservarlo)'
 				: '';
 
 			const ultimosProductos = context?.ultimaBusqueda?.results ?? [];
@@ -1262,7 +1262,7 @@ export class VentasAgent implements IAgent {
 			const linkStr = productoURL ? `\nAquí tienes el enlace del producto:\n${productoURL}` : '';
 			const ciudadStr = context?.ciudad ? ` con envío gratis a ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
 			
-			const opcionesMsg = `¡Excelente elección! El *${productoSolicitado || 'producto'}*${precioStr}${ciudadStr}.${linkStr}\n\nPara continuar con tu compra, ¿cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\n2️⃣ Directamente en nuestra página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te doy las instrucciones paso a paso. 😊`;
+			const opcionesMsg = `¡Excelente elección! El *${productoSolicitado || 'producto'}*${precioStr}${ciudadStr}.${linkStr}\n\nPara continuar con tu compra, ¿cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te acompaño paso a paso. 😊`;
 
 			return {
 				response: opcionesMsg,
@@ -1284,7 +1284,7 @@ export class VentasAgent implements IAgent {
 		if (preguntaPago && context?.modalidad === 'contado' && !context?.flujo?.startsWith('pago_') && context?.flujo !== 'seleccion_pago') {
 			const tieneCobertura = context?.tieneCobertura;
 			return {
-				response: `Claro, estas son las opciones:\n1️⃣ Medios de pago autorizados\n2️⃣ Paga directamente en nuestra página web${tieneCobertura ? '\n3️⃣ Paga en un punto físico' : ''}\n¿Cuál prefieres?`,
+				response: `Claro, estas son las opciones:\n1️⃣ Por transferencia bancaria (medios autorizados)\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${tieneCobertura ? '\n3️⃣ Pagar en un punto físico' : ''}\n¿Cuál prefieres?`,
 				nextStage: 'PROPOSAL',
 				metadata: {
 					agentType: 'ventas',
@@ -1521,7 +1521,7 @@ export class VentasAgent implements IAgent {
 					context = { ...context, flujo: null };
 				} else {
 					return {
-						response: `Por favor elige una opción:\n1️⃣ Medios de pago autorizados\n2️⃣ Paga directamente en nuestra página web${context?.tieneCobertura ? '\n3️⃣ Paga en un punto físico' : ''}\n¿Cuál prefieres?`,
+						response: `Por favor elige una opción:\n1️⃣ Por transferencia bancaria (medios autorizados)\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${context?.tieneCobertura ? '\n3️⃣ Pagar en un punto físico' : ''}\n¿Cuál prefieres?`,
 						metadata: {
 							agentType: 'ventas',
 							flujo: 'seleccion_pago',
@@ -1851,7 +1851,7 @@ export class VentasAgent implements IAgent {
 			const nombreProducto = prod?.name || context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
 			const ref = prod?.sku ? ` (ref. ${prod.sku})` : '';
 			return {
-				response: `¡Con gusto! Te ayudo con el pago de ${nombreProducto}${ref} 😊 ¿Cómo prefieres pagar?\n\n1️⃣ Transferencia bancaria\n2️⃣ En la web (PSE, Tarjeta, Nequi)${context?.tieneCobertura ? '\n3️⃣ En un punto físico' : ''}`,
+				response: `¡Con gusto! Te ayudo con el pago de ${nombreProducto}${ref} 😊 ¿Cómo prefieres pagar?\n\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${context?.tieneCobertura ? '\n3️⃣ Pagar en un punto físico' : ''}`,
 				nextStage: 'PROPOSAL',
 				metadata: {
 					agentType: 'ventas',
