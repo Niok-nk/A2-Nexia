@@ -15,10 +15,10 @@ function determinarPipelineStage(userData: Record<string, any>, ultimaRespuesta:
 	const tienePresupuesto = !!userData?.presupuesto;
 	const tieneCiudad = !!userData?.ciudad;
 
-	// VENTA_CERRADA: solo cuando el cliente confirma que YA pagó o va a pagar
+	// VENTA_CERRADA: solo cuando el cliente confirma que YA pagó
 	if (
 		tieneProducto &&
-		/\b(?:ya pagu[eé]|pago realizado|ya hice el pago|ya transfer[ií]|comprobante enviado|ya consign[ué]|voy a pagar|estoy pagando|ya pagando|acabo de pagar|ya hice la transferencia|ya hice el pago|listo el pago|pago listo|pago confirmado)\b/i.test(historial.slice(-300))
+		/\b(?:ya pagu[eé]|pago realizado|ya hice el pago|ya transfer[ií]|comprobante enviado|ya consign[ué]|estoy pagando|ya pagando|acabo de pagar|ya hice la transferencia|ya hice el pago|listo el pago|pago listo|pago confirmado)\b/i.test(historial.slice(-300))
 	) {
 		return 'VENTA_CERRADA';
 	}

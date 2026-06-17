@@ -1204,13 +1204,17 @@ export class VentasAgent implements IAgent {
 
 		// Si el mensaje es una pregunta sobre medidas/specs, NO es intención de compra
 		// aunque mencione "la 3" o "prefiero" — primero hay que responder la duda.
-		const quiereComprar = quiereComprarRaw && !esPreguntaEspecificacion(message);
+		// También excluir preguntas de precio ("que precio tiene la de 15")
+		const esPreguntaPrecio = /\b(?:precio|cu[aá]nto\s+(?:cuesta|cuestan|vale|valen|es|son)|qu[eé]\s+precio\s+tiene)\b/i.test(message);
+		const quiereComprar = quiereComprarRaw && !esPreguntaEspecificacion(message) && !esPreguntaPrecio;
 
 		const puedeComprar = context?.modalidad === 'contado' || 
 			(context?.ultimaBusqueda?.results?.length > 0 && context?.modalidad !== 'credito');
 
 		const esNegacionLocal = /^(?:no\s+|tampoco|nunca|jam[aá]s|ni\s*lo\s*quiero)/i.test(message);
-		if (quiereComprar && puedeComprar && !esNegacionLocal) {
+		// Si ya está en flujo de pago, no re-detectar compra
+		const yaEnPago = context?.flujo && (context.flujo.startsWith('pago_') || context.flujo === 'seleccion_pago');
+		if (quiereComprar && puedeComprar && !esNegacionLocal && !yaEnPago) {
 			const tieneCobertura = context?.tieneCobertura;
 			const opcionPuntoFisico = tieneCobertura
 				? '\n3️⃣ Pagar en un punto físico (solo necesito tu nombre y cédula para reservarlo)'
@@ -1236,7 +1240,7 @@ export class VentasAgent implements IAgent {
 				if (!matchResult) {
 					// Mensaje vago positivo ("me gusta", "lo quiero") sin referencia a producto específico
 					// → asumir el primer producto para no romper la conversación
-					const esVagoPositivo = /^(?:me gusta|lo quiero|me interesa|d[aá]le|proceder|concretar|si\s*continuemos|si\s*sigamos|sigamos\s*adelante|continuemos|seguimos|me quedo con|compro eso|la compro|lo compro|eso quiero|eso me sirve|me llevo)$/i.test(message.trim());
+					const esVagoPositivo = /^(?:(?:si|sí)\s+)?(?:me gusta|lo quiero|me interesa|d[aá]le|proceder|concretar|continuemos|sigamos|seguimos|me quedo con|compro eso|la compro|lo compro|eso quiero|eso me sirve|me llevo)$|^(?:si|sí)\s+(?:continuemos|sigamos(?: adelante)?|seguimos)$/i.test(message.trim());
 					if (esVagoPositivo) {
 						productoSolicitado = ultimosProductos[0].name;
 						productoURL = ultimosProductos[0].permalink;
@@ -1480,7 +1484,7 @@ export class VentasAgent implements IAgent {
 			} else {
 				// Matching ANCLADO: la opción debe SER el número/palabra, no contenerlo.
 				const esOpcion1 = /^\s*1\s*[.)]?\s*$/.test(opcion) || /^(?:transferencia|medios?\s*(?:de\s*pago|autorizados?)|consignaci[oó]n)\b/i.test(opcion);
-				const esOpcion2 = /^\s*2\s*[.)]?\s*$/.test(opcion) || /^(?:p[aá]gina\s*web|web|en\s*l[íi]nea|online|pse|tarjeta|nequi)\b/i.test(opcion);
+				const esOpcion2 = /^\s*2\s*[.)]?\s*$/.test(opcion) || /^(?:p[aá]gina\s*web|web|en\s*l[íi]nea|online|pse|tarjeta|nequi)\b|\bp[aá]gina\b|\bvoy\s*a\s*pagar\b/i.test(opcion);
 				const esOpcion3 = /^\s*3\s*[.)]?\s*$/.test(opcion) || /^(?:punto\s*f[íi]sico|f[íi]sico|tienda|presencial)\b/i.test(opcion);
 
 				if (esOpcion1) {
