@@ -790,20 +790,12 @@ export class VentasAgent implements IAgent {
 
 		if (context?.flujo === 'perfilando_pausado') {
 			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
-			const mencionaProducto = context?.ultimaBusqueda?.results?.length > 0 && (
-				/\b(?:primero|primera|segundo|segunda|tercero|tercera|[1-3])\b/i.test(lower) ||
-				/(?:me (?:interesa|gusta|llama|llam[oó])|quiero|prefiero|ese|esa|este|esta|ese modelo|esa referencia)/i.test(lower)
-			);
 			if (quiereContinuar) {
 				context.flujo = 'perfilando';
-			} else if (mencionaProducto) {
-				context.flujo = null;
 			} else {
+				// Cualquier otro mensaje (pago, consulta, producto, etc.) sale del pausado
+				// y se procesa normalmente en el flujo general
 				context.flujo = null;
-				return {
-					response: 'Perfecto, cuéntame entonces en qué producto estás interesado y te busco las mejores opciones. 😊',
-					metadata: { agentType: 'ventas', flujo: null },
-				};
 			}
 		}
 
@@ -1828,7 +1820,7 @@ export class VentasAgent implements IAgent {
 		// ── Detectar intención de compra ("me gusta", "cómo pago", "lo quiero") ─
 		const tieneProductos = context?.ultimaBusqueda?.results?.length > 0;
 		const esNegacion = /^(?:no\s+|tampoco|nunca|jam[aá]s|ni\s*lo\s*quiero)/i.test(message);
-		const compraIntencion = !esNegacion && /(?:me\s*gusta|lo\s*quiero|lo\s*compro|c[oó]mo\s*(?:pago|compro|adquiero)|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|ese)|dalo|res[eé]rvalo|lo\s*reservo|comprar|pagar)/i.test(message);
+		const compraIntencion = !esNegacion && /(?:me\s*gusta|lo\s*quiero|lo\s*compro|c[oó]mo\s*(?:pago|compro|adquiero|puedo\s*(?:pagar|comprar|adquirir)|le\s*(?:hago|hago\s*(?:para\s*)?pagar))|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|ese)|dalo|res[eé]rvalo|lo\s*reservo|comprar|pagar)/i.test(message);
 
 		// Intentar emparejar el precio mencionado en el mensaje con un producto de la búsqueda anterior
 		function extraerPrecio(texto: string): number | null {
@@ -2145,9 +2137,9 @@ REGLAS DE CATÁLOGO:
 				tieneCobertura: context?.tieneCobertura,
 				...(resetFlujo ? { flujo: null } : {}),
 				...(productoBuscado.length < 30 && productoBuscado.split(/\s+/).length <= 5 && !/[?¿]/.test(productoBuscado) ? { productoSolicitado: productoBuscado } : {}),
-				ultimaBusqueda: products.length > 0
-					? { results: products.slice(0, 6), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
-					: undefined,
+			ultimaBusqueda: products.length > 0
+				? { results: products.slice(0, 6), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
+				: context?.ultimaBusqueda,
 				...datosPersonales,
 			},
 		};
