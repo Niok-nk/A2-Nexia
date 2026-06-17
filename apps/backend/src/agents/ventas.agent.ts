@@ -1009,7 +1009,7 @@ export class VentasAgent implements IAgent {
 							const nums = (msgOriginal.match(/\d+[kKlLgG]*/g) || []).map((n: string) => n.toLowerCase());
 							const filtrados = products.filter(p => nums.some((n: string) => p.name.toLowerCase().includes(n)));
 							const finales = filtrados.length > 0 ? filtrados.slice(0, 4) : products.slice(0, 4);
-							const lista = finales.map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+							const lista = finales.map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}\n   ${p.permalink}`).join('\n');
 							return {
 								response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
 								metadata: {
@@ -1045,7 +1045,7 @@ export class VentasAgent implements IAgent {
 								};
 							}
 						}
-						const lista = products.slice(0, 6).map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+						const lista = products.slice(0, 6).map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}\n   ${p.permalink}`).join('\n');
 						return {
 							response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
 							metadata: {
@@ -1234,23 +1234,32 @@ export class VentasAgent implements IAgent {
 				const matchResult = await matchProductoDesdeMsg(message, ultimosProductos, lastAssistantMsg);
 				
 				if (!matchResult) {
-					// No se pudo identificar → preguntar con lista numerada
-					const listaNombres = ultimosProductos.slice(0, 3).map((p: any, i: number) => {
-						const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
-						return `${i + 1}️⃣ *${p.name}* (${precio})`;
-					}).join('\n');
-					
-					return {
-						response: `¡Ay, qué bien! Pero para darte las instrucciones exactas necesito saber cuál te llevas 😊 Escríbeme el número:\n\n${listaNombres}`,
-						metadata: {
-							agentType: 'ventas',
-							flujo: 'seleccion_pago_ambiguo',
-							ciudad: context?.ciudad,
-							ciudadValidada: true,
-							tieneCobertura: context?.tieneCobertura,
-							ultimaBusqueda: context?.ultimaBusqueda,
-						},
-					};
+					// Mensaje vago positivo ("me gusta", "lo quiero") sin referencia a producto específico
+					// → asumir el primer producto para no romper la conversación
+					const esVagoPositivo = /^(?:me gusta|lo quiero|me interesa|d[aá]le|proceder|concretar|si\s*continuemos|si\s*sigamos|sigamos\s*adelante|continuemos|seguimos|me quedo con|compro eso|la compro|lo compro|eso quiero|eso me sirve|me llevo)$/i.test(message.trim());
+					if (esVagoPositivo) {
+						productoSolicitado = ultimosProductos[0].name;
+						productoURL = ultimosProductos[0].permalink;
+						pPrice = ultimosProductos[0].price;
+					} else {
+						// No se pudo identificar → preguntar con lista numerada
+						const listaNombres = ultimosProductos.slice(0, 3).map((p: any, i: number) => {
+							const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
+							return `${i + 1}️⃣ *${p.name}* (${precio})`;
+						}).join('\n');
+						
+						return {
+							response: `¡Ay, qué bien! Pero para darte las instrucciones exactas necesito saber cuál te llevas 😊 Escríbeme el número:\n\n${listaNombres}`,
+							metadata: {
+								agentType: 'ventas',
+								flujo: 'seleccion_pago_ambiguo',
+								ciudad: context?.ciudad,
+								ciudadValidada: true,
+								tieneCobertura: context?.tieneCobertura,
+								ultimaBusqueda: context?.ultimaBusqueda,
+							},
+						};
+					}
 				}
 				
 				productoSolicitado = matchResult.name;
@@ -2078,7 +2087,7 @@ POLÍTICAS DE LA EMPRESA —debes cumplirlas:
 - No menciones entrega en primer piso a menos que el cliente pregunte explícitamente.
 - No confirmes despacho si el cliente no ha pagado.
 - Si el cliente dice que ya pagó, pídele el comprobante o número de transacción.
-- Si el cliente confirma que quiere un producto, ofrécele ayuda con el pago.
+- Si el cliente confirma que quiere un producto ("me gusta", "lo quiero", "dále", etc.), ofrécele las opciones de pago directamente. No preguntes cuál ni vuelvas a listar productos.
 - Si preguntan por opciones de pago, no las enumeres; guíalos a pagar en la web.
 - Si necesitan ayuda para pagar, ofrécete a escalar al equipo de soporte. Si el cliente insiste en un contacto, entrega el número +573187408190.
 - NUNCA compartas números de cartera (314 422 9949, 315 721 2367) ni correos de facturación. Si el cliente PIDE EXPLÍCITAMENTE cartera o escalar para envío/despacho, entrega el número +573187408190.
@@ -2088,7 +2097,7 @@ POLÍTICAS DE LA EMPRESA —debes cumplirlas:
 - Si el cliente dice "no me gusta esa marca" o algo similar, explícale que todos los electrodomésticos son JLC, marca propia colombiana, y ofrécele mostrarle otros modelos del mismo tipo (nunca sugerir otras marcas ni saltar a pago).
  
 REGLAS DE CATÁLOGO:
-- Usa el CATÁLOGO de productos para responder. Si hay productos, preséntalos de forma natural (máx 1-2 recomendaciones).
+- Usa el CATÁLOGO de productos para responder. Siempre incluye el enlace del producto al presentarlo. Nunca preguntes si quiere el enlace.
 - Si el cliente pregunta detalles/especificaciones de un producto del catálogo, responde usando su información de "Detalles".
 - Si el cliente ya identificó un producto (por nombre, número o SKU), concéntrate en ese producto.
 - Si no hay productos en el catálogo, dilo con honestidad y pregunta qué busca.
@@ -2104,7 +2113,11 @@ REGLAS DE CATÁLOGO:
 				},
 				{
 					cliente: 'Busco una nevera',
-					asistente: 'Tenemos la Nevera JLC No Frost 251L por $1.399.900. ¿Te interesa o quieres ver más opciones?',
+					asistente: 'Tenemos la Nevera JLC No Frost 251L por $1.399.900. https://jlc-electronics.com/product/nevera-jlc-no-frost-251l ¿Te interesa o quieres ver más opciones? 😊',
+				},
+				{
+					cliente: 'me gusta',
+					asistente: '¡Genial! Para continuar con tu compra, ¿cómo prefieres pagar? 😊\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)\n3️⃣ Pagar en un punto físico (solo necesito tu nombre y cédula para reservarlo)',
 				},
 				{
 					cliente: '¿Qué métodos de pago aceptan?',
