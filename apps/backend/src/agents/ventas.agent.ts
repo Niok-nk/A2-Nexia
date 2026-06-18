@@ -672,6 +672,57 @@ export class VentasAgent implements IAgent {
 	async handle(message: string, context: any): Promise<AgentResponse> {
 		const lower = message.toLowerCase().trim();
 
+		// ── Imagen del cliente: analizar con Gemini multimodal ───────────────
+		// Si el cliente envió una imagen (con o sin texto), usar Gemini Vision
+		// para analizarla y responder. Esto bypassa cualquier flujo activo para
+		// que la IA pueda interpretar la imagen según el contexto de la conversación.
+		if (context?.mediaFileName) {
+			const mediaPath = path.join(process.cwd(), 'media', context.mediaFileName);
+			try {
+				const imgBuffer = await fs.readFile(mediaPath);
+				const base64 = imgBuffer.toString('base64');
+				const mime = context.mediaMimeType || 'image/jpeg';
+				const systemText =
+`Eres ${AGENT_NAME}, asesora comercial y experta en electrodomésticos de JLC Electronics Colombia.
+
+Cálida, cercana, femenina, colombiana. Mensajes cortos, máximo 2 frases. Máximo 1 emoji.
+
+${buildUserDataContext(context?.userData)}
+${context?.ciudad ? `Ciudad del cliente: ${context.ciudad}.` : ''}
+${context?.tieneCobertura !== undefined ? `Cobertura: ${context.tieneCobertura ? 'sí' : 'no'}.` : ''}
+
+POLÍTICAS DE LA EMPRESA —debes cumplirlas:
+- El precio NO incluye flete. Si preguntan por envío, indica que se calcula al agregar el producto al carrito en la web.
+- No confirmes despacho si el cliente no ha pagado.
+- Si el cliente dice que ya pagó, pídele el comprobante o número de transacción.
+- Si el cliente confirma que quiere un producto ("me gusta", "lo quiero"), ofrécele las opciones de pago directamente.
+- NUNCA compartas números de cartera ni correos de facturación.
+- No compartas direcciones de agencias físicas.
+
+REGLAS PARA ANALIZAR IMÁGENES:
+- El cliente ha enviado una imagen junto con su mensaje: "${message}".
+- Analiza la imagen y responde combinando lo que ves con el mensaje del cliente.
+- Si la imagen muestra un producto (vitrina, nevera, lavadora, etc.) y el cliente pide información, responde con los detalles que puedas identificar y guíalo a la web o pregúntale algo relevante.
+- Si la imagen parece un comprobante de pago, recibo o transferencia, agradécele y sigue el flujo de pago.
+- Si la imagen no se relaciona con productos o pagos, responde con naturalidad y ayuda en lo que necesite.
+- NO preguntes "¿desde dónde nos escribes?" ni entres en flujos de perfilado — responde directamente sobre lo que ves.`;
+
+				const userPrompt = message === '[Imagen]' ? 'Analiza esta imagen y responde apropiadamente.' : message;
+				const raw = await generateMultimodalResponse(userPrompt, base64, mime, systemText);
+				const response = cleanResponse(raw);
+				return {
+					response,
+					metadata: {
+						agentType: 'ventas',
+						flujo: null,
+						...(context?.ciudad ? { ciudad: context.ciudad, ciudadValidada: context.ciudadValidada } : {}),
+					},
+				};
+			} catch {
+				// Si falla la lectura de la imagen, continuar con el flujo normal
+			}
+		}
+
 		// ── Flujo de esperando_ciudad o esperando_modalidad pausado ──────────
 		if (context?.flujo === 'esperando_ciudad_pausado') {
 			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
@@ -2131,7 +2182,8 @@ REGLAS DE CATÁLOGO:
 - Si menciona un SKU o referencia que SÍ está en el catálogo, confírmaselo y dale el enlace.
 - Si menciona un SKU o referencia que NO está, dilo naturalmente sin afirmar que "no existe".
 - No inventes productos, precios ni disponibilidad.
-- No recomiendes productos de otra categoría si no encontraste lo que busca.`,
+- No recomiendes productos de otra categoría si no encontraste lo que busca.
+- Si el cliente ha enviado una imagen (tú no la ves, pero el mensaje contiene "[Imagen]"), significa que el cliente compartió una foto. Guíalo con naturalidad preguntando de qué producto se trata o pídele que describa la imagen si necesitas más contexto.`,
 			ejemplos: [
 				{
 					cliente: '¿Tienen el parlante JLC-21215 de 500W?',
@@ -2160,21 +2212,7 @@ REGLAS DE CATÁLOGO:
 
 		const catalogPrompt = `\n\nCATÁLOGO DE PRODUCTOS:\n${productListStr}\n\n---\nResponde al cliente según las reglas anteriores.`;
 
-		let raw: string;
-		if (context?.mediaFileName) {
-			const mediaPath = path.join(process.cwd(), 'media', context.mediaFileName);
-			try {
-				const imgBuffer = await fs.readFile(mediaPath);
-				const base64 = imgBuffer.toString('base64');
-				const mime = context.mediaMimeType || 'image/jpeg';
-				const systemText = system + '\n\nEl cliente ha enviado una imagen junto con su mensaje. Analízala y responde según las reglas anteriores.';
-				raw = await generateMultimodalResponse(user + catalogPrompt, base64, mime, systemText);
-			} catch {
-				raw = await generateResponse(user + catalogPrompt, system);
-			}
-		} else {
-			raw = await generateResponse(user + catalogPrompt, system);
-		}
+		const raw = await generateResponse(user + catalogPrompt, system);
 		let response = cleanResponse(raw);
 		response = sanitizarNumerosVentas(response);
 

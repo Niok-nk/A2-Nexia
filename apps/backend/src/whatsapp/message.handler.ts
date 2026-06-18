@@ -140,8 +140,8 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 			body = '[📄 Documento]';
 			logger.info({ phone }, 'Document/sticker message received, body set to placeholder');
 		} else if (esImagenOVideo) {
-			logger.info({ phone }, 'Media message without caption, treating as comprobante');
-			body = 'ya pague';
+			logger.info({ phone }, 'Media message without caption');
+			body = '[Imagen]';
 		} else {
 			logger.warn({ phone }, 'Empty message body, ignoring');
 			return;
