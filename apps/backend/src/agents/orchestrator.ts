@@ -9,7 +9,9 @@ import {
 	DistribuidoresAgent,
 	PagosAgent,
 } from './agents.js';
-import { generateResponse } from '../utils/gemini.js';
+import { generateResponse, generateMultimodalResponse } from '../utils/gemini.js';
+import fs from 'fs/promises';
+import path from 'path';
 
 type IntentKey =
 	| 'bienvenida'
@@ -242,6 +244,46 @@ Categoría:`;
 		context: any
 	): Promise<{ agentType: string; response: string; metadata?: Record<string, any> }> {
 		const hasHistory = Array.isArray(context?.history) && context.history.length > 0 && context?.nuevaSesion !== true;
+
+		// ─── IMAGEN DEL CLIENTE ────────────────────────────────────────────
+		// Si el cliente envió una imagen, analizarla con Gemini Vision
+		// independientemente del flujo o agente activo.
+		if (context?.mediaFileName) {
+			const mediaPath = path.join(process.cwd(), 'media', context.mediaFileName);
+			try {
+				const imgBuffer = await fs.readFile(mediaPath);
+				const base64 = imgBuffer.toString('base64');
+				const mime = context.mediaMimeType || 'image/jpeg';
+				const userDataStr = context?.userData
+					? Object.entries(context.userData).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join('\n')
+					: '';
+				const systemText =
+`Eres Sara, asesora comercial de JLC Electronics Colombia. Cálida, cercana, femenina, mensajes cortos (1-2 frases), máximo 1 emoji.
+
+El cliente ha enviado una imagen. Analízala y responde combinando lo que ves con su mensaje: "${message}".
+${userDataStr ? `\nDatos del cliente:\n${userDataStr}\n` : ''}
+${context?.ciudad ? `Ciudad: ${context.ciudad}.` : ''}
+
+REGLAS:
+- Si la imagen muestra un producto (vitrina, nevera, lavadora, TV, etc.), identifícalo y responde con la información que puedas dar. Guíalo a la web o pregunta algo relevante.
+- Si la imagen es un comprobante de pago, recibo o transferencia, agradécele y dile que el pago ha quedado registrado. Pídele el número de transacción si es necesario.
+- Si la imagen es de un producto dañado o con falla, dile que el servicio técnico puede ayudarle y que lo escalarás.
+- Si la imagen es otra cosa, responde con naturalidad.
+- NO preguntes "¿desde dónde nos escribes?" ni entres en flujos de perfilado. Responde directamente sobre lo que ves.
+- Si no entiendes qué muestra la imagen, pregunta amablemente al cliente.`;
+
+				const userPrompt = message === '[Imagen]' ? 'Analiza esta imagen y responde apropiadamente.' : message;
+				const raw = await generateMultimodalResponse(userPrompt, base64, mime, systemText);
+				const response = raw.replace(/<[^>]+>/g, '').trim();
+				return {
+					agentType: context?.flujo ? String(context.flujo).replace(/_.*$/, '') || 'ventas' : 'ventas',
+					response,
+					metadata: { flujo: null, agentType: 'ventas' },
+				};
+			} catch {
+				// Si falla, continuar con el flujo normal
+			}
+		}
 
 		// ─── SALIDA DE EMERGENCIA (ESCAPE HATCH) ───
 		// Si el usuario quiere cancelar o cambiar de tema, rompemos cualquier flujo activo
