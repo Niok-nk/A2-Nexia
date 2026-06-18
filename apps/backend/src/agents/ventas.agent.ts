@@ -846,12 +846,10 @@ export class VentasAgent implements IAgent {
 					context.flujo = null;
 					// No se retorna — el flujo normal procesa el mensaje
 				} else {
-					const listaNombres = ultimosProductos.slice(0, 3).map((p: any, i: number) => {
-						const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
-						return `${i + 1}️⃣ *${p.name}* (${precio})`;
-					}).join('\n');
+					const p = ultimosProductos[0];
+					const precio = p?.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
 					return {
-						response: `Disculpa, no logré captar tu elección. Por favor escríbeme el número de la opción que prefieres:\n\n${listaNombres}`,
+						response: `Te recomiendo este:\n*${p?.name}* (${precio})\n${p?.permalink}\n\n¿Te gusta o prefieres ver algo diferente? 😊`,
 						metadata: {
 							agentType: 'ventas',
 							flujo: 'seleccion_pago_ambiguo',
@@ -1013,10 +1011,10 @@ export class VentasAgent implements IAgent {
 						if (esEspecifico) {
 							const nums = (msgOriginal.match(/\d+[kKlLgG]*/g) || []).map((n: string) => n.toLowerCase());
 							const filtrados = products.filter(p => nums.some((n: string) => p.name.toLowerCase().includes(n)));
-							const finales = filtrados.length > 0 ? filtrados.slice(0, 4) : products.slice(0, 4);
+							const finales = filtrados.length > 0 ? filtrados.slice(0, 1) : products.slice(0, 1);
 							const lista = finales.map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}\n   ${p.permalink}`).join('\n');
 							return {
-								response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
+								response: `¡Perfecto! Te recomiendo empezar con este:\n\n${lista}\n\n¿Te gusta o prefieres algo diferente? 😊`,
 								metadata: {
 									agentType: 'ventas',
 									modalidad: 'contado',
@@ -1050,9 +1048,9 @@ export class VentasAgent implements IAgent {
 								};
 							}
 						}
-						const lista = products.slice(0, 6).map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}\n   ${p.permalink}`).join('\n');
+						const lista = products.slice(0, 1).map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}\n   ${p.permalink}`).join('\n');
 						return {
-							response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
+							response: `¡Perfecto! Te recomiendo empezar con este:\n\n${lista}\n\n¿Te gusta o prefieres algo diferente? 😊`,
 							metadata: {
 								agentType: 'ventas',
 								modalidad: 'contado',
@@ -1253,14 +1251,11 @@ export class VentasAgent implements IAgent {
 						productoURL = ultimosProductos[0].permalink;
 						pPrice = ultimosProductos[0].price;
 					} else {
-						// No se pudo identificar → preguntar con lista numerada
-						const listaNombres = ultimosProductos.slice(0, 3).map((p: any, i: number) => {
-							const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
-							return `${i + 1}️⃣ *${p.name}* (${precio})`;
-						}).join('\n');
-						
+						// No se pudo identificar → mostrar el primero y preguntar
+						const p = ultimosProductos[0];
+						const precio = p?.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
 						return {
-							response: `¡Ay, qué bien! Pero para darte las instrucciones exactas necesito saber cuál te llevas 😊 Escríbeme el número:\n\n${listaNombres}`,
+							response: `Te recomiendo este:\n*${p?.name}* (${precio})\n${p?.permalink}\n\n¿Te gusta o prefieres ver algo diferente? 😊`,
 							metadata: {
 								agentType: 'ventas',
 								flujo: 'seleccion_pago_ambiguo',
@@ -1937,11 +1932,11 @@ export class VentasAgent implements IAgent {
 				const termino = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || terminoBusqueda || message;
 				const categoriaCtx = context?.ultimaBusqueda?.categoria || detectarCategoria(termino);
 				const resultado = await buscarProductoInteligente(termino, categoriaCtx);
-				products = resultado.products?.slice(0, 6) || [];
+				products = resultado.products?.slice(0, 3) || [];
 				hayProductos = products.length > 0;
 				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
 			} catch {
-				products = context?.ultimaBusqueda?.results?.slice(0, 6) || [];
+				products = context?.ultimaBusqueda?.results?.slice(0, 3) || [];
 				hayProductos = products.length > 0;
 				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
 			}
@@ -2074,7 +2069,7 @@ export class VentasAgent implements IAgent {
 		}
 
 		const productListStr = products.length > 0
-			? products.slice(0, 6).map((p: any, i: number) => {
+			? products.slice(0, 3).map((p: any, i: number) => {
 				const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar precio';
 				const desc = htmlToCleanText(p.description || p.short_description || '', i === 0);
 				// Incluir atributos estructurados (dimensiones, capacidad, etc.)
@@ -2123,7 +2118,8 @@ POLÍTICAS DE LA EMPRESA —debes cumplirlas:
 - Si el cliente dice "no me gusta esa marca" o algo similar, explícale que todos los electrodomésticos son JLC, marca propia colombiana, y ofrécele mostrarle otros modelos del mismo tipo (nunca sugerir otras marcas ni saltar a pago).
  
 REGLAS DE CATÁLOGO:
-- Usa el CATÁLOGO de productos para responder. Siempre incluye el enlace del producto al presentarlo. Nunca preguntes si quiere el enlace.
+- Muestra SOLO 1 producto a la vez. Elige el mejor candidato según lo que sepas del cliente. Si el cliente pide "ver opciones", no le muestres todo el catálogo — elige UN producto y preséntalo, luego pregunta algo para seguir perfilando (presupuesto, uso, capacidad que necesita, etc.).
+- Siempre incluye el enlace del producto al presentarlo. Nunca preguntes si quiere el enlace.
 - Si el cliente pregunta detalles/especificaciones de un producto del catálogo, responde usando su información de "Detalles".
 - Si el cliente ya identificó un producto (por nombre, número o SKU), concéntrate en ese producto.
 - Si no hay productos en el catálogo, dilo con honestidad y pregunta qué busca.
@@ -2139,7 +2135,7 @@ REGLAS DE CATÁLOGO:
 				},
 				{
 					cliente: 'Busco una nevera',
-					asistente: 'Tenemos la Nevera JLC No Frost 251L por $1.399.900. https://jlc-electronics.com/product/nevera-jlc-no-frost-251l ¿Te interesa o quieres ver más opciones? 😊',
+					asistente: 'Tenemos la Nevera JLC No Frost 251L por $1.399.900. https://jlc-electronics.com/product/nevera-jlc-no-frost-251l ¿Para cuántas personas la necesitas? Así te confirmo si es el tamaño ideal 😊',
 				},
 				{
 					cliente: 'me gusta',
@@ -2177,7 +2173,7 @@ REGLAS DE CATÁLOGO:
 				...(resetFlujo ? { flujo: null } : {}),
 				...(productoBuscado.length < 30 && productoBuscado.split(/\s+/).length <= 5 && !/[?¿]/.test(productoBuscado) ? { productoSolicitado: productoBuscado } : {}),
 			ultimaBusqueda: products.length > 0
-				? { results: products.slice(0, 6), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
+				? { results: products.slice(0, 3), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
 				: context?.ultimaBusqueda,
 				...datosPersonales,
 			},
