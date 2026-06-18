@@ -27,7 +27,7 @@ app.use(
 		credentials: true,
 	})
 );
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(pinoHttp({ logger }));
 
 const limiter = rateLimit({
