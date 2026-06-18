@@ -1460,22 +1460,27 @@ export class VentasAgent implements IAgent {
 
 		// ── PASO 4e: Ya estamos esperando el comprobante ────────────────────
 		if (context?.flujo === 'esperando_comprobante') {
-			const productoSolicitado = context?.productoSolicitado || context?.userData?.productoSolicitado || 'tu producto';
-			const ciudad = context?.ciudad || context?.userData?.ciudad || '';
-			const tieneCiudad = !!ciudad;
-			const responseParts = [
-				`¡Ay, qué chévere! Ya recibí tu comprobante, así que voy a confirmar el pago de ${productoSolicitado} para dejarla reservada y lista para el envío${tieneCiudad ? ` a ${ciudad}` : ''}. Tan pronto el equipo lo verifique, te estaré contando. ¡Muchas gracias por tu compra! 😊`,
-			];
-			return {
-				response: responseParts.join('\n\n'),
-				metadata: {
-					agentType: 'ventas',
-					flujo: null,
-					ciudad: context?.ciudad,
-					ciudadValidada: true,
-					tieneCobertura: context?.tieneCobertura,
-				},
-			};
+			// Si pregunta algo, salir del flujo para que Gemini responda
+			if (/[¿?]/.test(message)) {
+				context.flujo = null;
+			} else {
+				const productoSolicitado = context?.productoSolicitado || context?.userData?.productoSolicitado || 'tu producto';
+				const ciudad = context?.ciudad || context?.userData?.ciudad || '';
+				const tieneCiudad = !!ciudad;
+				const responseParts = [
+					`¡Ay, qué chévere! Ya recibí tu comprobante, así que voy a confirmar el pago de ${productoSolicitado} para dejarla reservada y lista para el envío${tieneCiudad ? ` a ${ciudad}` : ''}. Tan pronto el equipo lo verifique, te estaré contando. ¡Muchas gracias por tu compra! 😊`,
+				];
+				return {
+					response: responseParts.join('\n\n'),
+					metadata: {
+						agentType: 'ventas',
+						flujo: null,
+						ciudad: context?.ciudad,
+						ciudadValidada: true,
+						tieneCobertura: context?.tieneCobertura,
+					},
+				};
+			}
 		}
 
 		// ── PASO 5: Flujo de selección de pago ──────────────────────────────
@@ -1556,27 +1561,32 @@ export class VentasAgent implements IAgent {
 
 		// ── Continuación pago físico: usuario ya dio nombre + cédula ────
 		if (context?.flujo === 'pago_fisico') {
-			const cedulaMatch = message.match(/\b\d{5,12}\b/);
-			const nombre = message.replace(/\b\d{5,12}\b/g, '').trim();
-			const tieneNombre = nombre.length >= 3;
-			const tieneCedula = !!cedulaMatch;
+			// Si pregunta algo en vez de dar datos, salir del flujo
+			if (/[¿?]/.test(message)) {
+				context.flujo = null;
+			} else {
+				const cedulaMatch = message.match(/\b\d{5,12}\b/);
+				const nombre = message.replace(/\b\d{5,12}\b/g, '').trim();
+				const tieneNombre = nombre.length >= 3;
+				const tieneCedula = !!cedulaMatch;
 
-			if (tieneNombre || tieneCedula) {
+				if (tieneNombre || tieneCedula) {
+					return {
+						response: `¡Gracias! Tu solicitud de compra en punto físico quedó registrada. Un asesor se comunicará contigo para coordinar la entrega. Si necesitas algo más, acá estoy para ayudarte 😊💙`,
+						nextStage: 'TRANSFER',
+						metadata: {
+							agentType: 'ventas',
+							flujo: null,
+							nombreCliente: nombre.length >= 3 ? nombre : undefined,
+							cedulaCliente: cedulaMatch ? cedulaMatch[0] : undefined,
+						},
+					};
+				}
 				return {
-					response: `¡Gracias! Tu solicitud de compra en punto físico quedó registrada. Un asesor se comunicará contigo para coordinar la entrega. Si necesitas algo más, acá estoy para ayudarte 😊💙`,
-					nextStage: 'TRANSFER',
-					metadata: {
-						agentType: 'ventas',
-						flujo: null,
-						nombreCliente: nombre.length >= 3 ? nombre : undefined,
-						cedulaCliente: cedulaMatch ? cedulaMatch[0] : undefined,
-					},
+					response: `¿Me confirmas tu nombre completo y número de cédula para la reserva? 😊`,
+					metadata: { agentType: 'ventas', flujo: 'pago_fisico' },
 				};
 			}
-			return {
-				response: `¿Me confirmas tu nombre completo y número de cédula para la reserva? 😊`,
-				metadata: { agentType: 'ventas', flujo: 'pago_fisico' },
-			};
 		}
 
 		// ── PASO 6: Detectar datos personales del cliente ──────────────────
@@ -1601,6 +1611,10 @@ export class VentasAgent implements IAgent {
 		const perfilState = context?.perfilState as { categoria: string; step: number; answers: Record<string, string> } | undefined;
 
 		if (context?.flujo === 'perfilando' && perfilState) {
+			// Si pregunta algo en vez de responder perfil, salir del flujo
+			if (/[¿?]/.test(message)) {
+				context.flujo = null;
+			} else {
 			const pasos = PROFILING_STEPS[perfilState.categoria] || PROFILING_STEPS.otra;
 			const pasoActual = pasos[perfilState.step - 1];
 			if (pasoActual) {
@@ -1660,6 +1674,7 @@ export class VentasAgent implements IAgent {
 						...datosPersonales,
 					},
 				};
+			}
 			}
 		}
 
