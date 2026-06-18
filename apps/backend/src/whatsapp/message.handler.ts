@@ -10,14 +10,16 @@ import logger from '../utils/logger.js';
 // ─── Debounce buffer for batching rapid messages per contact ────────
 // Cuando un cliente manda varios mensajes seguidos, esperamos
 // DEBOUNCE_MS para agruparlos y responder con el contexto completo.
-const debounceBuffer = new Map<string, {
+// Funciona tanto para WhatsApp (Baileys) como para el chat web.
+const DEBOUNCE_MS = 3000; // 3 segundos
+
+const debounceBatch = new Map<string, {
 	timer: NodeJS.Timeout;
-	bodies: string[];
-	mediaInfos: Array<{ mediaType: string; mediaMimeType: string; mediaFileName: string } | null>;
+	entries: Array<{ body: string; mediaInfo: { mediaType: string; mediaMimeType: string; mediaFileName: string } | null }>;
 	realPhone: string | null;
 	firstBody: string;
+	resolveFirst: (value: { response: string; agentType: string }) => void;
 }>();
-const DEBOUNCE_MS = 3000; // 3 segundos
 
 function safeParseJson(str: string | null | undefined): any {
 	if (!str) return {};
@@ -185,61 +187,77 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 			},
 		});
 
-		debounceForContact(phone, body, realPhone, mediaInfo ?? null);
+		// Fire-and-forget: el mensaje se bufferiza y el flush enviará
+		// la respuesta por WhatsApp cuando el timer se cumpla.
+		bufferForDebounce(phone, body, realPhone, mediaInfo ?? null)
+			.then((result) => {
+				if (result.agentType === 'BUFFERED' || !result.response) return;
+				const sendTo = realPhone || phone;
+				sendMessage(sendTo, result.response)
+					.then(() => logger.info({ phone, sendTo, agentType: result.agentType, batched: true }, 'Debounced WhatsApp response sent'))
+					.catch((err) => logger.warn({ phone, sendTo, error: err }, 'Failed to send debounced WhatsApp response'));
+			})
+			.catch((err) => logger.error({ error: err, phone }, 'bufferForDebounce failed'));
 	} catch (error) {
 		logger.error({ error, phone }, 'Error handling incoming message');
 	}
 }
 
 // ─── Debounce: buffer per-contact messages, process as batch after inactivity ───
-function debounceForContact(
+// Retorna un Promise que:
+//   - Para el PRIMER mensaje del batch: resuelve cuando el timer se dispare (3s),
+//     con el resultado combinado de processIncomingMessage.
+//   - Para mensajes SUBSIGUIENTES: resuelve inmediatamente con agentType='BUFFERED'.
+export function bufferForDebounce(
 	phone: string,
 	body: string,
 	realPhone: string | null,
 	mediaInfo: { mediaType: string; mediaMimeType: string; mediaFileName: string } | null
-): void {
-	const existing = debounceBuffer.get(phone);
+): Promise<{ response: string; agentType: string }> {
+	const existing = debounceBatch.get(phone);
 	if (existing) {
 		clearTimeout(existing.timer);
-		existing.bodies.push(body);
-		existing.mediaInfos.push(mediaInfo);
-	} else {
-		debounceBuffer.set(phone, {
-			timer: null as any,
-			bodies: [body],
-			mediaInfos: [mediaInfo],
-			realPhone,
-			firstBody: body,
-		});
+		existing.entries.push({ body, mediaInfo });
+		existing.timer = setTimeout(() => flushDebounceBatch(phone), DEBOUNCE_MS);
+		logger.info({ phone, batchSize: existing.entries.length }, '→ bufferForDebounce: extending existing batch');
+		return Promise.resolve({ response: '', agentType: 'BUFFERED' });
 	}
 
-	const entry = debounceBuffer.get(phone)!;
-	entry.timer = setTimeout(async () => {
-		debounceBuffer.delete(phone);
+	logger.info({ phone, body: body.slice(0, 40) }, '→ bufferForDebounce: new batch');
+	return new Promise((resolve) => {
+		const batch = {
+			timer: null as any,
+			entries: [{ body, mediaInfo }],
+			realPhone,
+			firstBody: body,
+			resolveFirst: resolve,
+		};
+		debounceBatch.set(phone, batch);
+		batch.timer = setTimeout(() => flushDebounceBatch(phone), DEBOUNCE_MS);
+	});
+}
 
-		const combinedBody = entry.bodies.join('\n').trim() || '[Imagen]';
-		const lastMediaInfo = entry.mediaInfos[entry.mediaInfos.length - 1] ?? undefined;
-		const firstBody = entry.firstBody;
-		const targetRealPhone = entry.realPhone;
+async function flushDebounceBatch(phone: string): Promise<void> {
+	const batch = debounceBatch.get(phone);
+	if (!batch) return;
+	debounceBatch.delete(phone);
 
-		try {
-			const { response, agentType } = await processIncomingMessage(
-				phone, combinedBody, targetRealPhone, lastMediaInfo,
-				{ skipInboundSave: true, firstBodyForSessionCheck: firstBody }
-			);
-			if (!response) return;
+	logger.info({ phone, batchSize: batch.entries.length }, '→ flushDebounceBatch: processing batch');
 
-			const sendTo = targetRealPhone || phone;
-			try {
-				await sendMessage(sendTo, response);
-				logger.info({ phone, realPhone: targetRealPhone, sendTo, agentType, batchedCount: entry.bodies.length }, 'Debounced batch response sent');
-			} catch (err) {
-				logger.warn({ phone, sendTo, agentType, error: err }, 'Failed to send debounced WhatsApp response');
-			}
-		} catch (error) {
-			logger.error({ error, phone }, 'Error processing debounced batch');
-		}
-	}, DEBOUNCE_MS);
+	const combinedBody = batch.entries.map(e => e.body).join('\n').trim() || '[Imagen]';
+	const lastMedia = batch.entries[batch.entries.length - 1].mediaInfo ?? undefined;
+
+	try {
+		const result = await processIncomingMessage(
+			phone, combinedBody, batch.realPhone, lastMedia,
+			{ skipInboundSave: true, firstBodyForSessionCheck: batch.firstBody }
+		);
+		batch.resolveFirst(result);
+		logger.info({ phone, agentType: result.agentType, batchedCount: batch.entries.length }, 'Debounced batch completed');
+	} catch (error) {
+		logger.error({ error, phone }, 'Error flushing debounce batch');
+		batch.resolveFirst({ response: '', agentType: 'SYSTEM' });
+	}
 }
 
 export async function processIncomingMessage(

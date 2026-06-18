@@ -5,7 +5,7 @@ import { getStatus, getCurrentQR, sendMessage, reconnectWhatsApp } from './whats
 import { requireAuth } from '../middleware/auth.middleware.js';
 import prisma from '../db/index.js';
 import logger from '../utils/logger.js';
-import { processIncomingMessage } from './message.handler.js';
+import { processIncomingMessage, bufferForDebounce } from './message.handler.js';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
@@ -142,25 +142,44 @@ router.post('/chat', async (req: Request, res: Response) => {
 	}
 
 	try {
-		const { response, agentType } = await processIncomingMessage(phone, message, null, mediaInfo);
-		if (!response) {
+		// Save individual inbound message to DB immediately
+		const contact = await (prisma.contact as any).upsert({
+			where: { phone },
+			update: {},
+			create: { phone, realPhone: null },
+		});
+		await prisma.message.create({
+			data: {
+				contactId: contact.id,
+				direction: 'INBOUND',
+				body: message,
+				...(mediaInfo ?? {}),
+			},
+		});
+
+		// Buffer con debounce para agrupar mensajes rápidos del mismo contacto
+		const result = await bufferForDebounce(phone, message, null, mediaInfo ?? null);
+		if (result.agentType === 'BUFFERED') {
+			res.json({ success: true, buffered: true, message: '' });
+			return;
+		}
+
+		if (!result.response) {
 			res.status(500).json({ error: 'No se pudo procesar el mensaje' });
 			return;
 		}
 
-		const contact = await prisma.contact.findUnique({ where: { phone } }).catch(() => null);
 		const sendTo = contact?.realPhone || phone;
-
 		const waStatus = getStatus();
 		logger.info({ waStatus, phone, sendTo }, 'WhatsApp send check');
 		try {
-			await sendMessage(sendTo, response);
+			await sendMessage(sendTo, result.response);
 			logger.info({ phone, sendTo }, 'Message sent via WhatsApp');
 		} catch (err) {
 			logger.warn({ error: err, phone, sendTo, waStatus }, 'WhatsApp send failed');
 		}
 
-		res.json({ success: true, message: response, agentType });
+		res.json({ success: true, message: result.response, agentType: result.agentType });
 	} catch (error) {
 		logger.error({ error, phone, message }, 'Chat error');
 		res.status(500).json({ error: 'Error procesando mensaje', details: String(error) });
