@@ -219,6 +219,11 @@ export function esPreguntaEspecificacion(texto: string): boolean {
 	return (tieneSpec && esPregunta) || tieneCapacidadNumerica;
 }
 
+/** Detecta si el mensaje pide información/descripción de un producto (no es intención de compra) */
+export function esPreguntaInfo(texto: string): boolean {
+	return /\b(?:descr[ií]beme|descr[ií]belo|describir|descripci[oó]n|cu[aá]ntame\s*m[aá]s|dime\s*m[aá]s|m[aá]s\s*info(?:rmaci[oó]n)?|m[aá]s\s*detalles|c[oó]mo\s*es\s*(?:el|la|ese|esta)|h[aá]blame\s*de|qu[eé]\s*incluye|qu[eé]\s*tiene|qu[eé]\s*trae|qu[eé]\s*hace|detalles?\s*del\s*producto)\b/i.test(texto);
+}
+
 /** Convierte texto de presupuesto a un techo numérico en pesos. */
 function parsearPresupuesto(texto: string): number {
 	if (!texto) return 0;
@@ -1206,7 +1211,7 @@ export class VentasAgent implements IAgent {
 		// aunque mencione "la 3" o "prefiero" — primero hay que responder la duda.
 		// También excluir preguntas de precio ("que precio tiene la de 15")
 		const esPreguntaPrecio = /\b(?:precio|cu[aá]nto\s+(?:cuesta|cuestan|vale|valen|es|son)|qu[eé]\s+precio\s+tiene)\b/i.test(message);
-		const quiereComprar = quiereComprarRaw && !esPreguntaEspecificacion(message) && !esPreguntaPrecio;
+		const quiereComprar = quiereComprarRaw && !esPreguntaEspecificacion(message) && !esPreguntaPrecio && !esPreguntaInfo(message);
 
 		const puedeComprar = context?.modalidad === 'contado' || 
 			(context?.ultimaBusqueda?.results?.length > 0 && context?.modalidad !== 'credito');
@@ -1240,7 +1245,9 @@ export class VentasAgent implements IAgent {
 				if (!matchResult) {
 					// Mensaje vago positivo ("me gusta", "lo quiero") sin referencia a producto específico
 					// → asumir el primer producto para no romper la conversación
-					const esVagoPositivo = /^(?:(?:si|sí)\s+)?(?:me gusta|lo quiero|me interesa|d[aá]le|proceder|concretar|continuemos|sigamos|seguimos|me quedo con|compro eso|la compro|lo compro|eso quiero|eso me sirve|me llevo)$|^(?:si|sí)\s+(?:continuemos|sigamos(?: adelante)?|seguimos)$/i.test(message.trim());
+					// Pero si pide descripción/info, no es compra, dejar fluir
+					const mensajeTrim = message.trim();
+					const esVagoPositivo = !esPreguntaInfo(mensajeTrim) && /^(?:(?:si|sí)\s+)?(?:me gusta|lo quiero|me interesa|d[aá]le|proceder|concretar|continuemos|sigamos|seguimos|me quedo con|compro eso|la compro|lo compro|eso quiero|eso me sirve|me llevo)$|^(?:si|sí)\s+(?:continuemos|sigamos(?: adelante)?|seguimos)$/i.test(mensajeTrim);
 					if (esVagoPositivo) {
 						productoSolicitado = ultimosProductos[0].name;
 						productoURL = ultimosProductos[0].permalink;
@@ -1833,7 +1840,7 @@ export class VentasAgent implements IAgent {
 		// ── Detectar intención de compra ("me gusta", "cómo pago", "lo quiero") ─
 		const tieneProductos = context?.ultimaBusqueda?.results?.length > 0;
 		const esNegacion = /^(?:no\s+|tampoco|nunca|jam[aá]s|ni\s*lo\s*quiero)/i.test(message);
-		const compraIntencion = !esNegacion && /(?:me\s*gusta|lo\s*quiero|lo\s*compro|c[oó]mo\s*(?:pago|compro|adquiero|puedo\s*(?:pagar|comprar|adquirir)|le\s*(?:hago|hago\s*(?:para\s*)?pagar))|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|ese)|dalo|res[eé]rvalo|lo\s*reservo|comprar|pagar)/i.test(message);
+		const compraIntencion = !esNegacion && !esPreguntaInfo(message) && /(?:me\s*gusta|lo\s*quiero|lo\s*compro|c[oó]mo\s*(?:pago|compro|adquiero|puedo\s*(?:pagar|comprar|adquirir)|le\s*(?:hago|hago\s*(?:para\s*)?pagar))|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|ese)|dalo|res[eé]rvalo|lo\s*reservo|comprar|pagar)/i.test(message);
 
 		// Intentar emparejar el precio mencionado en el mensaje con un producto de la búsqueda anterior
 		function extraerPrecio(texto: string): number | null {
