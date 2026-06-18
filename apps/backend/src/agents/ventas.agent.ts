@@ -56,7 +56,7 @@ function extraerCapacidad(mensaje: string): { valor: number; unidad: string; que
 	for (const p of patrones) {
 		const match = t.match(p.regex);
 		if (match) {
-			return { valor: parseInt(match[1], 10), unidad: p.unidad, query: `${match[1]} ${p.label}` };
+			return { valor: parseInt(match[1], 10), unidad: p.unidad, query: `${match[1]} ${p.unidad}` };
 		}
 	}
 	return null;
@@ -1704,7 +1704,8 @@ export class VentasAgent implements IAgent {
 				const terminoParaBuscar = message.toLowerCase().replace(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa)\s*/gi, '').trim();
 				let productosDisponibles: any[] = [];
 				try {
-					productosDisponibles = await wooCommerceService.searchProducts(terminoParaBuscar, 20);
+					const resultado = await buscarProductoInteligente(terminoParaBuscar, cat);
+					productosDisponibles = resultado.products;
 					if (productosDisponibles.length === 0) {
 						productosDisponibles = await wooCommerceService.searchProducts(cat, 20);
 					}
@@ -2109,6 +2110,7 @@ POLÍTICAS DE LA EMPRESA —debes cumplirlas:
 - No confirmes despacho si el cliente no ha pagado.
 - Si el cliente dice que ya pagó, pídele el comprobante o número de transacción.
 - Si el cliente confirma que quiere un producto ("me gusta", "lo quiero", "dále", etc.), ofrécele las opciones de pago directamente. No preguntes cuál ni vuelvas a listar productos.
+- Cuando muestres un producto, NO preguntes "¿Seguimos buscando?" ni "¿Seguimos buscando el producto ideal para ti?". En vez de eso, cuando el cliente muestre interés, ofrécele ir al pago o pregúntale algo concreto para avanzar (ej: "¿te gusta esta o prefieres algo diferente?"). Siempre busca cerrar la venta, no alargar la búsqueda.
 - Si preguntan por opciones de pago, no las enumeres; guíalos a pagar en la web.
 - Si necesitan ayuda para pagar, ofrécete a escalar al equipo de soporte. Si el cliente insiste en un contacto, entrega el número +573187408190.
 - NUNCA compartas números de cartera (314 422 9949, 315 721 2367) ni correos de facturación. Si el cliente PIDE EXPLÍCITAMENTE cartera o escalar para envío/despacho, entrega el número +573187408190.
