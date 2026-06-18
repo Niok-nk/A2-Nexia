@@ -6,6 +6,9 @@ import { requireAuth } from '../middleware/auth.middleware.js';
 import prisma from '../db/index.js';
 import logger from '../utils/logger.js';
 import { processIncomingMessage } from './message.handler.js';
+import fs from 'fs/promises';
+import path from 'path';
+import crypto from 'crypto';
 
 const router: Router = Router();
 
@@ -107,6 +110,8 @@ router.post('/send', requireAuth, async (req: Request, res: Response) => {
 const testMessageSchema = z.object({
 	phone: z.string().min(10),
 	message: z.string().min(1),
+	image: z.string().optional(),
+	imageMimeType: z.string().optional(),
 });
 
 // Endpoint sin auth para el chat flotante
@@ -117,10 +122,27 @@ router.post('/chat', async (req: Request, res: Response) => {
 		return;
 	}
 
-	const { phone, message } = result.data;
+	const { phone, message, image, imageMimeType } = result.data;
+
+	let mediaInfo: { mediaType: string; mediaMimeType: string; mediaFileName: string } | undefined;
+
+	if (image && imageMimeType) {
+		try {
+			const ext = imageMimeType.split('/')[1] || 'jpg';
+			const fileName = `${crypto.randomUUID()}.${ext}`;
+			const mediaDir = path.join(process.cwd(), 'media');
+			await fs.mkdir(mediaDir, { recursive: true });
+			const buffer = Buffer.from(image, 'base64');
+			await fs.writeFile(path.join(mediaDir, fileName), buffer);
+			mediaInfo = { mediaType: 'image', mediaMimeType: imageMimeType, mediaFileName: fileName };
+			logger.info({ fileName, size: buffer.length }, 'Image saved from chat widget');
+		} catch (err) {
+			logger.warn({ error: err }, 'Failed to save image from chat widget');
+		}
+	}
 
 	try {
-		const { response, agentType } = await processIncomingMessage(phone, message);
+		const { response, agentType } = await processIncomingMessage(phone, message, null, mediaInfo);
 		if (!response) {
 			res.status(500).json({ error: 'No se pudo procesar el mensaje' });
 			return;

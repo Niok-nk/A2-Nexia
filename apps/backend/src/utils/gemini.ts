@@ -56,6 +56,53 @@ function esRespuestaSegura(texto: string): boolean {
 	return true;
 }
 
+export const generateMultimodalResponse = async (
+	text: string,
+	imageBase64: string,
+	mimeType: string,
+	systemInstruction?: string
+): Promise<string> => {
+	let lastError: any;
+	const parts: any[] = [
+		{ text },
+		{ inlineData: { mimeType, data: imageBase64 } },
+	];
+
+	for (const modelName of MODELS) {
+		let currentParts = parts;
+		for (let attempt = 1; attempt <= 5; attempt++) {
+			try {
+				const model = genAI.getGenerativeModel({
+					model: modelName,
+					systemInstruction,
+				}, { timeout: REQUEST_TIMEOUT_MS });
+				const result = await model.generateContent({ contents: [{ role: 'user', parts: currentParts }] });
+				const text = result.response.text();
+
+				if (esRespuestaSegura(text)) return text;
+
+				currentParts = [
+					{ text: `${text}\n\n[SISTEMA - ERROR DE SEGURIDAD]: Tu respuesta anterior contenía razonamiento interno o texto en inglés. RESPONDE ÚNICAMENTE EN ESPAÑOL COLOMBIANO.` },
+					{ inlineData: { mimeType, data: imageBase64 } },
+				];
+			} catch (error: any) {
+				const esRateLimit = String(error).includes('429') || String(error).includes('Too Many Requests');
+				if (esRateLimit) {
+					const delayMs = Math.min(1000 * Math.pow(2, attempt), 30_000);
+					console.warn(`[Gemini API] Model (${modelName}) rate-limited on attempt ${attempt}. Retrying in ${delayMs}ms...`);
+					await new Promise(r => setTimeout(r, delayMs));
+					continue;
+				}
+				console.warn(`[Gemini API] Model (${modelName}) failed on attempt ${attempt}. Error: ${error}`);
+				lastError = error;
+				break;
+			}
+		}
+	}
+
+	throw new Error(`Gemini API error (All models failed). Last error: ${lastError}`);
+};
+
 const REQUEST_TIMEOUT_MS = 60_000;
 
 export const getGeminiModel = (systemInstruction?: string) => {

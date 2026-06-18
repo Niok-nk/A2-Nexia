@@ -19,7 +19,9 @@ import {
 	getSaludo,
 	resolverOpcion
 } from './helpers.js';
-import { generateResponse } from '../utils/gemini.js';
+import { generateResponse, generateMultimodalResponse } from '../utils/gemini.js';
+import fs from 'fs/promises';
+import path from 'path';
 import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
 import { sendMessage as sendWA } from '../whatsapp/whatsapp.js';
 
@@ -2158,7 +2160,21 @@ REGLAS DE CATÁLOGO:
 
 		const catalogPrompt = `\n\nCATÁLOGO DE PRODUCTOS:\n${productListStr}\n\n---\nResponde al cliente según las reglas anteriores.`;
 
-		const raw = await generateResponse(user + catalogPrompt, system);
+		let raw: string;
+		if (context?.mediaFileName) {
+			const mediaPath = path.join(process.cwd(), 'media', context.mediaFileName);
+			try {
+				const imgBuffer = await fs.readFile(mediaPath);
+				const base64 = imgBuffer.toString('base64');
+				const mime = context.mediaMimeType || 'image/jpeg';
+				const systemText = system + '\n\nEl cliente ha enviado una imagen junto con su mensaje. Analízala y responde según las reglas anteriores.';
+				raw = await generateMultimodalResponse(user + catalogPrompt, base64, mime, systemText);
+			} catch {
+				raw = await generateResponse(user + catalogPrompt, system);
+			}
+		} else {
+			raw = await generateResponse(user + catalogPrompt, system);
+		}
 		let response = cleanResponse(raw);
 		response = sanitizarNumerosVentas(response);
 

@@ -313,6 +313,7 @@ export async function processIncomingMessage(
 		})),
 		userData,
 		nuevaSesion: esNuevaSesion,
+		...(mediaInfo?.mediaFileName ? { mediaFileName: mediaInfo.mediaFileName, mediaType: mediaInfo.mediaType, mediaMimeType: mediaInfo.mediaMimeType } : {}),
 	};
 
 	// Si ya tenemos ciudad guardada, pre-poblamos el contexto
