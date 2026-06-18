@@ -7,6 +7,18 @@ import { verificarCobertura } from '../agents/helpers.js';
 import { downloadMedia } from './media.service.js';
 import logger from '../utils/logger.js';
 
+// ─── Debounce buffer for batching rapid messages per contact ────────
+// Cuando un cliente manda varios mensajes seguidos, esperamos
+// DEBOUNCE_MS para agruparlos y responder con el contexto completo.
+const debounceBuffer = new Map<string, {
+	timer: NodeJS.Timeout;
+	bodies: string[];
+	mediaInfos: Array<{ mediaType: string; mediaMimeType: string; mediaFileName: string } | null>;
+	realPhone: string | null;
+	firstBody: string;
+}>();
+const DEBOUNCE_MS = 3000; // 3 segundos
+
 function safeParseJson(str: string | null | undefined): any {
 	if (!str) return {};
 	try {
@@ -150,55 +162,126 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 
 	logger.info({ phone, realPhone, body: body.slice(0, 80) }, 'Incoming WA message');
 
-		try {
-		const { response, agentType } = await processIncomingMessage(phone, body, realPhone, mediaInfo ?? undefined);
-		if (!response) return;
+	try {
+		// Save the inbound message to DB immediately (for history), then
+		// buffer the orchestration to batch rapid messages from the same contact.
+		const contact = await (prisma.contact as any).upsert({
+			where: { phone },
+			update: {
+				...(realPhone !== phone ? { realPhone } : {})
+			},
+			create: {
+				phone,
+				realPhone: realPhone !== phone ? realPhone : (phone.startsWith('158') && phone.length >= 14 ? null : phone)
+			},
+		});
 
-		// 10. Enviar respuesta por WhatsApp (intentar aunque el status no sea 'connected')
-		//     Baileys puede recibir mensajes incluso cuando isReady = false
-		const sendTo = realPhone || phone;
-		try {
-			await sendMessage(sendTo, response);
-			logger.info({ phone, realPhone, sendTo, agentType }, 'Response sent');
-		} catch (err) {
-			logger.warn({ phone, sendTo, agentType, error: err }, 'Failed to send WhatsApp response');
-		}
+		await prisma.message.create({
+			data: {
+				contactId: contact.id,
+				direction: 'INBOUND',
+				body,
+				...(mediaInfo ?? {}),
+			},
+		});
+
+		debounceForContact(phone, body, realPhone, mediaInfo ?? null);
 	} catch (error) {
 		logger.error({ error, phone }, 'Error handling incoming message');
 	}
+}
+
+// ─── Debounce: buffer per-contact messages, process as batch after inactivity ───
+function debounceForContact(
+	phone: string,
+	body: string,
+	realPhone: string | null,
+	mediaInfo: { mediaType: string; mediaMimeType: string; mediaFileName: string } | null
+): void {
+	const existing = debounceBuffer.get(phone);
+	if (existing) {
+		clearTimeout(existing.timer);
+		existing.bodies.push(body);
+		existing.mediaInfos.push(mediaInfo);
+	} else {
+		debounceBuffer.set(phone, {
+			timer: null as any,
+			bodies: [body],
+			mediaInfos: [mediaInfo],
+			realPhone,
+			firstBody: body,
+		});
+	}
+
+	const entry = debounceBuffer.get(phone)!;
+	entry.timer = setTimeout(async () => {
+		debounceBuffer.delete(phone);
+
+		const combinedBody = entry.bodies.join('\n').trim() || '[Imagen]';
+		const lastMediaInfo = entry.mediaInfos[entry.mediaInfos.length - 1] ?? undefined;
+		const firstBody = entry.firstBody;
+		const targetRealPhone = entry.realPhone;
+
+		try {
+			const { response, agentType } = await processIncomingMessage(
+				phone, combinedBody, targetRealPhone, lastMediaInfo,
+				{ skipInboundSave: true, firstBodyForSessionCheck: firstBody }
+			);
+			if (!response) return;
+
+			const sendTo = targetRealPhone || phone;
+			try {
+				await sendMessage(sendTo, response);
+				logger.info({ phone, realPhone: targetRealPhone, sendTo, agentType, batchedCount: entry.bodies.length }, 'Debounced batch response sent');
+			} catch (err) {
+				logger.warn({ phone, sendTo, agentType, error: err }, 'Failed to send debounced WhatsApp response');
+			}
+		} catch (error) {
+			logger.error({ error, phone }, 'Error processing debounced batch');
+		}
+	}, DEBOUNCE_MS);
 }
 
 export async function processIncomingMessage(
 	phone: string,
 	body: string,
 	realPhone: string | null = null,
-	mediaInfo?: { mediaType: string; mediaMimeType: string; mediaFileName: string }
+	mediaInfo?: { mediaType: string; mediaMimeType: string; mediaFileName: string },
+	options?: { skipInboundSave?: boolean; firstBodyForSessionCheck?: string }
 ): Promise<{ response: string; agentType: string; contactId?: string; leadId?: string }> {
 	try {
-	// 1. Upsert del contacto
-	const contact = await (prisma.contact as any).upsert({
-		where: { phone },
-		update: {
-			...(realPhone !== phone ? { realPhone } : {})
-		},
-		create: { 
-			phone,
-			realPhone: realPhone !== phone ? realPhone : (phone.startsWith('158') && phone.length >= 14 ? null : phone)
-		},
-	});
+	// 1. Upsert del contacto (skip si skipInboundSave, el contacto ya existe)
+	const contact = options?.skipInboundSave
+		? await prisma.contact.findUnique({ where: { phone } })
+		: await (prisma.contact as any).upsert({
+			where: { phone },
+			update: {
+				...(realPhone !== phone ? { realPhone } : {})
+			},
+			create: { 
+				phone,
+				realPhone: realPhone !== phone ? realPhone : (phone.startsWith('158') && phone.length >= 14 ? null : phone)
+			},
+		});
 
-	// 2. Obtener historial reciente (últimos 10 mensajes) ANTES de guardar el INBOUND
-	//    para que el orquestador pueda detectar si es el primer mensaje (hasHistory = false)
+	if (!contact) {
+		logger.error({ phone }, 'Contact not found (skipInboundSave but no contact exists)');
+		return { response: '', agentType: 'SYSTEM' };
+	}
+
+	// 2. Obtener historial reciente
 	const history = await prisma.message.findMany({
 		where: { contactId: contact.id },
 		orderBy: { sentAt: 'desc' },
 		take: 30,
 	});
 
-	// 4. Detectar nueva sesión: cliente que ya tenía conversaciones previas y vuelve a saludar
-	//    Esto crea un nuevo Lead (instancia independiente) para preservar los datos anteriores.
+	// 4. Detectar nueva sesión.
+	//    Cuando los mensajes llegan debounced (skipInboundSave), usamos el primer
+	//    cuerpo original para detectar saludos, no el combinado.
+	const bodyForSessionCheck = options?.firstBodyForSessionCheck || body;
 	const tieneHistorial = history.length > 0;
-	const esNuevaSesion = tieneHistorial && orchestrator.esSaludo(body);
+	const esNuevaSesion = tieneHistorial && orchestrator.esSaludo(bodyForSessionCheck);
 
 	if (esNuevaSesion) {
 		logger.info({ phone, contactId: contact.id }, 'Nueva sesión detectada — se creará un nuevo Lead');
@@ -212,16 +295,19 @@ export async function processIncomingMessage(
 			orderBy: { createdAt: 'desc' },
 		});
 
-	const stageInbound = !esNuevaSesion && lead?.stage ? lead.stage : 'INITIAL';
-	await prisma.message.create({
-		data: {
-			contactId: contact.id,
-			direction: 'INBOUND',
-			body,
-			extra: JSON.stringify({ stage: stageInbound }),
-			...mediaInfo,
-		},
-	});
+	// Inbound message: skip if already saved individually by handleIncomingMessage
+	if (!options?.skipInboundSave) {
+		const stageInbound = !esNuevaSesion && lead?.stage ? lead.stage : 'INITIAL';
+		await prisma.message.create({
+			data: {
+				contactId: contact.id,
+				direction: 'INBOUND',
+				body,
+				extra: JSON.stringify({ stage: stageInbound }),
+				...mediaInfo,
+			},
+		});
+	}
 
 	// 6. Cargar UserData persistido (datos recolectados por la IA progresivamente)
 	let userDataRecord = lead
