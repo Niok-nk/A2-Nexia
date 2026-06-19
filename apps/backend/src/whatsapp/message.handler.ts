@@ -7,6 +7,8 @@ import { verificarCobertura } from '../agents/helpers.js';
 import { downloadMedia } from './media.service.js';
 import logger from '../utils/logger.js';
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
 // ─── Debounce buffer for batching rapid messages per contact ────────
 // Cuando un cliente manda varios mensajes seguidos, esperamos
 // DEBOUNCE_MS para agruparlos y responder con el contexto completo.
@@ -190,8 +192,9 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 		// Fire-and-forget: el mensaje se bufferiza y el flush enviará
 		// la respuesta por WhatsApp cuando el timer se cumpla.
 		bufferForDebounce(phone, body, realPhone, mediaInfo ?? null)
-			.then((result) => {
+			.then(async (result) => {
 				if (result.agentType === 'BUFFERED' || !result.response) return;
+				await sleep(5000);
 				const sendTo = realPhone || phone;
 				sendMessage(sendTo, result.response)
 					.then(() => logger.info({ phone, sendTo, agentType: result.agentType, batched: true }, 'Debounced WhatsApp response sent'))

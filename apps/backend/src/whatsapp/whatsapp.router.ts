@@ -10,6 +10,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
 const router: Router = Router();
 
 // GET /api/v1/whatsapp/status
@@ -172,6 +174,7 @@ router.post('/chat', async (req: Request, res: Response) => {
 		const sendTo = contact?.realPhone || phone;
 		const waStatus = getStatus();
 		logger.info({ waStatus, phone, sendTo }, 'WhatsApp send check');
+		await sleep(5000);
 		try {
 			await sendMessage(sendTo, result.response);
 			logger.info({ phone, sendTo }, 'Message sent via WhatsApp');
@@ -206,6 +209,8 @@ router.post('/test', requireAuth, async (req: Request, res: Response) => {
 		// Usar realPhone del contacto para enviar
 		const contact = await prisma.contact.findUnique({ where: { phone } }).catch(() => null);
 		const sendTo = contact?.realPhone || phone;
+
+		await sleep(5000);
 
 		try {
 			await sendMessage(sendTo, response);
