@@ -224,6 +224,11 @@ export function detectarShortcuts(message: string, categoria: string): Record<st
 	return answers;
 }
 
+/** Detección centralizada de "ya pagué" / pago confirmado */
+export function detectarPagoConfirmado(texto: string): boolean {
+	return /\b(?:ya pagu[ée]|pago realizado|ya hice el pago|ya transfer[ií]|comprobante enviado|ya consign[ué]|estoy pagando|ya pagando|acabo de pagar|ya hice la transferencia|ya hice el pago|listo el pago|pago listo|pago confirmado)\b/i.test(texto);
+}
+
 export function obtenerTerminoBusquedaDesdePerfil(categoria: string, answers: Record<string, string>): string {
 	if (categoria === 'nevera') {
 		if (answers.presupuesto === 'alto') return 'nevecon';

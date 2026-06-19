@@ -17,11 +17,10 @@ import {
 	detectarCiudadConIA,
 	AGENT_NAME,
 	getSaludo,
-	resolverOpcion
+	resolverOpcion,
+	detectarPagoConfirmado
 } from './helpers.js';
-import { generateResponse, generateMultimodalResponse } from '../utils/gemini.js';
-import fs from 'fs/promises';
-import path from 'path';
+import { generateResponse } from '../utils/gemini.js';
 import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
 import { sendMessage as sendWA } from '../whatsapp/whatsapp.js';
 
@@ -671,57 +670,6 @@ export class VentasAgent implements IAgent {
 	// ── Handle principal ──────────────────────────────────────────────────────
 	async handle(message: string, context: any): Promise<AgentResponse> {
 		const lower = message.toLowerCase().trim();
-
-		// ── Imagen del cliente: analizar con Gemini multimodal ───────────────
-		// Si el cliente envió una imagen (con o sin texto), usar Gemini Vision
-		// para analizarla y responder. Esto bypassa cualquier flujo activo para
-		// que la IA pueda interpretar la imagen según el contexto de la conversación.
-		if (context?.mediaFileName) {
-			const mediaPath = path.join(process.cwd(), 'media', context.mediaFileName);
-			try {
-				const imgBuffer = await fs.readFile(mediaPath);
-				const base64 = imgBuffer.toString('base64');
-				const mime = context.mediaMimeType || 'image/jpeg';
-				const systemText =
-`Eres ${AGENT_NAME}, asesora comercial y experta en electrodomésticos de JLC Electronics Colombia.
-
-Cálida, cercana, femenina, colombiana. Mensajes cortos, máximo 2 frases. Máximo 1 emoji.
-
-${buildUserDataContext(context?.userData)}
-${context?.ciudad ? `Ciudad del cliente: ${context.ciudad}.` : ''}
-${context?.tieneCobertura !== undefined ? `Cobertura: ${context.tieneCobertura ? 'sí' : 'no'}.` : ''}
-
-POLÍTICAS DE LA EMPRESA —debes cumplirlas:
-- El precio NO incluye flete. Si preguntan por envío, indica que se calcula al agregar el producto al carrito en la web.
-- No confirmes despacho si el cliente no ha pagado.
-- Si el cliente dice que ya pagó, pídele el comprobante o número de transacción.
-- Si el cliente confirma que quiere un producto ("me gusta", "lo quiero"), ofrécele las opciones de pago directamente.
-- NUNCA compartas números de cartera ni correos de facturación.
-- No compartas direcciones de agencias físicas.
-
-REGLAS PARA ANALIZAR IMÁGENES:
-- El cliente ha enviado una imagen junto con su mensaje: "${message}".
-- Analiza la imagen y responde combinando lo que ves con el mensaje del cliente.
-- Si la imagen muestra un producto (vitrina, nevera, lavadora, etc.) y el cliente pide información, responde con los detalles que puedas identificar y guíalo a la web o pregúntale algo relevante.
-- Si la imagen parece un comprobante de pago, recibo o transferencia, agradécele y sigue el flujo de pago.
-- Si la imagen no se relaciona con productos o pagos, responde con naturalidad y ayuda en lo que necesite.
-- NO preguntes "¿desde dónde nos escribes?" ni entres en flujos de perfilado — responde directamente sobre lo que ves.`;
-
-				const userPrompt = message === '[Imagen]' ? 'Analiza esta imagen y responde apropiadamente.' : message;
-				const raw = await generateMultimodalResponse(userPrompt, base64, mime, systemText);
-				const response = cleanResponse(raw);
-				return {
-					response,
-					metadata: {
-						agentType: 'ventas',
-						flujo: null,
-						...(context?.ciudad ? { ciudad: context.ciudad, ciudadValidada: context.ciudadValidada } : {}),
-					},
-				};
-			} catch {
-				// Si falla la lectura de la imagen, continuar con el flujo normal
-			}
-		}
 
 		// ── Flujo de esperando_ciudad o esperando_modalidad pausado ──────────
 		if (context?.flujo === 'esperando_ciudad_pausado') {
@@ -1501,7 +1449,7 @@ REGLAS PARA ANALIZAR IMÁGENES:
 		}
 
 		// ── PASO 4d: Confirmación de pago realizado ──
-		const yaPago = /\b(?:ya pagu[eé]|pago realizado|ya transfer[ií]|ya realic[eé] el pago|ya hice el pago|pago hecho|listo el pago|comprobante enviado)\b/i.test(message);
+		const yaPago = detectarPagoConfirmado(message);
 		if (yaPago && context?.modalidad === 'contado') {
 			return {
 				response: `¡Perfecto! Para confirmar tu pago, ¿me puedes compartir el comprobante o el número de transacción? (Puedes enviar una captura de pantalla / pantallazo o foto). 😊\n\nUna vez enviado, nuestro equipo verificará el pago en un tiempo máximo de 1 hora y procederemos con el despacho inmediato de tu pedido con envío gratis. En ese momento te enviaremos el número de guía para que puedas rastrearlo.`,

@@ -652,6 +652,11 @@ export async function processIncomingMessage(
 		if (metadata?.presupuesto) ud.presupuesto = metadata.presupuesto;
 
 		const extra = { ...safeParseJson(userDataRecord?.extra) };
+		// Si el orquestador marcó notificarComprobante, forzar VENTA_CERRADA en el pipeline
+		if (metadata?.notificarComprobante) {
+			ud.notificarComprobante = true;
+		}
+
 		const mergedExtra = { ...extra, ...metadata };
 		const udHasData = Object.keys(ud).length > 0;
 
@@ -669,7 +674,16 @@ export async function processIncomingMessage(
 			});
 		}
 
-		// 11. IA extractora de datos (post-procesamiento)
+		// 11a. Si se recibió comprobante via flag (imagen), forzar avance pipeline
+		if (metadata?.notificarComprobante && lead?.stage !== 'VENTA_CERRADA') {
+			await prisma.lead.update({
+				where: { id: lead.id },
+				data: { stage: 'VENTA_CERRADA' },
+			});
+			logger.info({ leadId: lead.id }, 'Pipeline forzado a VENTA_CERRADA por notificarComprobante');
+		}
+
+		// 11b. IA extractora de datos (post-procesamiento)
 		// Analiza el historial completo y extrae datos del cliente que el
 		// agente conversacional pudo haber omitido. También mueve el pipeline.
 		extractAndSaveData(

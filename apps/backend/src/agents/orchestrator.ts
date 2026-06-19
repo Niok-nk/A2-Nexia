@@ -10,8 +10,25 @@ import {
 	PagosAgent,
 } from './agents.js';
 import { generateResponse, generateMultimodalResponse } from '../utils/gemini.js';
+import { cleanResponse } from './helpers.js';
 import fs from 'fs/promises';
 import path from 'path';
+
+function safeMediaPath(fileName: string): string | null {
+	const base = path.basename(fileName);
+	if (base !== fileName || base.includes('..')) return null;
+	return path.join(process.cwd(), 'media', base);
+}
+
+function sanitizarNumeros(texto: string): string {
+	const AUTORIZADO = '3187408190';
+	const patron = /(\+?57[\s-]*)?\b3\d{2}[\s-]*\d{3}[\s-]*\d{4}\b/g;
+	return texto.replace(patron, (match) => {
+		const soloDigitos = match.replace(/\D/g, '').replace(/^57/, '');
+		if (soloDigitos === AUTORIZADO) return match;
+		return '+57 318 740 8190';
+	});
+}
 
 type IntentKey =
 	| 'bienvenida'
@@ -249,37 +266,47 @@ Categoría:`;
 		// Si el cliente envió una imagen, analizarla con Gemini Vision
 		// independientemente del flujo o agente activo.
 		if (context?.mediaFileName) {
-			const mediaPath = path.join(process.cwd(), 'media', context.mediaFileName);
+			const mediaPath = safeMediaPath(context.mediaFileName);
+			if (!mediaPath) {
+				return {
+					agentType: 'ventas',
+					response: 'Disculpa, no pude procesar la imagen. ¿Puedes intentar de nuevo? 😊',
+					metadata: { flujo: context?.flujo || null, agentType: 'ventas' },
+				};
+			}
 			try {
 				const imgBuffer = await fs.readFile(mediaPath);
 				const base64 = imgBuffer.toString('base64');
 				const mime = context.mediaMimeType || 'image/jpeg';
+				const enFlujoPago = ['esperando_comprobante', 'pago_medios', 'pago_web', 'pago_completado', 'seleccion_pago'].includes(context?.flujo);
 				const userDataStr = context?.userData
 					? Object.entries(context.userData).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join('\n')
 					: '';
 				const systemText =
-`Eres Sara, asesora comercial de JLC Electronics Colombia. Cálida, cercana, femenina, mensajes cortos (1-2 frases), máximo 1 emoji.
+`Eres Sara, asesora comercial de JLC Electronics Colombia. Cálida, cercana, femenina, mensajes MUY cortos (máximo 280 caracteres y 2 frases), máximo 1 emoji.
 
 El cliente ha enviado una imagen. Analízala y responde combinando lo que ves con su mensaje: "${message}".
 ${userDataStr ? `\nDatos del cliente:\n${userDataStr}\n` : ''}
 ${context?.ciudad ? `Ciudad: ${context.ciudad}.` : ''}
 
 REGLAS:
-- Si la imagen muestra un producto (vitrina, nevera, lavadora, TV, etc.), identifícalo y responde con la información que puedas dar. Guíalo a la web o pregunta algo relevante.
-- Si la imagen es un comprobante de pago, recibo o transferencia, agradécele y dile que el pago ha quedado registrado. Pídele el número de transacción si es necesario.
-- Si la imagen es de un producto dañado o con falla, dile que el servicio técnico puede ayudarle y que lo escalarás.
+- Si la imagen muestra PRODUCTO (vitrina, nevera, lavadora, TV, etc.), identifícalo y responde con la información que puedas dar. Guíalo a la web o pregunta algo relevante.
+- Si la imagen es COMPROBANTE DE PAGO, recibo o transferencia, agradécele y dile que el pago ha quedado registrado. Pídele el número de transacción si es necesario.
+- Si la imagen es PRODUCTO DAÑADO o con falla, dile que el servicio técnico puede ayudarle y que lo escalarás.
 - Si la imagen es otra cosa, responde con naturalidad.
 - NO preguntes "¿desde dónde nos escribes?" ni entres en flujos de perfilado. Responde directamente sobre lo que ves.
-- Si no entiendes qué muestra la imagen, pregunta amablemente al cliente.`;
+- Si no entiendes qué muestra la imagen, pregunta amablemente al cliente.
+- Responde en máximo 280 caracteres y 2 frases.`;
 
 				const userPrompt = message === '[Imagen]' ? 'Analiza esta imagen y responde apropiadamente.' : message;
 				const raw = await generateMultimodalResponse(userPrompt, base64, mime, systemText);
-				const response = raw.replace(/<[^>]+>/g, '').trim();
-				return {
-					agentType: context?.flujo ? String(context.flujo).replace(/_.*$/, '') || 'ventas' : 'ventas',
-					response,
-					metadata: { flujo: null, agentType: 'ventas' },
-				};
+				const response = sanitizarNumeros(cleanResponse(raw));
+				const metadata: Record<string, any> = { flujo: null, agentType: 'ventas' };
+				if (enFlujoPago) {
+					metadata.notificarComprobante = true;
+					metadata.pipelineStage = 'VENTA_CERRADA';
+				}
+				return { agentType: 'ventas', response, metadata };
 			} catch {
 				// Si falla, continuar con el flujo normal
 			}
