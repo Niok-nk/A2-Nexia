@@ -1828,7 +1828,8 @@ export class VentasAgent implements IAgent {
 		const preguntaEnvio = /(?:gu[ií]a|despacho|cu[aá]ndo\s*(?:llega|recibo|lo\s*recibo|me\s*llega)|estado\s*(?:de\s*)?(?:mi\s*)?pedido|rastre|tracking|seguimiento|cu[aá]nto\s*(?:tarda|demora|se\s*demora)|correo\s*con\s*la\s*gu[ií]a)/i.test(lower);
 		const pideCartera = /\bcartera\b/i.test(lower);
 
-		if ((yaCompro || preguntaEnvio) && !pideCartera) {
+		// Post-purchase: ya compró y pregunta por envío/guía
+		if (yaCompro && preguntaEnvio && !pideCartera) {
 			return {
 				response: `¡Qué buena noticia! 🎉 Tu pedido ya quedó registrado; el equipo te confirma el despacho y la guía muy pronto por aquí.`,
 				metadata: {
@@ -1838,6 +1839,19 @@ export class VentasAgent implements IAgent {
 					ciudad: context?.ciudad,
 					ciudadValidada: context?.ciudadValidada,
 					...datosPersonales,
+				},
+			};
+		}
+
+		// Pre-purchase: pregunta por tiempo de envío sin haber comprado aún
+		if (preguntaEnvio && !context?.flujo) {
+			return {
+				response: `Los envíos aproximadamente tardan entre 3 a 10 días hábiles, dependiendo de la ciudad. Apenas se despacha te compartimos la guía para que puedas hacer seguimiento. ¿Te gustaría continuar con tu compra? 😊`,
+				metadata: {
+					agentType: 'ventas',
+					flujo: null,
+					ciudad: context?.ciudad,
+					ciudadValidada: context?.ciudadValidada,
 				},
 			};
 		}
