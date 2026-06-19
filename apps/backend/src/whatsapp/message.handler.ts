@@ -11,7 +11,7 @@ import logger from '../utils/logger.js';
 // Cuando un cliente manda varios mensajes seguidos, esperamos
 // DEBOUNCE_MS para agruparlos y responder con el contexto completo.
 // Funciona tanto para WhatsApp (Baileys) como para el chat web.
-const DEBOUNCE_MS = 3000; // 3 segundos
+const DEBOUNCE_MS = 5000; // 5 segundos
 
 const debounceBatch = new Map<string, {
 	timer: NodeJS.Timeout;
