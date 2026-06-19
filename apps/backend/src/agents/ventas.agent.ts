@@ -18,7 +18,8 @@ import {
 	AGENT_NAME,
 	getSaludo,
 	resolverOpcion,
-	detectarPagoConfirmado
+	detectarPagoConfirmado,
+	clasificarIntencionConIA
 } from './helpers.js';
 import { generateResponse } from '../utils/gemini.js';
 import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
@@ -672,9 +673,16 @@ export class VentasAgent implements IAgent {
 	async handle(message: string, context: any): Promise<AgentResponse> {
 		const lower = message.toLowerCase().trim();
 
+		// ── Clasificación con IA (antes de regex) ─────────────────────────────
+		// Corre en paralelo para no bloquear; solo para mensajes sin flujo activo.
+		const aiClasificacion = !context?.flujo ? await clasificarIntencionConIA(
+			message,
+			context?.history?.slice(-4).map((h: any) => `${h.role === 'user' ? 'Cliente' : 'Asistente'}: ${h.parts?.[0]?.text || ''}`).join('\n') || ''
+		) : null;
+
 		// ── Flujo de esperando_ciudad o esperando_modalidad pausado ──────────
 		if (context?.flujo === 'esperando_ciudad_pausado') {
-			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
 			if (quiereContinuar) {
 				context.flujo = 'esperando_ciudad';
 				return {
@@ -695,7 +703,7 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (context?.flujo === 'esperando_modalidad_pausado') {
-			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
 			if (quiereContinuar) {
 				context.flujo = 'esperando_modalidad';
 			return {
@@ -752,7 +760,7 @@ export class VentasAgent implements IAgent {
 		// ── Flujo de crédito activo o pausado ──────────────────────────────────
 		if (context?.flujo === 'credito' || context?.flujo === 'credito_pausado') {
 			if (context?.flujo === 'credito_pausado') {
-				const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b|\breproducir\b/i.test(lower);
+				const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b|\breproducir\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
 				if (quiereContinuar) {
 					context.flujo = 'credito';
 				} else {
@@ -783,7 +791,7 @@ export class VentasAgent implements IAgent {
 
 		// ── Flujo de pago o perfilando pausado ─────────────────────────────────
 		if (context?.flujo === 'pago_pausado') {
-			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
 			if (quiereContinuar) {
 				context.flujo = context.flujoAnterior || 'seleccion_pago';
 			} else {
@@ -796,7 +804,7 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (context?.flujo === 'perfilando_pausado') {
-			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
 			if (quiereContinuar) {
 				context.flujo = 'perfilando';
 			} else {
@@ -1140,7 +1148,7 @@ export class VentasAgent implements IAgent {
 						ciudad: ciudadDetectada,
 						tieneCobertura: true,
 					};
-					const productoDetectado = detectarCategoria(message);
+				const productoDetectado = detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null;
 					return {
 						response: `¡Qué bien! A ${ciudadDetectada.charAt(0).toUpperCase() + ciudadDetectada.slice(1)} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
 						metadata: {
@@ -1690,7 +1698,7 @@ export class VentasAgent implements IAgent {
 		const categoriaGeneral = esCategoriaSola || esBusquedaCategoria;
 
 		if (categoriaGeneral) {
-			const nuevaCategoria = detectarCategoria(message);
+			const nuevaCategoria = detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null;
 			const categoriaAnterior = context?.ultimaBusqueda?.categoria;
 			if (nuevaCategoria && categoriaAnterior && nuevaCategoria !== categoriaAnterior) {
 				context = {
@@ -1702,7 +1710,7 @@ export class VentasAgent implements IAgent {
 				};
 			}
 		}
-		let catDetectada = detectarCategoria(message);
+		let catDetectada = detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null;
 		// Si el mensaje actual no tiene categoría pero es pregunta de medidas/specs,
 		// inferir categoría desde el pendingMessage o productoSolicitado anterior
 		if (!catDetectada && esPreguntaEspecificacion(message)) {
@@ -2105,6 +2113,7 @@ export class VentasAgent implements IAgent {
 			instruccion: `Eres ${AGENT_NAME}, asesora comercial y experta en electrodomésticos de JLC Electronics Colombia.
 
 Personalidad y Estilo:
+${aiClasificacion ? 'Análisis de intención (referencia): el cliente parece estar interesado en "' + aiClasificacion.intent + '"' + (aiClasificacion.categoriaSugerida ? ', categoría sugerida: ' + aiClasificacion.categoriaSugerida : '') + '.\n' : ''}
 - Cálida, cercana y femenina, como una amiga que sabe de electrodomésticos.
 - Español colombiano natural y espontáneo, nunca robótico.
 - MENSAJES CORTOS: 1-2 frases máximo. Es WhatsApp, no un correo. Ve al grano con calidez.

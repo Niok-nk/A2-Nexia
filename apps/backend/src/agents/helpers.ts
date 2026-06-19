@@ -229,6 +229,82 @@ export function detectarPagoConfirmado(texto: string): boolean {
 	return /\b(?:ya pagu[ée]|pago realizado|ya hice el pago|ya transfer[ií]|comprobante enviado|ya consign[ué]|estoy pagando|ya pagando|acabo de pagar|ya hice la transferencia|ya hice el pago|listo el pago|pago listo|pago confirmado)\b/i.test(texto);
 }
 
+/** Resultado de la clasificación con IA antes del procesamiento regex */
+export interface ClasificacionIA {
+	intent: 'consulta_producto' | 'compra' | 'pregunta_especificacion' | 'consulta_general' | 'problema_web' | 'consulta_credito' | 'consulta_pago' | 'pregunta_stock' | 'queja' | 'saludo' | 'irrelevante';
+	categoriaSugerida: string | null;
+	tieneIntencionCompra: boolean;
+	esPreguntaTecnica: boolean;
+	quiereContinuar: boolean;
+	quiereCancelar: boolean;
+	confianza: number;
+}
+
+/** Usa IA para clasificar la intención del mensaje ANTES del procesamiento regex. */
+export async function clasificarIntencionConIA(message: string, history: string): Promise<ClasificacionIA | null> {
+	try {
+		const prompt = `Analiza el mensaje del cliente y responde SOLO con JSON sin explicación:
+
+Mensaje: "${message.replace(/"/g, "'")}"
+${history ? `Historial:\n${history}` : ''}
+
+Responde este JSON exacto:
+{
+  "intent": "consulta_producto" | "compra" | "pregunta_especificacion" | "consulta_general" | "problema_web" | "consulta_credito" | "consulta_pago" | "pregunta_stock" | "queja" | "saludo" | "irrelevante",
+  "categoriaSugerida": "lavadora" | "nevera" | "televisor" | "parlante" | "congelador" | "ventilador" | "cocina" | "audio" | null,
+  "tieneIntencionCompra": true/false,
+  "esPreguntaTecnica": true/false,
+  "quiereContinuar": true/false,
+  "quiereCancelar": true/false,
+  "confianza": 0.0-1.0
+}
+
+REGLAS:
+- "compra" = dice "lo quiero", "compro", "pagar", "me gusta" + producto definido
+- "pregunta_especificacion" = pregunta medidas, capacidad, color, características
+- "consulta_producto" = busca productos, pregunta disponibilidad
+- Si es una respuesta positiva a una pregunta anterior ("sí", "dale", "ok", "bueno") → quiereContinuar: true
+- Si es negación ("no", "no quiero", "cancelar") → quiereCancelar: true
+- confianza < 0.5 = no estás seguro, el regex resolverá mejor`;
+
+		const raw = await generateResponse(prompt);
+		const jsonMatch = raw.match(/\{[\s\S]*\}/);
+		if (!jsonMatch) return null;
+		return JSON.parse(jsonMatch[0]) as ClasificacionIA;
+	} catch {
+		return null;
+	}
+}
+
+/** Usa IA para refinar una respuesta genérica del regex y hacerla más natural. */
+export async function refinarRespuestaConIA(
+	message: string,
+	currentResponse: string,
+	context: { categoria?: string; producto?: string; tieneProductos?: boolean; ciudad?: string; history?: string }
+): Promise<string | null> {
+	try {
+		const prompt = `Eres Sara, asesora de JLC Electronics. Refina esta respuesta para que suene natural, cálida y personalizada.
+
+Mensaje del cliente: "${message.replace(/"/g, "'")}"
+Respuesta actual: "${currentResponse.replace(/"/g, "'")}"
+Contexto: ${Object.entries(context).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ')}
+
+REGLAS:
+- Responde SOLO el texto refinado, sin explicaciones ni JSON.
+- Máximo 2 frases. Máximo 1 emoji.
+- Español colombiano natural.
+- Si la respuesta actual está bien, responde exactamente "OK".
+- Personaliza si sabes la categoría/producto.`;
+
+		const refined = await generateResponse(prompt);
+		const clean = refined?.trim();
+		if (!clean || clean === 'OK') return null;
+		return clean;
+	} catch {
+		return null;
+	}
+}
+
 export function obtenerTerminoBusquedaDesdePerfil(categoria: string, answers: Record<string, string>): string {
 	if (categoria === 'nevera') {
 		if (answers.presupuesto === 'alto') return 'nevecon';
