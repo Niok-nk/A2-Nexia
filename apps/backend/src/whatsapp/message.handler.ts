@@ -442,6 +442,8 @@ export async function processIncomingMessage(
 	if (extra?.repuestoData) context.repuestoData = extra.repuestoData;
 	if (extra?.distribuidorData) context.distribuidorData = extra.distribuidorData;
 	if (typeof extra?.creditoStep === 'number') context.creditoStep = extra.creditoStep;
+	if (typeof extra?.ciudadValidada === 'boolean') context.ciudadValidada = extra.ciudadValidada;
+	if (typeof extra?.tieneCobertura === 'boolean') context.tieneCobertura = extra.tieneCobertura;
 	if (extra?.productoURL) context.productoURL = extra.productoURL;
 	if (extra?.productoCompra) context.productoCompra = extra.productoCompra;
 	if (extra?.terminoBusqueda) context.terminoBusqueda = extra.terminoBusqueda;

@@ -1966,7 +1966,7 @@ REGLAS PARA ANALIZAR IMÁGENES:
 			? 'tienes envío gratis'
 			: 'envío por transportadora (el flete se calcula en la web al agregar el producto al carrito)';
 
-		const pideMas = /(?:tienes\s*mas|hay\s*m[áa]s|m[áa]s\s*opciones|otr[oa]s?\s*opciones|quiero\s*ver\s*m[áa]s|mu[ée]strame\s*m[áa]s|busco\s*otr[oa]|alg[úu]n\s*otr[oa]|otr[oa]s?\s*opciones|diferente)/i.test(message);
+		const pideMas = /(?:tienes\s*mas|hay\s*m[áa]s|m[áa]s\s*opciones|otr[oa]s?\s*opciones|quiero\s*ver\s*m[áa]s|mu[ée]strame\s*m[áa]s|busco\s*otr[oa]|alg[úu]n\s*otr[oa]|otr[oa]s?\s*opciones|diferente|es\s*(?:el|la)\s*mismo|el\s*mismo|lo\s*mismo|la\s*misma)/i.test(message);
 		const pideMasEconomico = /(?:m[áa]s\s*(?:econ[oó]mic[oa]s?|barat[oa]s?|econ[oó]mic[oa])|algo\s*(?:m[áa]s\s*)?(?:econ[oó]mico|barato)|m[áa]s\s*barato|menos\s*costoso|de\s*menor\s*precio|hay\s*(?:algo\s*)?m[áa]s\s*barat)/i.test(message);
 
 		let products: any[] = [];
@@ -2131,8 +2131,9 @@ REGLAS PARA ANALIZAR IMÁGENES:
 			return txt.length > maxLen ? txt.slice(0, maxLen - 3) + '...' : txt;
 		}
 
+		if (productoIndex >= products.length) productoIndex = 0;
 		const productListStr = products.length > 0
-			? products.slice(0, 3).map((p: any, i: number) => {
+			? products.slice(productoIndex, productoIndex + 3).map((p: any, i: number) => {
 				const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar precio';
 				const desc = htmlToCleanText(p.description || p.short_description || '', i === 0);
 				// Incluir atributos estructurados (dimensiones, capacidad, etc.)
@@ -2241,7 +2242,7 @@ REGLAS DE CATÁLOGO:
 				...(resetFlujo ? { flujo: null } : {}),
 				...(productoBuscado.length < 30 && productoBuscado.split(/\s+/).length <= 5 && !/[?¿]/.test(productoBuscado) ? { productoSolicitado: productoBuscado } : {}),
 			ultimaBusqueda: products.length > 0
-				? { results: products.slice(0, 3), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
+				? { results: products.slice(productoIndex, productoIndex + 3), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
 				: context?.ultimaBusqueda,
 				...datosPersonales,
 			},
