@@ -37,12 +37,18 @@ import { sendMessage as sendWA } from '../whatsapp/whatsapp.js';
 
 const CATEGORIAS_PRODUCTO = ['nevera', 'nevecon', 'refrigerador', 'refri', 'lavadora', 'televisor', 'tv', 'congelador', 'parlante', 'sonido', 'licuadora', 'horno', 'microondas', 'estufa', 'ventilador', 'plancha', 'aspiradora', 'cafetera', 'freidora', 'minibar', 'exhibidor', 'hervidor', 'arrocera'];
 
-/** Extrae un SKU/referencia tipo "JLC-21215" o "JLC-55A71SGO" del texto. */
+/** Extrae un SKU/referencia tipo "JLC-21215", "JLC-55A71SGO" o código alfanumérico pelado como "36215PRO". */
 function extraerSKU(texto: string): string | null {
-	// Patrón: JLC seguido de guión opcional y alfanuméricos (mínimo 3 chars)
+	// Patrón 1: JLC seguido de guión opcional y alfanuméricos (mínimo 3 chars)
 	const match = texto.match(/\bJLC[\s-]?([A-Z0-9]{3,15})\b/i);
 	if (match) {
 		return `JLC-${match[1].toUpperCase()}`;
+	}
+	// Patrón 2: Código alfanumérico pelado (ej: "36215PRO", "6615N")
+	// Al menos 5 caracteres, mezcla de dígitos y letras, sin espacios
+	const bare = texto.match(/\b(\d{2,}[A-Z]{2,}\d*|[A-Z]{2,}\d{3,})\b/i);
+	if (bare && bare[1].length >= 5) {
+		return bare[1].toUpperCase();
 	}
 	return null;
 }
@@ -292,11 +298,16 @@ function sanitizarNumerosVentas(texto: string): string {
 	// Captura: con prefijo +57 (ej "+57 320 788 1151") o celular pelado de 10
 	// dígitos que empiece por 3 (ej "3207881151", "320 788 1151").
 	const patron = /(\+?57[\s-]*)?\b3\d{2}[\s-]*\d{3}[\s-]*\d{4}\b/g;
-	return texto.replace(patron, (match) => {
+	let result = texto.replace(patron, (match) => {
 		const soloDigitos = match.replace(/\D/g, '').replace(/^57/, '');
 		if (soloDigitos === AUTORIZADO) return match;
 		return '+57 318 740 8190';
 	});
+	// También eliminar menciones tipo "WhatsApp de cartera" o "cartera" como
+	// destino de contacto, ya que en ventas no se debe redirigir a cartera.
+	result = result.replace(/\bescr[ií]benos\s+al\s+whatsapp\s+de\s+cartera\b/gi, 'contáctanos al');
+	result = result.replace(/\bwhatsapp\s+de\s+cartera\b/gi, 'whatsapp');
+	return result;
 }
 
 export function formatearResumenCredito(data: CreditoData): string {
@@ -2148,8 +2159,8 @@ POLÍTICAS DE LA EMPRESA —debes cumplirlas:
 - NUNCA preguntes "¿Seguimos buscando?" ni "¿Seguimos buscando el producto ideal para ti?". Cuando el cliente muestre interés, ofrécele ir al pago. Si el cliente pide otra opción, muestra un producto diferente. Siempre busca cerrar la venta, no alargar la búsqueda.
 - Si preguntan por opciones de pago, no las enumeres; guíalos a pagar en la web.
 - Si necesitan ayuda para pagar, ofrécete a escalar al equipo de soporte. Si el cliente insiste en un contacto, entrega el número +573187408190.
-- NUNCA compartas números de cartera (314 422 9949, 315 721 2367) ni correos de facturación. Si el cliente PIDE EXPLÍCITAMENTE cartera o escalar para envío/despacho, entrega el número +573187408190.
-- Para seguimiento post-compra (guía de despacho, "ya compré", "cuándo llega", estado del pedido): dile con calidez que ya quedó registrado y que el equipo le confirma el despacho y la guía pronto. NO des números de cartera. Si insiste en un contacto para coordinar envío, entrega el número +573187408190.
+- NUNCA menciones "cartera" ni "WhatsApp de cartera" NI números de cartera (314 422 9949, 315 721 2367). Tampoco redirijas al cliente a cartera desde ventas. Si el cliente pide cartera explícitamente o escalar para envío/despacho, entrega únicamente +573187408190.
+- Para seguimiento post-compra (guía de despacho, "ya compré", "cuándo llega", estado del pedido): dile con calidez que ya quedó registrado y que el equipo le confirma el despacho y la guía pronto. NO menciones cartera. Si insiste en un contacto para coordinar envío, entrega el número +573187408190.
 - No digas "generé tu orden". Di que el producto queda reservado pendiente de pago.
 - No compartas direcciones de agencias físicas.
 - Si el cliente dice "no me gusta esa marca" o algo similar, explícale que todos los electrodomésticos son JLC, marca propia colombiana, y ofrécele mostrarle otros modelos del mismo tipo (nunca sugerir otras marcas ni saltar a pago).
