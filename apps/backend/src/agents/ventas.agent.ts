@@ -34,7 +34,7 @@ import { sendMessage as sendWA } from '../whatsapp/whatsapp.js';
 // Intenta múltiples estrategias en orden de especificidad y devuelve el
 // primer conjunto de resultados que coincida.
 
-const CATEGORIAS_PRODUCTO = ['nevera', 'nevecon', 'refrigerador', 'refri', 'lavadora', 'televisor', 'tv', 'congelador', 'parlante', 'sonido', 'licuadora', 'horno', 'microondas', 'estufa', 'ventilador', 'aire', 'plancha', 'aspiradora', 'cafetera', 'freidora', 'minibar', 'exhibidor', 'hervidor', 'arrocera'];
+const CATEGORIAS_PRODUCTO = ['nevera', 'nevecon', 'refrigerador', 'refri', 'lavadora', 'televisor', 'tv', 'congelador', 'parlante', 'sonido', 'licuadora', 'horno', 'microondas', 'estufa', 'ventilador', 'plancha', 'aspiradora', 'cafetera', 'freidora', 'minibar', 'exhibidor', 'hervidor', 'arrocera'];
 
 /** Extrae un SKU/referencia tipo "JLC-21215" o "JLC-55A71SGO" del texto. */
 function extraerSKU(texto: string): string | null {
@@ -76,7 +76,8 @@ function extraerPotencia(texto: string): string | null {
 function detectarCategoriaTexto(texto: string): string | null {
 	const lower = texto.toLowerCase();
 	for (const cat of CATEGORIAS_PRODUCTO) {
-		if (lower.includes(cat)) {
+		const match = cat === 'refri' ? /\brefri\b/.test(lower) : lower.includes(cat);
+		if (match) {
 			// Normalizar sinónimos
 			if (cat === 'tv') return 'televisor';
 			if (cat === 'sonido') return 'parlante';
@@ -182,7 +183,7 @@ export async function buscarProductoInteligente(
 	// ── Estrategia 6: Texto libre (limpiar palabras de relleno) ─────────
 	const textoLimpio = mensaje
 		.toLowerCase()
-		.replace(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa|info de|informacion de|el|la|los|las|un|una|este|esta|ese|esa)\s*/gi, '')
+		.replace(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa|info de|informacion de|\bel\b|\bla\b|\blos\b|\blas\b|\bun\b|\buna\b|\beste\b|\besta\b|\bese\b|\besa\b)\s*/gi, '')
 		.replace(/[.,!?¡¿]+/g, '')
 		.trim();
 	if (textoLimpio.length >= 3) {
@@ -212,7 +213,7 @@ export async function buscarProductoInteligente(
 export function esPreguntaEspecificacion(texto: string): boolean {
 	const t = texto.toLowerCase();
 	// Palabras de especificación técnica (incluye capacidad: kilos, litros, pulgadas)
-	const tieneSpec = /(?:medida|medidas|mide|miden|cu[aá]nto mide|dimensi[oó]n|dimensiones|alto|ancho|largo|profundidad|fondo|altura|anchura|cent[ií]metro|cm\b|metro|pulgada|tama[ñn]o|capacidad|litro|litros|lt\b|kilo|kilogramo|kg\b|pies|peso|consumo|voltaje|potencia|watt|vatio|color|colores|garant[ií]a|especificaci|caracter[ií]stica|ficha t[eé]cnica|cabe|caben|entra|cu[aá]nto pesa|material|funci[oó]n|funciones|programa)/i.test(t);
+	const tieneSpec = /(?:\bmedida\b|\bmedidas\b|\bmide\b|\bmiden\b|cu[aá]nto mide|\bdimensi[oó]n\b|\bdimensiones\b|\balto\b|\bancho\b|\blargo\b|\bprofundidad\b|\bfondo\b|\baltura\b|\banchura\b|\bcent[ií]metro\b|\bcm\b|\bmetro\b|\bpulgada\b|\btama[ñn]o\b|\bcapacidad\b|\blitro\b|\blitros\b|\blt\b|\bkilo\b|\bkilogramo\b|\bkg\b|\bpeso\b|\bconsumo\b|\bvoltaje\b|\bpotencia\b|\bwatt\b|\bvatio\b|\bcolor\b|\bcolores\b|\bgarant[ií]a\b|especificaci|caracter[ií]stica|ficha t[eé]cnica|\bcabe\b|\bcaben\b|\bentra\b|cu[aá]nto pesa|\bmaterial\b|\bfunci[oó]n\b|\bfunciones\b|\bprograma\b)/i.test(t);
 	// Capacidad numérica (ej: "19 kilos", "254 litros", "50 pulgadas", "18kg") como pregunta implícita
 	const tieneCapacidadNumerica = /\b\d{2,4}\s*(?:kilos|kilogramos|kg|litros|lt|pulgadas|pulg)\b/i.test(t);
 	// Forma interrogativa
@@ -673,7 +674,7 @@ export class VentasAgent implements IAgent {
 
 		// ── Flujo de esperando_ciudad o esperando_modalidad pausado ──────────
 		if (context?.flujo === 'esperando_ciudad_pausado') {
-			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower);
 			if (quiereContinuar) {
 				context.flujo = 'esperando_ciudad';
 				return {
@@ -694,7 +695,7 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (context?.flujo === 'esperando_modalidad_pausado') {
-			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower);
 			if (quiereContinuar) {
 				context.flujo = 'esperando_modalidad';
 			return {
@@ -735,7 +736,7 @@ export class VentasAgent implements IAgent {
 		}
 
 		// Detectar problema web desde mensaje libre (sin flujo activo)
-		const esProblemaWeb = !context?.flujo && /(?:problem[aeo]|error|fall[oóae]|no\s*(?:funcion[ae]|carg[aeo]|abre|sirve|dej[ao]|pued[eo])|pagina\s*(?:no|da|tien)|web\s*(?:no|mal|error)|trab[ae]ad[ao]|congel[ao]|se\s*(?:qued[oó]|trab[oó])|no\s*(?:carg[ao]|proces[oa]|redireccion[ae]|muestra))\b/i.test(lower);
+		const esProblemaWeb = !context?.flujo && /\b(?:problem[aeo]|error|fall[oóae]|no\s*(?:funcion[ae]|carg[aeo]|abre|sirve|dej[ao]|pued[eo])|pagina\s*(?:no|da|tien)|web\s*(?:no|mal|error)|trab[ae]ad[ao]|congel[ao]|se\s*(?:qued[oó]|trab[oó])|no\s*(?:carg[ao]|proces[oa]|redireccion[ae]|muestra))\b/i.test(lower);
 
 		if (esProblemaWeb) {
 			return {
@@ -751,7 +752,7 @@ export class VentasAgent implements IAgent {
 		// ── Flujo de crédito activo o pausado ──────────────────────────────────
 		if (context?.flujo === 'credito' || context?.flujo === 'credito_pausado') {
 			if (context?.flujo === 'credito_pausado') {
-				const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar|reproducir/i.test(lower);
+				const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b|\breproducir\b/i.test(lower);
 				if (quiereContinuar) {
 					context.flujo = 'credito';
 				} else {
@@ -767,7 +768,7 @@ export class VentasAgent implements IAgent {
 				// relacionada, salir del flujo para que el procesamiento normal la maneje
 				const stepActual = context?.creditoStep ?? 0;
 				if (stepActual > 0) {
-					const esConsulta = /[¿?]|quiero (?:ver|que me muestre|saber|comprar|buscar)|muestra|hay.*(?:m[aá]s|otro|alguna)|no\s+(?:me gusta|quiero|gracias)|tienes.*(?:de |con )|capacidad|kilos|kg\b|litros|lt\b|pulgadas|potencia|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|presupuesto|cu[aá]nto|precio|especificaciones?|caracter[ií]sticas?|detalles?|modelo|referencia|garant[ií]a|dimensiones|medidas|venden|tienen|busco|necesito|cat[aá]logo/i.test(message);
+					const esConsulta = /[¿?]|quiero (?:ver|que me muestre|saber|comprar|buscar)|\bmuestra\b|hay.*(?:m[aá]s|otro|alguna)|no\s+(?:me gusta|quiero|gracias)|\btienes\b.*(?:de |con )|\bcapacidad\b|\bkilos\b|\bkg\b|\blitros\b|\blt\b|\bpulgadas\b|\bpotencia\b|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|\bpresupuesto\b|\bcu[aá]nto\b|\bprecio\b|especificaciones?|caracter[ií]sticas?|detalles?|\bmodelo\b|\breferencia\b|garant[ií]a|dimensiones|\bmedidas\b|\bvenden\b|\btienen\b|\bbusco\b|\bnecesito\b|\bcat[aá]logo\b/i.test(message);
 					if (esConsulta) {
 						context.flujo = 'credito_pausado';
 						// No se retorna — el flujo normal procesa el mensaje
@@ -782,7 +783,7 @@ export class VentasAgent implements IAgent {
 
 		// ── Flujo de pago o perfilando pausado ─────────────────────────────────
 		if (context?.flujo === 'pago_pausado') {
-			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower);
 			if (quiereContinuar) {
 				context.flujo = context.flujoAnterior || 'seleccion_pago';
 			} else {
@@ -795,7 +796,7 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (context?.flujo === 'perfilando_pausado') {
-			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower);
 			if (quiereContinuar) {
 				context.flujo = 'perfilando';
 			} else {
@@ -842,7 +843,7 @@ export class VentasAgent implements IAgent {
 			} else {
 				// Si el mensaje es una consulta sobre otros productos (no un intento de selección fallido),
 				// salir del flujo para que el procesamiento normal lo maneje
-				const esConsultaProducto = /[¿?]|quiero (?:ver|que me muestre|saber)|muestra|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|tienes.*(?:de |con )|capacidad|kilos|kg\b|litros|lt\b|pulgadas|potencia|m[aá]s (?:grande|peque|chico|barato|caro)|m[aá]s grande|m[aá]s peque|otro modelo|otra opcion|otras opciones|no tiene|b[uú]sca|b[uú]squeda|recomiend|presupuesto/i.test(message);
+				const esConsultaProducto = /[¿?]|quiero (?:ver|que me muestre|saber)|\bmuestra\b|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|\btienes\b.*(?:de |con )|\bcapacidad\b|\bkilos\b|\bkg\b|\blitros\b|\blt\b|\bpulgadas\b|\bpotencia\b|m[aá]s (?:grande|peque|chico|barato|caro)|m[aá]s grande|m[aá]s peque|otro modelo|otra opcion|otras opciones|no tiene|b[uú]sca|b[uú]squeda|recomiend|\bpresupuesto\b/i.test(message);
 				if (esConsultaProducto) {
 					context.flujo = null;
 					// No se retorna — el flujo normal procesa el mensaje
@@ -954,8 +955,8 @@ export class VentasAgent implements IAgent {
 
 		// ── SI ESTAMOS ESPERANDO MODALIDAD (contado / crédito) ─────────────
 		if (context?.flujo === 'esperando_modalidad') {
-			const quiereCredito = /cr[eé]dito|a cr[eé]dito|financiar|financiaci[oó]n|cuotas|pagar a cuotas|^\s*1\s*$/i.test(lower);
-			const quiereContado = /contado|efectivo|pago inmediato|precio de contado|contadito|^\s*2\s*$/i.test(lower);
+			const quiereCredito = /\bcr[eé]dito\b|a cr[eé]dito|\bfinanciar\b|\bfinanciaci[oó]n\b|\bcuotas\b|pagar a cuotas|^\s*1\s*$/i.test(lower);
+			const quiereContado = /\b(?:contado|efectivo|pago\s+inmediato|precio\s+de\s+contado|contadito)\b|^\s*2\s*$/i.test(lower);
 
 			if (quiereCredito) {
 				return {
@@ -976,7 +977,7 @@ export class VentasAgent implements IAgent {
 
 			// Si el mensaje es una consulta no relacionada, salir del flujo
 			if (!quiereContado) {
-				const esConsulta = /[¿?]|quiero (?:ver|que me muestre|saber|comprar|pagar|adquirir)|muestra|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|tienes.*(?:de |con )|capacidad|kilos|kg\b|litros|lt\b|pulgadas|potencia|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|presupuesto|cu[aá]nto|precio|especificaciones?|caracter[ií]sticas?|detalles?|[¿¡]+\s*(?:contado|cr[eé]dito|efectivo|transferencia|tarjeta|nequi|pago)/i.test(message);
+				const esConsulta = /[¿?]|quiero (?:ver|que me muestre|saber|comprar|pagar|adquirir)|\bmuestra\b|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|\btienes\b.*(?:de |con )|\bcapacidad\b|\bkilos\b|\bkg\b|\blitros\b|\blt\b|\bpulgadas\b|\bpotencia\b|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|\bpresupuesto\b|\bcu[aá]nto\b|\bprecio\b|especificaciones?|caracter[ií]sticas?|detalles?|[¿¡]+\s*(?:contado|cr[eé]dito|efectivo|transferencia|tarjeta|nequi|pago)/i.test(message);
 				if (esConsulta) {
 					context.flujo = null;
 					// No se retorna — el flujo normal procesa el mensaje
@@ -1390,7 +1391,7 @@ export class VentasAgent implements IAgent {
 
 		// ── Manejo de pago completado o fallido ───────────────────────────────
 		if (context?.flujo === 'pago_completado') {
-			const noPudo = /no\s*(?:pude|puedo|logr[eé]|me\s*dej[oó])|problema|error|fallo|fall[oó]|no\s*sirv[eió]/i.test(lower);
+			const noPudo = /\b(?:no\s*(?:pude|puedo|logr[eé]|me\s*dej[oó]|sirv[eió])|problema|error|fallo|fall[oó])\b/i.test(lower);
 			if (noPudo) {
 				const ciudadCap = context?.ciudad ? context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1) : '';
 				const productoInfo = context?.productoURL || 'producto pendiente';
@@ -1423,7 +1424,7 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (context?.flujo === 'pago_web') {
-			const quiereAyuda = /\bs[íi]\b|sip|dale|ok|bueno|claro|si gracias|si por favor|me acompañas|guíame|ayúdame|paso a paso/i.test(lower);
+			const quiereAyuda = /\bs[íi]\b|\bsip\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|si gracias|si por favor|me acompañas|guíame|ayúdame|paso a paso/i.test(lower);
 			if (quiereAyuda) {
 				return {
 					response: `¡Con mucho gusto te acompaño! 😊\n\nPaso 1 de 5: Abre el enlace del producto y dale clic en el botón *Añadir al carrito* 🛒\n\nDime "listo" cuando lo hayas hecho.`,
@@ -1547,7 +1548,7 @@ export class VentasAgent implements IAgent {
 					};
 				}
 				// Si el mensaje es una consulta no relacionada con pago, salir del flujo
-				if (/[¿?]|quiero (?:ver|que me muestre|saber|comprar|buscar)|muestra|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|tienes.*(?:de |con )|capacidad|kilos|kg\b|litros|lt\b|pulgadas|potencia|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|presupuesto|cu[aá]nto|precio|especificaciones?|caracter[ií]sticas?|detalles?|modelo|referencia|garant[ií]a|dimensiones|medidas/i.test(message)) {
+				if (/[¿?]|quiero (?:ver|que me muestre|saber|comprar|buscar)|\bmuestra\b|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|\btienes\b.*(?:de |con )|\btiene\b|\bcapacidad\b|\bkilos\b|\bkg\b|\blitros\b|\blt\b|\bpulgadas\b|\bpotencia\b|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|\bpresupuesto\b|\bcu[aá]nto\b|\bprecio\b|especificaciones?|caracter[ií]sticas?|detalles?|\bmodelo\b|\breferencia\b|\bmedidas\b/i.test(message)) {
 					context = { ...context, flujo: null };
 				} else {
 					return {
@@ -1685,7 +1686,7 @@ export class VentasAgent implements IAgent {
 
 		const CATEGORIAS = CATEGORIAS_RE;
 		const esCategoriaSola = CATEGORIAS.test(message) && message.split(/\s+/).length <= 4;
-		const esBusquedaCategoria = CATEGORIAS.test(message) && /(?:busco|quiero|necesito|me interesa|tiene[ns]?|hay|venden|muestra|quisiera|info de|informacion de|precio de|precios de|cuesta|cuestan|vale|valen|consulta|tambi[eé]n)/i.test(message);
+		const esBusquedaCategoria = CATEGORIAS.test(message) && /(?:\bbusco\b|\bquiero\b|\bnecesito\b|me interesa|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bquisiera\b|info de|informacion de|precio de|precios de|\bcuesta\b|\bcuestan\b|\bvale\b|\bvalen\b|\bconsulta\b|\btambi[eé]n\b)/i.test(message);
 		const categoriaGeneral = esCategoriaSola || esBusquedaCategoria;
 
 		if (categoriaGeneral) {
@@ -1711,7 +1712,7 @@ export class VentasAgent implements IAgent {
 		if ((categoriaGeneral || catDetectada) && context?.flujo !== 'perfilando') {
 			const cat = catDetectada;
 			if (cat) {
-				const terminoParaBuscar = message.toLowerCase().replace(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa)\s*/gi, '').trim();
+				const terminoParaBuscar = message.toLowerCase().replace(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa)\s*/gi, '').trim();
 				let productosDisponibles: any[] = [];
 				try {
 					const resultado = await buscarProductoInteligente(terminoParaBuscar, cat);
@@ -1784,7 +1785,7 @@ export class VentasAgent implements IAgent {
 				} else {
 					const primerPaso = pasos.find(p => !shortcuts[p.field]);
 					if (primerPaso) {
-						const prodMatch = message.match(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa|info de|informacion de)\s*(?:un[oa]?|unas?|disponible|esta|este|esa|ese)?\s*([a-záéíóúñÁÉÍÓÚÑ][a-záéíóúñÁÉÍÓÚÑ\s]{2,40})/i);
+						const prodMatch = message.match(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa|info de|informacion de)\s*(?:\bun[oa]?\b|\bunas?\b|\bdisponible\b|\besta\b|\beste\b|\besa\b|\bese\b)?\s*([a-záéíóúñÁÉÍÓÚÑ][a-záéíóúñÁÉÍÓÚÑ\s]{2,40})/i);
 						return {
 							response: primerPaso.pregunta,
 							metadata: {
@@ -1815,7 +1816,7 @@ export class VentasAgent implements IAgent {
 
 		// ── Seguimiento post-compra (ya pagó / guía / cuándo llega) ─────────
 		// NO mostrar números de cartera; confirmar registro y escalar internamente.
-		const yaCompro = /(?:ya\s*(?:compr[éeó]|pagu[éeó]|cancel[éeó]|realic[éeé]|hice\s*(?:el|la)\s*(?:compra|pago|transferencia))|qued[óo]\s*pag[ao]|hice\s*la\s*compra|complet[éeó]\s*(?:el|la)\s*(?:compra|pago))/i.test(lower);
+		const yaCompro = /(?:\bya\b\s*(?:compr[éeó]|pagu[éeó]|cancel[éeó]|realic[éeé]|\bhice\b\s*(?:el|la)\s*(?:compra|pago|transferencia))|qued[óo]\s*pag[ao]|\bhice\b\s*la\s*compra|complet[éeó]\s*(?:el|la)\s*(?:compra|pago))/i.test(lower);
 		const preguntaEnvio = /(?:gu[ií]a|despacho|cu[aá]ndo\s*(?:llega|recibo|lo\s*recibo|me\s*llega)|estado\s*(?:de\s*)?(?:mi\s*)?pedido|rastre|tracking|seguimiento|cu[aá]nto\s*(?:tarda|demora|se\s*demora)|correo\s*con\s*la\s*gu[ií]a)/i.test(lower);
 		const pideCartera = /\bcartera\b/i.test(lower);
 
@@ -1852,7 +1853,7 @@ export class VentasAgent implements IAgent {
 
 		// ── Si está en flujo de pago pero pide un producto nuevo, reiniciar ──
 		let resetFlujo = false;
-		const esNuevoProductoEnPago = context?.flujo === 'seleccion_pago' && /(?:y\s*(?:de|en|para)\s*(?:los|las|un|una)?|qu[e\u00e9]\s*(?:tal|hay\s*de|me\s*recomiendas|otr[oa]s?\s*opciones)|recomiendas|recomi[e\u00e9]ndame|tienes?\s*(?:televisores?|neveras?|lavadoras?|congeladores?|tvs?|licuadoras?|parlantes?|aires?\s*(?:acondicionado)?|ventiladores?|estufas?|hornos?|microondas?|equipos?\s*de\s*sonido|monitores?|pantallas?|aspiradoras?|planchas?)|(?:y\s*)?(?:en\s*)?(?:televisores|neveras|lavadoras|congeladores|tvs|licuadoras|parlantes|sonido|aire|ventiladores|electrodom[e\u00e9]sticos))/i.test(message);
+		const esNuevoProductoEnPago = context?.flujo === 'seleccion_pago' && /(?:y\s*(?:de|en|para)\s*(?:los|las|un|una)?|qu[e\u00e9]\s*(?:tal|hay\s*de|me\s*recomiendas|otr[oa]s?\s*opciones)|recomiendas|recomi[e\u00e9]ndame|tienes?\s*(?:televisores?|neveras?|lavadoras?|congeladores?|tvs?|licuadoras?|parlantes?|aires?\s*(?:acondicionado)?|ventiladores?|estufas?|hornos?|microondas?|equipos?\s*de\s*sonido|monitores?|pantallas?|aspiradoras?|planchas?)|(?:y\s*)?(?:en\s*)?(?:\btelevisores\b|\bneveras\b|\blavadoras\b|\bcongeladores\b|\btvs\b|\blicuadoras\b|\bparlantes\b|\bsonido\b|\baire\b|\bventiladores\b|\belectrodom[e\u00e9]sticos\b))/i.test(message);
 		if (esNuevoProductoEnPago) {
 			context = { ...context, flujo: null, ultimaBusqueda: undefined, terminoBusqueda: message };
 			resetFlujo = true;
@@ -1861,7 +1862,7 @@ export class VentasAgent implements IAgent {
 		// ── Detectar intención de compra ("me gusta", "cómo pago", "lo quiero") ─
 		const tieneProductos = context?.ultimaBusqueda?.results?.length > 0;
 		const esNegacion = /^(?:no\s+|tampoco|nunca|jam[aá]s|ni\s*lo\s*quiero)/i.test(message);
-		const compraIntencion = !esNegacion && !esPreguntaInfo(message) && /(?:me\s*gusta|lo\s*quiero|lo\s*compro|c[oó]mo\s*(?:pago|compro|adquiero|puedo\s*(?:pagar|comprar|adquirir)|le\s*(?:hago|hago\s*(?:para\s*)?pagar))|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|ese)|dalo|res[eé]rvalo|lo\s*reservo|comprar|pagar)/i.test(message);
+		const compraIntencion = !esNegacion && !esPreguntaInfo(message) && /(?:\bme\b\s*gusta|\blo\b\s*quiero|\blo\b\s*compro|c[oó]mo\s*(?:pago|compro|adquiero|puedo\s*(?:pagar|comprar|adquirir)|\ble\b\s*(?:hago|hago\s*(?:para\s*)?pagar))|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|\bese\b)|\bdalo\b|res[eé]rvalo|\blo\b\s*reservo|\bcomprar\b|\bpagar\b)/i.test(message);
 
 		// Intentar emparejar el precio mencionado en el mensaje con un producto de la búsqueda anterior
 		function extraerPrecio(texto: string): number | null {
@@ -1923,7 +1924,7 @@ export class VentasAgent implements IAgent {
 		let terminoBusqueda = context?.terminoBusqueda || message;
 
 		const STOPWORDS_PRODUCTO = /\s+(?:de|del|la|el|los|las|un|una|unos|unas|por|para|con|que|y|o|en|a|al|JLC|Electronics|marca|modelo|referencia|producto|electrodoméstico|electrodomestico)\b.*/i;
-		const busquedaMatch = message.match(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa|info de|informacion de)\s*(?:un[oa]?|unas?|disponible|esta|este|esa|ese)?\s*([a-záéíóúñÁÉÍÓÚÑ][a-záéíóúñÁÉÍÓÚÑ\s]{2,40})/i);
+		const busquedaMatch = message.match(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa|info de|informacion de)\s*(?:\bun[oa]?\b|\bunas?\b|\bdisponible\b|\besta\b|\beste\b|\besa\b|\bese\b)?\s*([a-záéíóúñÁÉÍÓÚÑ][a-záéíóúñÁÉÍÓÚÑ\s]{2,40})/i);
 		let productoBuscado: string;
 		if (busquedaMatch) {
 			productoBuscado = busquedaMatch[1].trim()
@@ -1935,7 +1936,7 @@ export class VentasAgent implements IAgent {
 			productoBuscado = terminoBusqueda;
 		}
 
-		const preguntaSeguimiento = /(?:especificaciones?|caracter[ií]sticas?|detalles?|d[ée]tal|cu[aá]nto cuesta|cu[aá]nto vale|cu[aá]l es|en qu[eé] se diferencia|diferencia|c[oó]mo es|descr[ií]belo|dimensiones|medidas|capacidad|color|modelo|referencia|precio|m[aá]s info|m[aá]s informaci[oó]n|primero|segunda?|tercero|este|ese|aquel|me gusta|prefiero|quiero|detalles|garantia|la primera opci[oó]n|el primero|la primera)/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
+		const preguntaSeguimiento = /\b(?:especificaciones?|caracter[ií]sticas?|detalles?|d[ée]tal|cu[aá]nto cuesta|cu[aá]nto vale|cu[aá]l es|en qu[eé] se diferencia|diferencia|c[oó]mo es|descr[ií]belo|dimensiones|medidas|capacidad|color|modelo|referencia|precio|m[aá]s info|m[aá]s informaci[oó]n|primero|segunda?|tercero|este|ese|aquel|me gusta|prefiero|quiero|detalles|garantia|la primera opci[oó]n|el primero|la primera)\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
 
 		if (preguntaSeguimiento) {
 			// Re-consultar WooCommerce fresco en vez de reusar cache
@@ -2121,7 +2122,7 @@ POLÍTICAS DE LA EMPRESA —debes cumplirlas:
 - No confirmes despacho si el cliente no ha pagado.
 - Si el cliente dice que ya pagó, pídele el comprobante o número de transacción.
 - Si el cliente confirma que quiere un producto ("me gusta", "lo quiero", "dále", etc.), ofrécele las opciones de pago directamente. No preguntes cuál ni vuelvas a listar productos.
-- Cuando muestres un producto, NO preguntes "¿Seguimos buscando?" ni "¿Seguimos buscando el producto ideal para ti?". En vez de eso, cuando el cliente muestre interés, ofrécele ir al pago o pregúntale algo concreto para avanzar (ej: "¿te gusta esta o prefieres algo diferente?"). Siempre busca cerrar la venta, no alargar la búsqueda.
+- NUNCA preguntes "¿Seguimos buscando?" ni "¿Seguimos buscando el producto ideal para ti?". Cuando el cliente muestre interés, ofrécele ir al pago. Si el cliente pide otra opción, muestra un producto diferente. Siempre busca cerrar la venta, no alargar la búsqueda.
 - Si preguntan por opciones de pago, no las enumeres; guíalos a pagar en la web.
 - Si necesitan ayuda para pagar, ofrécete a escalar al equipo de soporte. Si el cliente insiste en un contacto, entrega el número +573187408190.
 - NUNCA compartas números de cartera (314 422 9949, 315 721 2367) ni correos de facturación. Si el cliente PIDE EXPLÍCITAMENTE cartera o escalar para envío/despacho, entrega el número +573187408190.

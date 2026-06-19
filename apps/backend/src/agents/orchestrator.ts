@@ -338,8 +338,8 @@ REGLAS:
 		const esPausado = flujoActivo === 'credito_pausado' || flujoActivo === 'pago_pausado' || flujoActivo === 'perfilando_pausado' || flujoActivo === 'esperando_ciudad_pausado' || flujoActivo === 'esperando_modalidad_pausado' || flujoActivo === 'repuestos_pausado';
 		if (flujoActivo && esPausado) {
 			const lowerMsg = message.toLowerCase().trim();
-			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar|reproducir/i.test(lowerMsg);
-			const quiereCancelar = /no|cancelar|salir|ya no|no quiero/i.test(lowerMsg);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b|\breproducir\b/i.test(lowerMsg);
+			const quiereCancelar = /\bno\b|cancelar|salir|\bya\s+no\b|\bno\s+quiero\b/i.test(lowerMsg);
 			
 			if (!quiereContinuar && !quiereCancelar) {
 				fueInterrumpido = true;
@@ -416,7 +416,7 @@ REGLAS:
 					productoURL: context?.productoURL || context?.ultimaBusqueda?.results?.[0]?.permalink,
 				};
 			} else if (flujoOriginal === 'perfilando') {
-				response += `\n\n¿Seguimos buscando el producto ideal para ti? 😊`;
+				response += `\n\n¿En qué más puedo ayudarte? 😊`;
 				metadata = {
 					...metadata,
 					flujo: 'perfilando_pausado',

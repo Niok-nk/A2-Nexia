@@ -165,9 +165,9 @@ export function resolverRespuestaPerfil(msg: string, field: string): string {
 	const lower = msg.toLowerCase().trim();
 
 	if (field === 'presupuesto') {
-		if (/menos|bajo|barato|econ[oó]mico/i.test(lower)) return 'bajo';
-		if (/medio|moderado|normal/i.test(lower)) return 'medio';
-		if (/nevecon|alto|sin l[ií]mite|lo que sea|no importa|ilimitado/i.test(lower)) return 'alto';
+		if (/\bmenos\b|\bbajo\b|\bbarato\b|\becon[oó]mico\b/i.test(lower)) return 'bajo';
+		if (/\bmedio\b|\bmoderado\b|\bnormal\b/i.test(lower)) return 'medio';
+		if (/\bnevecon\b|\balto\b|sin l[ií]mite|lo que sea|no importa|\bilimitado\b/i.test(lower)) return 'alto';
 		const valor = extraerNumero(lower);
 		if (valor !== null) {
 			if (valor < 1000000) return 'bajo';
@@ -181,16 +181,16 @@ export function resolverRespuestaPerfil(msg: string, field: string): string {
 
 export function detectarCategoria(msg: string): string | null {
 	const lower = msg.toLowerCase();
-	if (/lavadora|lavadoras|secadora|lavar/i.test(lower)) return 'lavadora';
-	if (/televisor|televisores|tv|pantalla|smart/i.test(lower)) return 'televisor';
-	if (/nevera|neveras|nevecon|nevecones|refrigerador/i.test(lower)) return 'nevera';
-	if (/ventilador|ventiladores|aire|acondicionado|climatizacion|climatizaci[oó]n|aire acondicionado port[aá]til|clima/i.test(lower)) return 'ventilador';
-	if (/congelador|congeladores/i.test(lower)) return 'congelador';
-	if (/vitrina|vitrinas/i.test(lower)) return 'vitrina';
-	if (/exhibidor|exhibidores/i.test(lower)) return 'exhibidor';
-	if (/minibar|mini\s*bar/i.test(lower)) return 'minibar';
-	if (/cabina|cabinas|parlante|parlantes|torre de sonido|torres de sonido|sonido|audio|bafle|bocina/i.test(lower)) return 'audio';
-	if (/cafetera|cafeteras|freidora|freidoras|hervidor|hervidores|horno|hornos|licuadora|licuadoras|olla|ollas|arrocera|exprimidor/i.test(lower)) return 'cocina';
+	if (/\blavadora\b|\blavadoras\b|\bsecadora\b|\blavar\b/i.test(lower)) return 'lavadora';
+	if (/\btelevisor\b|\btelevisores\b|\btv\b|\bpantalla\b|\bsmart\b/i.test(lower)) return 'televisor';
+	if (/\bnevera\b|\bneveras\b|\bnevecon\b|\bnevecones\b|\brefrigerador\b/i.test(lower)) return 'nevera';
+	if (/\bventilador\b|\bventiladores\b|\bacondicionado\b|\bclimatizaci[oó]n\b|\baire\s+acondicionado\b|\bclima\b/i.test(lower)) return 'ventilador';
+	if (/\bcongelador\b|\bcongeladores\b/i.test(lower)) return 'congelador';
+	if (/\bvitrina\b|\bvitrinas\b/i.test(lower)) return 'vitrina';
+	if (/\bexhibidor\b|\bexhibidores\b/i.test(lower)) return 'exhibidor';
+	if (/\bminibar\b|\bmini\s*bar\b/i.test(lower)) return 'minibar';
+	if (/\bcabina\b|\bcabinas\b|\bparlante\b|\bparlantes\b|\btorre\s+de\s+sonido\b|\btorres\s+de\s+sonido\b|\bsonido\b|\baudio\b|\bbafle\b|\bbocina\b/i.test(lower)) return 'audio';
+	if (/\bcafetera\b|\bcafeteras\b|\bfreidora\b|\bfreidoras\b|\bhervidor\b|\bhervidores\b|\bhorno\b|\bhornos\b|\blicuadora\b|\blicuadoras\b|\bolla\b|\bollas\b|\barrocera\b|\bexprimidor\b/i.test(lower)) return 'cocina';
 	if (CATEGORIAS_RE.test(msg)) return 'otra';
 	return null;
 }
@@ -203,7 +203,7 @@ Producto:`;
 	try {
 		const respuesta = await generateResponse(prompt);
 		const limpio = respuesta.replace(/[.,!?¡¿"'()\-:;]/g, '').trim().toLowerCase();
-		if (limpio && limpio.length >= 2 && !/(?:no se|no pude|ninguno|nada|error|producto)/i.test(limpio)) {
+		if (limpio && limpio.length >= 2 && !/\b(?:no se|no pude|ninguno|nada|error|producto)\b/i.test(limpio)) {
 			return limpio;
 		}
 	} catch { /* fallback silencioso */ }
@@ -219,8 +219,8 @@ export function detectarShortcuts(message: string, categoria: string): Record<st
 			answers.presupuesto = 'alto';
 		}
 	}
-	if (/barato|econ[oó]mico|menos/i.test(lower)) answers.presupuesto = 'bajo';
-	if (/lo que sea|sin l[ií]mite|no importa|indistinto|el mejor|necesario/i.test(lower)) answers.presupuesto = 'alto';
+	if (/\bbarato\b|\becon[oó]mico\b|\bmenos\b/i.test(lower)) answers.presupuesto = 'bajo';
+	if (/lo que sea|sin l[ií]mite|no importa|\bindistinto\b|\bel mejor\b|\bnecesario\b/i.test(lower)) answers.presupuesto = 'alto';
 	return answers;
 }
 
