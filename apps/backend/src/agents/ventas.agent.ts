@@ -400,7 +400,7 @@ async function generarMensajeSinCobertura(ciudad: string, mensajeUsuario: string
 	try {
 		const msg = await generateResponse(
 			ctx,
-			`Eres un asesor de ventas amable y natural. El usuario es de ${ciudad}, donde NO tenemos cobertura directa. Redacta un mensaje personalizado (máximo 2 oraciones) que:
+			`Eres una asesora de ventas amable y natural. El usuario es de ${ciudad}, donde NO tenemos cobertura directa. Redacta un mensaje personalizado (máximo 2 oraciones) que:
 - NO diga "qué bien" ni "excelente" (porque no hay cobertura directa)
 - Informe amablemente que no tenemos cobertura directa pero que enviamos por transportadora (el flete NO está incluido en el precio, se calcula al agregar el producto al carrito en la web)
 - NO menciones "pago contra entrega", "contra entrega" ni "pagar al recibir"
@@ -1151,74 +1151,83 @@ REGLAS PARA ANALIZAR IMÁGENES:
 
 		}
 
-		// ── PASO 1: Validar cobertura si aún no se hizo (mejoras #2 y #4) ─────
+		// ── PASO 1: Validar cobertura si aún no se hizo ──────────────────────
 		if (!context?.ciudadValidada) {
 			const ciudadDetectada = await extraerCiudadDelMensaje(message);
 
 			if (!ciudadDetectada) {
 				const esPrimeraVez = !context?.history?.length && !context?.nuevaSesion;
-				const saludo = getSaludo();
-				const intro = esPrimeraVez
-					? `${saludo} 👋 Soy ${AGENT_NAME}, tu asesora en JLC Electronics, la marca de los colombianos.\n\n`
-					: '';
 				const productoDetectado = detectarCategoria(message);
-				const meta: any = {
-					agentType: 'ventas',
-					flujo: 'esperando_ciudad',
-					pendingMessage: message,
-				};
-				if (productoDetectado) meta.productoSolicitado = productoDetectado;
-				return {
-					response: `${intro}¿Desde dónde nos escribes? 📍`,
-					metadata: meta,
-				};
-			}
 
-			const cobertura = await verificarCobertura(ciudadDetectada);
+				// Si el mensaje tiene intención clara de producto (no es solo un saludo),
+				// saltar la pregunta de ciudad y dejar que Gemini maneje la interacción
+				// con el contexto completo del producto.
+				if (productoDetectado && !esPrimeraVez && message.length > 10) {
+					context = { ...context, ciudadValidada: true, productoSolicitado: productoDetectado };
+				} else {
+					const saludo = getSaludo();
+					const intro = esPrimeraVez
+						? `${saludo} 👋 Soy ${AGENT_NAME}, tu asesora en JLC Electronics, la marca de los colombianos.\n\n`
+						: '';
+					const meta: any = {
+						agentType: 'ventas',
+						flujo: 'esperando_ciudad',
+						pendingMessage: message,
+					};
+					if (productoDetectado) meta.productoSolicitado = productoDetectado;
+					return {
+						response: `${intro}¿Desde dónde nos escribes? 📍`,
+						metadata: meta,
+					};
+				}
+			} else {
+				// Ciudad detectada en el mensaje → validar cobertura
+				const cobertura = await verificarCobertura(ciudadDetectada);
 
-			if (cobertura === 'cobertura') {
+				if (cobertura === 'cobertura') {
+					context = {
+						...context,
+						ciudadValidada: true,
+						ciudad: ciudadDetectada,
+						tieneCobertura: true,
+					};
+					const productoDetectado = detectarCategoria(message);
+					return {
+						response: `¡Qué bien! A ${ciudadDetectada.charAt(0).toUpperCase() + ciudadDetectada.slice(1)} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
+						metadata: {
+							agentType: 'ventas',
+							ciudad: ciudadDetectada,
+							ciudadValidada: true,
+							tieneCobertura: true,
+							flujo: 'esperando_modalidad',
+							pendingMessage: message,
+							...(productoDetectado && { productoSolicitado: productoDetectado }),
+						},
+					};
+				}
+
 				context = {
 					...context,
 					ciudadValidada: true,
 					ciudad: ciudadDetectada,
-					tieneCobertura: true,
+					tieneCobertura: false,
 				};
-				const productoDetectado = detectarCategoria(message);
+				const msgSinCobertura = (await generarMensajeSinCobertura(ciudadDetectada, context?.pendingMessage || '')).trim();
+				const productoDetectado = context?.pendingMessage ? detectarCategoria(context.pendingMessage) : null;
 				return {
-					response: `¡Qué bien! A ${ciudadDetectada.charAt(0).toUpperCase() + ciudadDetectada.slice(1)} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
+					response: msgSinCobertura,
 					metadata: {
 						agentType: 'ventas',
 						ciudad: ciudadDetectada,
 						ciudadValidada: true,
-						tieneCobertura: true,
-						flujo: 'esperando_modalidad',
-						pendingMessage: message,
+						tieneCobertura: false,
+						modalidad: 'contado',
+						flujo: null,
+						pendingMessage: context?.pendingMessage,
 						...(productoDetectado && { productoSolicitado: productoDetectado }),
 					},
 				};
 			}
-
-			context = {
-				...context,
-				ciudadValidada: true,
-				ciudad: ciudadDetectada,
-				tieneCobertura: false,
-			};
-			const msgSinCobertura = (await generarMensajeSinCobertura(ciudadDetectada, context?.pendingMessage || '')).trim();
-			const productoDetectado = context?.pendingMessage ? detectarCategoria(context.pendingMessage) : null;
-			return {
-				response: msgSinCobertura,
-				metadata: {
-					agentType: 'ventas',
-					ciudad: ciudadDetectada,
-					ciudadValidada: true,
-					tieneCobertura: false,
-					modalidad: 'contado',
-					flujo: null,
-					pendingMessage: context?.pendingMessage,
-					...(productoDetectado && { productoSolicitado: productoDetectado }),
-				},
-			};
 		}
 
 		// ── PASO 3: Si eligió crédito → iniciar formulario ──────────────────
@@ -2180,7 +2189,7 @@ REGLAS DE CATÁLOGO:
 - Si el cliente pide "más información" de un producto que YA fue identificado y mostrado, dale los detalles disponibles y OFRÉCELE ir al pago. No preguntes presupuesto ni entres en perfilado.
 - Si el cliente ya identificó un producto (por nombre, número o SKU), concéntrate en ese producto.
 - Si no hay productos en el catálogo, dilo con honestidad y pregunta qué busca.
-- Si el cliente es de Crédito, nunca mostrar precios de productos.
+- Si el cliente es de Crédito, NUNCA mostrar precios de productos.
 - Si el cliente pide un producto nuevo o diferente, ayúdale con eso.
 - Si menciona un SKU o referencia que SÍ está en el catálogo, confírmaselo y dale el enlace.
 - Si menciona un SKU o referencia que NO está, dilo naturalmente sin afirmar que "no existe".
