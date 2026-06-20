@@ -691,6 +691,14 @@ export class VentasAgent implements IAgent {
 			context?.history?.slice(-4).map((h: any) => `${h.role === 'user' ? 'Cliente' : 'Asistente'}: ${h.parts?.[0]?.text || ''}`).join('\n') || ''
 		) : null;
 
+		// ── ¿El usuario está haciendo una pregunta activa? ───────────────────
+		// Si es una pregunta del usuario (no respuesta a pregunta del bot),
+		// saltamos todos los flujos automáticos y dejamos que la IA responda.
+		const esPreguntaActiva = /[?¿]/.test(message)
+			|| /^(?:cu[aá]l|cu[aá]nto|cu[aá]nta|qu[eé]|c[oó]mo|d[oó]nde|tiene|tienen|son\s+de|es\s+de|me\s+(?:das|pasas|dices|confirmas|puedes)|podr[ií]as|sabes)/i.test(message)
+			|| aiClasificacion?.esPreguntaTecnica === true
+			|| aiClasificacion?.intent === 'pregunta_especificacion';
+
 		// ── Flujo de esperando_ciudad o esperando_modalidad pausado ──────────
 		if (context?.flujo === 'esperando_ciudad_pausado') {
 			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
@@ -1730,9 +1738,7 @@ export class VentasAgent implements IAgent {
 		}
 		// Si el mensaje es una pregunta general (?, cuánto, qué, tiene, son de, etc.)
 		// sobre un producto, NO iniciar perfilación — es una consulta de especificación.
-		const esPreguntaGeneral = /[?¿]/.test(message) || /^(?:cu[aá]l|cu[aá]nto|cu[aá]nta|qu[eé]|c[oó]mo|d[oó]nde|tiene|tienen|son\s+de|es\s+de|me\s+(?:das|pasas|dices|confirmas|puedes)|podr[ií]as|sabes)/i.test(message);
-
-		if ((categoriaGeneral || catDetectada) && context?.flujo !== 'perfilando' && !esPreguntaGeneral && !aiClasificacion?.esPreguntaTecnica) {
+		if ((categoriaGeneral || catDetectada) && context?.flujo !== 'perfilando' && !esPreguntaActiva) {
 			const cat = catDetectada;
 			if (cat) {
 				const terminoParaBuscar = message.toLowerCase().replace(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa)\s*/gi, '').trim();
@@ -1873,7 +1879,7 @@ export class VentasAgent implements IAgent {
 
 		// ── Preguntas de stock/disponibilidad → escalar a Cris ─────────────
 		const preguntaStock = /(?:hay\s*(?:en\s*)?stock|disponible|disponibilidad|cu[aá]ndo\s*(?:llega|llegar[aá]|est[aá]|hay)|tiempo\s*(?:de\s*)?entrega|demora|cu[aá]nto\s*(?:demora|tarda)|lo\s*tiene\s*(?:en\s*)?stock|est[aá]\s*(?:disponible|en\s*stock)|fecha\s*(?:de\s*)?entrega|llega\s*(?:a\s*)?(?:mi\s*)?ciudad)/i.test(message);
-		if (preguntaStock && !context?.flujo) {
+		if (preguntaStock && !context?.flujo && !esPreguntaActiva) {
 			const ciudad = context?.ciudad || context?.userData?.ciudad || '';
 			const producto = context?.ultimaBusqueda?.results?.[0]?.name || context?.productoSolicitado || context?.terminoBusqueda || '';
 			return {
@@ -1924,7 +1930,7 @@ export class VentasAgent implements IAgent {
 			}) || null;
 		}
 
-		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago' && !resetFlujo) {
+		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago' && !resetFlujo && !esPreguntaActiva) {
 			const prod = productoPorPrecio || context?.ultimaBusqueda?.results?.[0];
 			const productoURL = prod?.permalink || context?.productoURL;
 			const nombreProducto = prod?.name || context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
