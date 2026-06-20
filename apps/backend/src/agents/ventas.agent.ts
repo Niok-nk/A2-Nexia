@@ -293,7 +293,7 @@ export const CREDITO_STEPS: CreditoStep[] = [
 	{ field: 'skuProducto',        pregunta: 'Por último, ¿tienes el código o referencia del producto? Lo ves debajo del nombre en la página. Si no lo tienes, escribe "No sé".' },
 ];
 
-function sanitizarNumerosVentas(texto: string): string {
+export function sanitizarNumerosVentas(texto: string): string {
 	const AUTORIZADO = '3187408190';
 	// Captura: con prefijo +57 (ej "+57 320 788 1151") o celular pelado de 10
 	// dígitos que empiece por 3 (ej "3207881151", "320 788 1151").
@@ -2155,6 +2155,8 @@ POLÍTICAS DE LA EMPRESA —debes cumplirlas:
 - No menciones entrega en primer piso a menos que el cliente pregunte explícitamente.
 - No confirmes despacho si el cliente no ha pagado.
 - Si el cliente dice que ya pagó, pídele el comprobante o número de transacción.
+- Si preguntan por garantía del producto, responde brevemente que tienen 1 año de garantía cubriendo defectos de fábrica, y que la factura de compra es el respaldo. No deriven a servicio técnico ni des números de contacto. La venta la gestionas tú.
+- Si preguntan por la calidad de un producto, responde con honestidad destacando sus ventajas. No preguntes presupuesto ni desvíes la pregunta.
 - Si el cliente confirma que quiere un producto ("me gusta", "lo quiero", "dále", etc.), ofrécele las opciones de pago directamente. No preguntes cuál ni vuelvas a listar productos.
 - NUNCA preguntes "¿Seguimos buscando?" ni "¿Seguimos buscando el producto ideal para ti?". Cuando el cliente muestre interés, ofrécele ir al pago. Si el cliente pide otra opción, muestra un producto diferente. Siempre busca cerrar la venta, no alargar la búsqueda.
 - Si preguntan por opciones de pago, no las enumeres; guíalos a pagar en la web.

@@ -1,6 +1,7 @@
 import { IAgent, AgentResponse } from './types.js';
 import { buildUserDataContext, buildGemmaPrompt, cleanResponse, formatHistory } from './helpers.js';
 import { generateResponse } from '../utils/gemini.js';
+import { sanitizarNumerosVentas } from './ventas.agent.js';
 
 export class ServicioTecnicoAgent implements IAgent {
 	name = 'Servicio Técnico';
@@ -44,7 +45,7 @@ Para garantías, el cliente debe tener factura de compra y el producto en buen e
 		});
 
 		const raw = await generateResponse(user, system);
-		const response = cleanResponse(raw);
+		const response = sanitizarNumerosVentas(cleanResponse(raw));
 
 		return {
 			response,
