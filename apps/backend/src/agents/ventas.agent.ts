@@ -1732,7 +1732,7 @@ export class VentasAgent implements IAgent {
 		// sobre un producto, NO iniciar perfilación — es una consulta de especificación.
 		const esPreguntaGeneral = /[?¿]/.test(message) || /^(?:cu[aá]l|cu[aá]nto|cu[aá]nta|qu[eé]|c[oó]mo|d[oó]nde|tiene|tienen|son\s+de|es\s+de|me\s+(?:das|pasas|dices|confirmas|puedes)|podr[ií]as|sabes)/i.test(message);
 
-		if ((categoriaGeneral || catDetectada) && context?.flujo !== 'perfilando' && !esPreguntaGeneral) {
+		if ((categoriaGeneral || catDetectada) && context?.flujo !== 'perfilando' && !esPreguntaGeneral && !aiClasificacion?.esPreguntaTecnica) {
 			const cat = catDetectada;
 			if (cat) {
 				const terminoParaBuscar = message.toLowerCase().replace(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa)\s*/gi, '').trim();
