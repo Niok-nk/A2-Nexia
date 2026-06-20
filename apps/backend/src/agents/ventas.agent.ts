@@ -220,7 +220,7 @@ export async function buscarProductoInteligente(
 export function esPreguntaEspecificacion(texto: string): boolean {
 	const t = texto.toLowerCase();
 	// Palabras de especificación técnica (incluye capacidad: kilos, litros, pulgadas)
-	const tieneSpec = /(?:\bmedida\b|\bmedidas\b|\bmide\b|\bmiden\b|cu[aá]nto mide|\bdimensi[oó]n\b|\bdimensiones\b|\balto\b|\bancho\b|\blargo\b|\bprofundidad\b|\bfondo\b|\baltura\b|\banchura\b|\bcent[ií]metro\b|\bcm\b|\bmetro\b|\bpulgada\b|\btama[ñn]o\b|\bcapacidad\b|\blitro\b|\blitros\b|\blt\b|\bkilo\b|\bkilogramo\b|\bkg\b|\bpeso\b|\bconsumo\b|\bvoltaje\b|\bpotencia\b|\bwatt\b|\bvatio\b|\bcolor\b|\bcolores\b|\bgarant[ií]a\b|especificaci|caracter[ií]stica|ficha t[eé]cnica|\bcabe\b|\bcaben\b|\bentra\b|cu[aá]nto pesa|\bmaterial\b|\bfunci[oó]n\b|\bfunciones\b|\bprograma\b)/i.test(t);
+	const tieneSpec = /(?:\bmedida\b|\bmedidas\b|\bmide\b|\bmiden\b|cu[aá]nto mide|\bdimensi[oó]n\b|\bdimensiones\b|\balto\b|\bancho\b|\blargo\b|\bprofundidad\b|\bfondo\b|\baltura\b|\banchura\b|\bcent[ií]metro\b|\bcm\b|\bmetro\b|\bpulgada\b|\btama[ñn]o\b|\bcapacidad\b|\blitro\b|\blitros\b|\blt\b|\bkilo\b|\bkilogramo\b|\bkg\b|\bpeso\b|\bconsumo\b|\bvoltaje\b|\bpotencia\b|\bwatt\b|\bvatio\b|\bcolor\b|\bcolores\b|\bgarant[ií]a\b|especificaci|caracter[ií]stica|ficha t[eé]cnica|\bcabe\b|\bcaben\b|\bentra\b|cu[aá]nto pesa|\bmaterial\b|\bfunci[oó]n\b|\bfunciones\b|\bprograma\b|tuber[ií]a|tuber[ií]as|tuber[ií]a\s*de|cobre|aluminio|acero|pl[aá]stico|vidrio|resisten)\)/i.test(t);
 	// Capacidad numérica (ej: "19 kilos", "254 litros", "50 pulgadas", "18kg") como pregunta implícita
 	const tieneCapacidadNumerica = /\b\d{2,4}\s*(?:kilos|kilogramos|kg|litros|lt|pulgadas|pulg)\b/i.test(t);
 	// Forma interrogativa
