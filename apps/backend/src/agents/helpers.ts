@@ -221,6 +221,7 @@ export function detectarShortcuts(message: string, categoria: string): Record<st
 	}
 	if (/\bbarato\b|\becon[oó]mico\b|\bmenos\b/i.test(lower)) answers.presupuesto = 'bajo';
 	if (/lo que sea|sin l[ií]mite|no importa|\bindistinto\b|\bel mejor\b|\bnecesario\b/i.test(lower)) answers.presupuesto = 'alto';
+	if (/\blisto\b|\bver\b/i.test(lower)) answers.presupuesto = 'ver';
 	return answers;
 }
 

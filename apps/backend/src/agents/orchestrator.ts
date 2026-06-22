@@ -166,7 +166,7 @@ export class Orchestrator {
 		if (/\b(c[oó]mo pago|d[oó]nde pago|medio de pago|medios de pago|formas de pago|forma de pago|pse|pagar con tarjeta|transferencia|consignar|consignaci[oó]n|soporte de pago|comprobante de pago)\b/.test(m)) {
 			return 'pagos';
 		}
-		if (/\b(comprar|cotizar|cotizaci[oó]n|precio|cu[aá]nto cuesta|cu[aá]nto vale|televisor|televisores|tv|nevera|neveras|nevecones?|lavadora|lavadoras|congeladores?|exhibidores?|minibar|freidora|freidoras|horno|hornos|licuadora|licuadoras|cafeteras?|hervidor|ventiladores?|cocina|parlante|parlantes|sonido|audio|video|refrigeraci[oó]n|electrodom[eé]stico|electrodom[eé]sticos|contado|cr[eé]dito|financiar|cuotas|profesional|profesionales|tuber[ií]a|tuber[ií]as|calidad|garant[ií]a)\b/.test(m)) {
+		if (/\b(comprar|cotizar|cotizaci[oó]n|precio|cu[aá]nto cuesta|cu[aá]nto vale|televisor|televisores|tv|nevera|neveras|nevecones?|lavadora|lavadoras|congeladores?|exhibidores?|minibar|freidora|freidoras|horno|hornos|licuadora|licuadoras|cafeteras?|hervidor|ventiladores?|cocina|parlante|parlantes|sonido|audio|video|refrigeraci[oó]n|electrodom[eé]stico|electrodom[eé]sticos|contado|cr[eé]dito|financiar|cuotas|profesional|profesionales|tuber[ií]a|tuber[ií]as|calidad|garant[ií]a|negocio)\b/.test(m)) {
 			return 'ventas';
 		}
 
@@ -186,7 +186,7 @@ REGLAS:
 - "servicio_tecnico" cubre: reparación, mantenimiento, garantía, equipo dañado o que no funciona.
 - "repuestos" cubre: piezas, partes, accesorios, filtros, empaques.
 - "vacantes" cubre: trabajo, empleo, hoja de vida.
-- "distribuidores" cubre: ser distribuidor, venta al mayor, mayorista.
+- "distribuidores" cubre: ser distribuidor, venta al mayor, mayorista. NO clasificar como distribuidores si el cliente dice "para negocio" o "uso comercial" refiriéndose al uso del producto (eso es ventas).
 - "pagos" cubre: medios de pago, PSE, tarjeta, cómo pagar una cuota, envío de soportes.
 
 Ejemplos:

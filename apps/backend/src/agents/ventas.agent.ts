@@ -295,19 +295,31 @@ export const CREDITO_STEPS: CreditoStep[] = [
 
 export function sanitizarNumerosVentas(texto: string): string {
 	const AUTORIZADO = '3187408190';
-	// Captura: con prefijo +57 (ej "+57 320 788 1151") o celular pelado de 10
-	// dígitos que empiece por 3 (ej "3207881151", "320 788 1151").
 	const patron = /(\+?57[\s-]*)?\b3\d{2}[\s-]*\d{3}[\s-]*\d{4}\b/g;
 	let result = texto.replace(patron, (match) => {
 		const soloDigitos = match.replace(/\D/g, '').replace(/^57/, '');
 		if (soloDigitos === AUTORIZADO) return match;
 		return '+57 318 740 8190';
 	});
-	// También eliminar menciones tipo "WhatsApp de cartera" o "cartera" como
-	// destino de contacto, ya que en ventas no se debe redirigir a cartera.
 	result = result.replace(/\bescr[ií]benos\s+al\s+whatsapp\s+de\s+cartera\b/gi, 'contáctanos al');
 	result = result.replace(/\bwhatsapp\s+de\s+cartera\b/gi, 'whatsapp');
 	return result;
+}
+
+export function sanitizarURLs(texto: string, productos: any[]): string {
+	const approvedUrls = new Set<string>();
+	for (const p of productos) {
+		if (p?.permalink) {
+			approvedUrls.add(p.permalink.replace(/\/+$/, ''));
+		}
+	}
+	approvedUrls.add('https://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg');
+
+	return texto.replace(/https?:\/\/[^\s<>"']+/g, (url) => {
+		const clean = url.replace(/[.,;:!?)]*$/, '').replace(/\/+$/, '');
+		if (approvedUrls.has(clean)) return url;
+		return '';
+	}).replace(/ {2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 export function formatearResumenCredito(data: CreditoData): string {
@@ -1982,18 +1994,42 @@ export class VentasAgent implements IAgent {
 		const preguntaSeguimiento = /\b(?:especificaciones?|caracter[ií]sticas?|detalles?|d[ée]tal|cu[aá]nto cuesta|cu[aá]nto vale|cu[aá]l es|en qu[eé] se diferencia|diferencia|c[oó]mo es|descr[ií]belo|dimensiones|medidas|capacidad|color|modelo|referencia|precio|m[aá]s info|m[aá]s informaci[oó]n|primero|segunda?|tercero|este|ese|aquel|me gusta|prefiero|quiero|detalles|garantia|la primera opci[oó]n|el primero|la primera)\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
 
 		if (preguntaSeguimiento) {
-			// Re-consultar WooCommerce fresco en vez de reusar cache
 			try {
 				const termino = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || terminoBusqueda || message;
 				const categoriaCtx = context?.ultimaBusqueda?.categoria || detectarCategoria(termino);
 				const resultado = await buscarProductoInteligente(termino, categoriaCtx);
-				products = resultado.products?.slice(0, 3) || [];
+				products = resultado.products?.slice(0, 10) || [];
 				hayProductos = products.length > 0;
 				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
 			} catch {
-				products = context?.ultimaBusqueda?.results?.slice(0, 3) || [];
+				products = context?.ultimaBusqueda?.results?.slice(0, 10) || [];
 				hayProductos = products.length > 0;
 				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			}
+		}
+
+		// ── BÚSQUEDA EN WOOCOMMERCE PARA CUALQUIER MENCIÓN DE PRODUCTO ──────
+		// Cada vez que el cliente menciona un producto (SKU, categoría, link,
+		// pregunta activa sobre producto), buscar en WooCommerce para tener
+		// datos frescos en el prompt de la IA y evitar que invente información.
+		if (products.length === 0 && esPreguntaActiva) {
+			const sku = extraerSKU(message);
+			const pideLink = /\b(?:link|enlace|url)\b/i.test(message);
+			const prodPrevio = context?.userData?.productoSolicitado || context?.productoSolicitado || context?.terminoBusqueda;
+			const cat = catDetectada || context?.ultimaBusqueda?.categoria || (prodPrevio ? detectarCategoria(prodPrevio) : null);
+			if (sku || cat || (pideLink && prodPrevio)) {
+				try {
+					const termino = sku || prodPrevio || message;
+					const resultado = await buscarProductoInteligente(termino, cat);
+					if (resultado.products.length > 0) {
+						products = resultado.products;
+						hayProductos = true;
+						productoIndex = 0;
+						productoBuscado = resultado.products[0]?.name || productoBuscado;
+					}
+				} catch {
+					// continuar sin productos
+				}
 			}
 		}
 
@@ -2005,9 +2041,12 @@ export class VentasAgent implements IAgent {
 				try {
 					const masProductos = await wooCommerceService.searchProducts(catBusqueda, pideMasEconomico ? 40 : 30);
 					if (masProductos?.length > 0) {
-						products = masProductos;
+						const idSet = new Set(masProductos.map((p: any) => p.id));
+						// Incluir productos previos que no aparecieron en la nueva búsqueda
+						const previos = (busquedaGuardada?.results || []).filter((p: any) => !idSet.has(p.id));
+						products = [...masProductos, ...previos];
 						if (pideMasEconomico) {
-							products = [...products].sort((a: any, b: any) => {
+							products.sort((a: any, b: any) => {
 								const pa = parseFloat(a.price || '999999999');
 								const pb = parseFloat(b.price || '999999999');
 								return pa - pb;
@@ -2018,8 +2057,40 @@ export class VentasAgent implements IAgent {
 						}
 						hayProductos = true;
 						productoBuscado = catBusqueda;
+					} else {
+						// Sin resultados nuevos → usar los previos
+						const previos = busquedaGuardada?.results || [];
+						if (previos.length > 0) {
+							products = [...previos];
+							if (pideMasEconomico) {
+								products.sort((a: any, b: any) => {
+									const pa = parseFloat(a.price || '999999999');
+									const pb = parseFloat(b.price || '999999999');
+									return pa - pb;
+								});
+								productoIndex = 0;
+							}
+							hayProductos = true;
+							productoBuscado = catBusqueda;
+						}
 					}
-				} catch { /* fall through */ }
+				} catch {
+					// Fallback a productos previos
+					const previos = busquedaGuardada?.results || [];
+					if (previos.length > 0) {
+						products = [...previos];
+						if (pideMasEconomico) {
+							products.sort((a: any, b: any) => {
+								const pa = parseFloat(a.price || '999999999');
+								const pb = parseFloat(b.price || '999999999');
+								return pa - pb;
+							});
+							productoIndex = 0;
+						}
+						hayProductos = true;
+						productoBuscado = catBusqueda;
+					}
+				}
 			}
 			if (!hayProductos) {
 				products = [];
@@ -2125,7 +2196,7 @@ export class VentasAgent implements IAgent {
 
 		if (productoIndex >= products.length) productoIndex = 0;
 		const productListStr = products.length > 0
-			? products.slice(productoIndex, productoIndex + 3).map((p: any, i: number) => {
+			? products.slice(productoIndex, productoIndex + 10).map((p: any, i: number) => {
 				const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar precio';
 				const desc = htmlToCleanText(p.description || p.short_description || '', i === 0);
 				// Incluir atributos estructurados (dimensiones, capacidad, etc.)
@@ -2180,11 +2251,12 @@ POLÍTICAS DE LA EMPRESA —debes cumplirlas:
 REGLAS DE CATÁLOGO:
 - Muestra SOLO 1 producto a la vez. Elige el mejor candidato según lo que sepas del cliente. Si el cliente pide "ver opciones", no le muestres todo el catálogo — elige UN producto y preséntalo, luego pregunta algo para seguir perfilando (uso, capacidad que necesita, etc.).
 - NO preguntes por presupuesto si el cliente ya te dio el dato, ya viste el precio del producto o ya mostraste el precio. Si el cliente ya sabe qué producto quiere y su precio, ofrécele las opciones de pago directamente para cerrar la venta.
-- Siempre incluye el enlace del producto al presentarlo. Nunca preguntes si quiere el enlace.
+- Siempre incluye el enlace del producto al presentarlo, pero SOLO si tienes el enlace real del catálogo (campo "Enlace:" de los datos del producto). NUNCA inventes, generes ni construyas URLs. Si el producto no tiene enlace real, no compartas ningún link. Nunca preguntes si quiere el enlace.
 - Si el cliente pregunta detalles/especificaciones de un producto del catálogo, responde usando su información de "Detalles".
 - Si el cliente pide "más información" de un producto que YA fue identificado y mostrado, dale los detalles disponibles y OFRÉCELE ir al pago. No preguntes presupuesto ni entres en perfilado.
 - Si el cliente ya identificó un producto (por nombre, número o SKU), concéntrate en ese producto.
-- Si no hay productos en el catálogo, dilo con honestidad y pregunta qué busca.
+- Si no hay productos en el catálogo, dilo con honestidad y pregunta qué busca. NUNCA compartas enlaces de productos que no estén en el catálogo.
+- Si el cliente pide una opción más económica o más barata, preséntale el producto más económico disponible en el catálogo. No digas que es el "único" modelo disponible ni que no hay más opciones. Si solo hay un producto en el catálogo, preséntalo como la mejor opción disponible.
 - Si el cliente es de Crédito, NUNCA mostrar precios de productos.
 - Si el cliente pide un producto nuevo o diferente, ayúdale con eso.
 - Si menciona un SKU o referencia que SÍ está en el catálogo, confírmaselo y dale el enlace.
@@ -2199,7 +2271,7 @@ REGLAS DE CATÁLOGO:
 				},
 				{
 					cliente: 'Busco una nevera',
-					asistente: 'Tenemos la Nevera JLC No Frost 251L por $1.399.900. https://jlc-electronics.com/product/nevera-jlc-no-frost-251l ¿Para cuántas personas la necesitas? Así te confirmo si es el tamaño ideal 😊',
+					asistente: 'Tenemos la Nevera JLC No Frost 251L por $1.399.900. ¿Para cuántas personas la necesitas? Así te confirmo si es el tamaño ideal 😊',
 				},
 				{
 					cliente: 'me gusta',
@@ -2223,6 +2295,7 @@ REGLAS DE CATÁLOGO:
 		const raw = await generateResponse(user + catalogPrompt, system);
 		let response = cleanResponse(raw);
 		response = sanitizarNumerosVentas(response);
+		response = sanitizarURLs(response, products);
 
 		return {
 			response,
@@ -2237,7 +2310,7 @@ REGLAS DE CATÁLOGO:
 				...(resetFlujo ? { flujo: null } : {}),
 				...(productoBuscado.length < 30 && productoBuscado.split(/\s+/).length <= 5 && !/[?¿]/.test(productoBuscado) ? { productoSolicitado: productoBuscado } : {}),
 			ultimaBusqueda: products.length > 0
-				? { results: products.slice(productoIndex, productoIndex + 3), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
+				? { results: products.slice(productoIndex, productoIndex + 10), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
 				: context?.ultimaBusqueda,
 				...datosPersonales,
 			},
