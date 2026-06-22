@@ -679,29 +679,39 @@ export const DEPARTAMENTOS_COBERTURA = [
 ];
 
 export const CIUDADES_COBERTURA: string[] = [
-	'pasto', 'tumaco', 'ipiales', 'la union', 'la unión', 'samaniego',
-	'túquerres', 'tuquerres', 'barbacoas', 'el charco', 'sandoná', 'sandona',
-	'chachagüi', 'chachagui',
-	'popayán', 'popayan', 'santander de quilichao', 'miranda', 'patía', 'patia',
-	'puerto tejada', 'piendamó', 'piendamo', 'el tambo', 'cajibío', 'cajibio',
-	'mocoa', 'puerto asís', 'puerto asis', 'orito', 'sibundoy', 'valle del guamuez',
-	'san miguel', 'villagarzón', 'villagarzon',
-	'neiva', 'pitalito', 'garzón', 'garzon', 'la plata', 'campoalegre',
-	'rivera', 'palermo', 'gigante', 'isnos', 'san agustín', 'san agustin',
-	'cali', 'buenaventura', 'palmira', 'tuluá', 'tulua', 'buga',
-	'cartago', 'jamundí', 'jamundi', 'yumbo', 'florida', 'pradera',
-	'zarzal', 'la victoria', 'roldanillo', 'el cerrito',
+	// Valle del Cauca
+	'cali', 'yumbo', 'jamundí', 'jamundi', 'palmira', 'buga', 'tuluá', 'tulua',
+	'santa helena',
+	// Cauca
+	'popayán', 'popayan', 'silvia', 'cajibío', 'cajibio', 'piendamó', 'piendamo',
+	'timbío', 'timbio', 'morales', 'el tambo', 'bolívar', 'bolivar',
+	'patía', 'patia', 'el bordo', 'suárez', 'suarez', 'caloto',
+	'mondomo', 'la sierra', 'villa gloria',
+	// Nariño
+	'pasto', 'ipiales', 'tumaco', 'túquerres', 'tuquerres',
+	'samaniego', 'sandoná', 'sandona', 'la union', 'la unión',
+	'san bernardo', 'bahía solano', 'bahia solano', 'consacá', 'consaca',
+	'ancuya', 'linares', 'ricaurte', 'iles', 'san vicente',
+	'cumbal', 'guachucal', 'pupiales', 'policarpa', 'sotomayor',
+	'chachagüi', 'chachagui', 'buesaco', 'sibundoy', 'santiago',
+	// Putumayo
+	'puerto asís', 'puerto asis', 'mocoa', 'orito',
+	'la hormiga', 'valle del guamuez', 'villagarzón', 'villagarzon',
+	'puerto caicedo', 'puerto guzmán', 'puerto guzman', 'el dorado',
+	// Huila
+	'pitalito', 'san agustín', 'san agustin', 'acevedo', 'garzón', 'garzon',
+	// Bogotá D.C.
+	'bogotá', 'bogota',
 ];
 
 export async function verificarCobertura(lugar: string): Promise<'cobertura' | 'sin_cobertura' | 'desconocido'> {
 	if (!lugar) return 'desconocido';
 	const l = lugar.toLowerCase().trim();
 
-	if (DEPARTAMENTOS_COBERTURA.some((d) => l.includes(d))) return 'cobertura';
 	if (CIUDADES_COBERTURA.some((c) => l.includes(c))) return 'cobertura';
 
 	const fueraCobertura = [
-		'bogota', 'bogotá', 'medellin', 'medellín', 'barranquilla', 'cartagena',
+		'medellin', 'medellín', 'barranquilla', 'cartagena',
 		'cucuta', 'cúcuta', 'bucaramanga', 'pereira', 'manizales', 'ibague', 'ibagué',
 		'santa marta', 'villavicencio', 'monteria', 'montería', 'sincelejo',
 		'valledupar', 'tunja', 'armenia', 'quibdo', 'quibdó', 'riohacha',
@@ -717,24 +727,16 @@ export async function verificarCobertura(lugar: string): Promise<'cobertura' | '
 }
 
 export const COBERTURA_DESCRIPCION = `
-JLC Electronics tiene cobertura de envío gratis en los siguientes departamentos y municipios de Colombia:
+JLC Electronics tiene cobertura de envío gratis únicamente en los siguientes municipios de Colombia:
 
-DEPARTAMENTOS CON COBERTURA TOTAL:
-- Nariño (completo)
-- Cauca (completo)
-- Putumayo (completo)
-- Huila (completo)
-- Valle del Cauca (completo)
+Valle del Cauca: Cali, Yumbo, Jamundí, Palmira, Buga, Tuluá, Santa Helena
+Cauca: Popayán, Silvia, Cajibío, Piendamó, Timbío, Morales, El Tambo, Bolívar, Patía (El Bordo), Suárez, Caloto, Mondomo, La Sierra, Villa Gloria
+Nariño: Pasto, Ipiales, Tumaco, Túquerres, Samaniego, Sandoná, La Unión, San Bernardo, Bahía Solano, Consacá, Ancuya, Linares, Ricaurte, Iles, San Vicente, Cumbal, Guachucal, Pupiales, Policarpa, Sotomayor, Chachagüí, Buesaco, Sibundoy, Santiago
+Putumayo: Puerto Asís, Mocoa, Orito, La Hormiga (Valle del Guamuez), Villagarzón, Puerto Caicedo, Puerto Guzmán, El Dorado
+Huila: Pitalito, San Agustín, Acevedo, Garzón
+Bogotá D.C.
 
-MUNICIPIOS PRINCIPALES CUBIERTOS:
-Nariño: Pasto, Tumaco, Ipiales, La Unión, Samaniego, Túquerres, Barbacoas, El Charco, Sandoná
-Cauca: Popayán, Santander de Quilichao, Miranda, Patía, Puerto Tejada, Piendamó, El Tambo, Cajibío
-Putumayo: Mocoa, Puerto Asís, Orito, Sibundoy, Valle del Guamuez, San Miguel, Villagarzón
-Huila: Neiva, Pitalito, Garzón, La Plata, Campoalegre, Rivera, Palermo, Gigante, Isnos, San Agustín
-Valle del Cauca: Cali, Buenaventura, Palmira, Tuluá, Buga, Cartago, Jamundí, Yumbo, Florida, Pradera, Zarzal, La Victoria, Roldanillo, El Cerrito
-
-CUBRIMOS TODO EL DEPARTAMENTO, no solo los municipios listados.
-NO tenemos cobertura en otros departamentos como Antioquia, Bogotá/Cundinamarca, Santander, Boyacá, etc.
+NO tenemos cobertura en otros municipios. Si un municipio no está en esta lista, no tiene cobertura.
 `.trim();
 
 const IA_CACHE = new Map<string, { result: any; expires: number }>();
