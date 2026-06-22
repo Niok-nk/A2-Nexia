@@ -1941,6 +1941,21 @@ export class VentasAgent implements IAgent {
 			resetFlujo = true;
 		}
 
+		// ── Nueva compra: el cliente quiere empezar de cero con otro producto ──
+		const esNuevaCompra = !esNuevoProductoEnPago && !context?.flujo && /(?:quiero\s*(?:comprar|buscar|ver)\s*(?:otro|un\s*nuevo|algo\s*diferente|otra\s*cosa)|busco\s*(?:otro|algo\s*m[aá]s|otra\s*cosa)|necesito\s*(?:otro|algo\s*diferente)|otr[oa]\s*(?:producto|opcion|alternativa|cosa)|quiero\s*(?:empezar\s*de\s*nuevo|comenzar\s*otra\s*vez|algo\s*distinto)|voy\s*a\s*(?:comprar|buscar)\s*(?:otro|un\s*nuevo)|me\s*recomiendas\s*(?:otro|algo\s*diferente|otra\s*marca))\b/i.test(lower) && !esPreguntaActiva;
+		if (esNuevaCompra) {
+			const cat = detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null;
+			if (cat) {
+				context = { ...context, flujo: null, ultimaBusqueda: undefined, terminoBusqueda: undefined, productoSolicitado: undefined, perfilState: undefined };
+				resetFlujo = true;
+			} else {
+				return {
+					response: `¡Claro! ¿Qué tipo de producto estás buscando? 😊`,
+					metadata: { agentType: 'ventas', flujo: null },
+				};
+			}
+		}
+
 		// ── Detectar intención de compra ("me gusta", "cómo pago", "lo quiero") ─
 		const tieneProductos = context?.ultimaBusqueda?.results?.length > 0;
 		const esNegacion = /^(?:no\s+|tampoco|nunca|jam[aá]s|ni\s*lo\s*quiero)/i.test(message);
