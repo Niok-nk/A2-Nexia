@@ -871,3 +871,20 @@ export async function extraerCiudadDelMensaje(mensaje: string): Promise<string |
 
 	return null;
 }
+
+export function sanitizarURLs(texto: string, productos: any[]): string {
+	const approvedUrls = new Set<string>();
+	for (const p of productos) {
+		if (p?.permalink) {
+			approvedUrls.add(p.permalink.replace(/\/+$/, ''));
+		}
+	}
+	approvedUrls.add('https://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg');
+	approvedUrls.add('https://jlc-electronics.com/');
+
+	return texto.replace(/https?:\/\/[^\s<>"']+/g, (url) => {
+		const clean = url.replace(/[.,;:!?)]*$/, '').replace(/\/+$/, '');
+		if (approvedUrls.has(clean)) return url;
+		return '';
+	}).replace(/ {2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}

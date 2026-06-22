@@ -19,7 +19,8 @@ import {
 	getSaludo,
 	resolverOpcion,
 	detectarPagoConfirmado,
-	clasificarIntencionConIA
+	clasificarIntencionConIA,
+	sanitizarURLs
 } from './helpers.js';
 import { generateResponse } from '../utils/gemini.js';
 import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
@@ -304,22 +305,6 @@ export function sanitizarNumerosVentas(texto: string): string {
 	result = result.replace(/\bescr[ií]benos\s+al\s+whatsapp\s+de\s+cartera\b/gi, 'contáctanos al');
 	result = result.replace(/\bwhatsapp\s+de\s+cartera\b/gi, 'whatsapp');
 	return result;
-}
-
-export function sanitizarURLs(texto: string, productos: any[]): string {
-	const approvedUrls = new Set<string>();
-	for (const p of productos) {
-		if (p?.permalink) {
-			approvedUrls.add(p.permalink.replace(/\/+$/, ''));
-		}
-	}
-	approvedUrls.add('https://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg');
-
-	return texto.replace(/https?:\/\/[^\s<>"']+/g, (url) => {
-		const clean = url.replace(/[.,;:!?)]*$/, '').replace(/\/+$/, '');
-		if (approvedUrls.has(clean)) return url;
-		return '';
-	}).replace(/ {2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 export function formatearResumenCredito(data: CreditoData): string {
@@ -1150,7 +1135,7 @@ export class VentasAgent implements IAgent {
 				// Si el mensaje tiene intención clara de producto (no es solo un saludo),
 				// saltar la pregunta de ciudad y dejar que Gemini maneje la interacción
 				// con el contexto completo del producto.
-				if (productoDetectado && !esPrimeraVez && message.length > 10) {
+				if (productoDetectado && !esPrimeraVez && message.length >= 10) {
 					context = { ...context, ciudadValidada: true, productoSolicitado: productoDetectado };
 				} else {
 					const saludo = getSaludo();

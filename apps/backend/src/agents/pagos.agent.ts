@@ -1,5 +1,5 @@
 import { IAgent, AgentResponse } from './types.js';
-import { buildUserDataContext, buildGemmaPrompt, cleanResponse, formatHistory } from './helpers.js';
+import { buildUserDataContext, buildGemmaPrompt, cleanResponse, formatHistory, sanitizarURLs } from './helpers.js';
 import { generateResponse } from '../utils/gemini.js';
 
 export class PagosAgent implements IAgent {
@@ -92,7 +92,7 @@ REGLAS:
 		});
 
 		const raw = await generateResponse(user, system);
-		const response = cleanResponse(raw);
+		const response = sanitizarURLs(cleanResponse(raw), ultimosProductos);
 
 		return {
 			response,
