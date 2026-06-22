@@ -681,6 +681,7 @@ export const DEPARTAMENTOS_COBERTURA = [
 export const CIUDADES_COBERTURA: string[] = [
 	'pasto', 'tumaco', 'ipiales', 'la union', 'la unión', 'samaniego',
 	'túquerres', 'tuquerres', 'barbacoas', 'el charco', 'sandoná', 'sandona',
+	'chachagüi', 'chachagui',
 	'popayán', 'popayan', 'santander de quilichao', 'miranda', 'patía', 'patia',
 	'puerto tejada', 'piendamó', 'piendamo', 'el tambo', 'cajibío', 'cajibio',
 	'mocoa', 'puerto asís', 'puerto asis', 'orito', 'sibundoy', 'valle del guamuez',
@@ -844,7 +845,7 @@ export async function extraerCiudadDelMensaje(mensaje: string): Promise<string |
 	const lower = mensaje.toLowerCase();
 
 	const patronesPrefijo = [
-		/(?:soy de|estoy en|vivo en|escribo desde|desde|ciudad[:\s]+|ubicado en|me encuentro en)\s+([a-záéíóúñ\s]{3,30})/i,
+		/(?:soy de|estoy en|vivo en|escribo desde|desde|ciudad[:\s]+|ubicado en|me encuentro en)\s+([a-záéíóúñü\s]{3,30})/i,
 	];
 
 	for (const patron of patronesPrefijo) {
@@ -861,7 +862,7 @@ export async function extraerCiudadDelMensaje(mensaje: string): Promise<string |
 		if (exactMatch) return trimmed;
 
 		const words = trimmed.split(/\s+/);
-		if (words.length <= 3 && words.every((w) => /^[a-záéíóúñ]+$/i.test(w))) {
+		if (words.length <= 3 && words.every((w) => /^[a-záéíóúñü]+$/i.test(w))) {
 			const algunaCoincide = words.some((w) =>
 				w.length > 2 && allCities.some((c) => c.includes(w) || w.includes(c))
 			);

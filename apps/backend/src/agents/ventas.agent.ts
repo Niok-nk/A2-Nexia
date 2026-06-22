@@ -1740,11 +1740,14 @@ export class VentasAgent implements IAgent {
 			if (cat) {
 				const terminoParaBuscar = message.toLowerCase().replace(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa)\s*/gi, '').trim();
 				let productosDisponibles: any[] = [];
+				let estrategiaBusqueda = 'sin_resultados';
 				try {
 					const resultado = await buscarProductoInteligente(terminoParaBuscar, cat);
 					productosDisponibles = resultado.products;
+					estrategiaBusqueda = resultado.estrategia;
 					if (productosDisponibles.length === 0) {
 						productosDisponibles = await wooCommerceService.searchProducts(cat, 20);
+						estrategiaBusqueda = 'categoria';
 					}
 				} catch { /* continuar sin productos */ }
 
@@ -1805,13 +1808,16 @@ export class VentasAgent implements IAgent {
 
 				if (esPreguntaEspecificacion(message)) {
 					// El producto ya fue identificado arriba; saltar el perfilamiento
+				} else if (productosDisponibles.length > 0 && estrategiaBusqueda !== 'categoria' && estrategiaBusqueda !== 'texto' && estrategiaBusqueda !== 'palabra_clave' && estrategiaBusqueda !== 'sin_resultados') {
+					// La búsqueda encontró un producto específico (SKU, capacidad, potencia)
+					// → no preguntar presupuesto, dejar que Gemini presente el producto
 				} else if (campos >= pasos.length) {
 					const terminoBusqueda = terminoParaBuscar;
 					context = { ...context, terminoBusqueda };
 				} else {
 					const primerPaso = pasos.find(p => !shortcuts[p.field]);
 					if (primerPaso) {
-						const prodMatch = message.match(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa|info de|informacion de)\s*(?:\bun[oa]?\b|\bunas?\b|\bdisponible\b|\besta\b|\beste\b|\besa\b|\bese\b)?\s*([a-záéíóúñÁÉÍÓÚÑ][a-záéíóúñÁÉÍÓÚÑ\s]{2,40})/i);
+						const prodMatch = message.match(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa|info de|informacion de)\s*(?:\bun[oa]?\b|\bunas?\b|\bdisponible\b|\besta\b|\beste\b|\besa\b|\bese\b)?\s*([a-záéíóúñüÁÉÍÓÚÑÜ][a-záéíóúñüÁÉÍÓÚÑÜ\s]{2,40})/i);
 						return {
 							response: primerPaso.pregunta,
 							metadata: {
@@ -1964,7 +1970,7 @@ export class VentasAgent implements IAgent {
 		let terminoBusqueda = context?.terminoBusqueda || message;
 
 		const STOPWORDS_PRODUCTO = /\s+(?:de|del|la|el|los|las|un|una|unos|unas|por|para|con|que|y|o|en|a|al|JLC|Electronics|marca|modelo|referencia|producto|electrodoméstico|electrodomestico)\b.*/i;
-		const busquedaMatch = message.match(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa|info de|informacion de)\s*(?:\bun[oa]?\b|\bunas?\b|\bdisponible\b|\besta\b|\beste\b|\besa\b|\bese\b)?\s*([a-záéíóúñÁÉÍÓÚÑ][a-záéíóúñÁÉÍÓÚÑ\s]{2,40})/i);
+		const busquedaMatch = message.match(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa|info de|informacion de)\s*(?:\bun[oa]?\b|\bunas?\b|\bdisponible\b|\besta\b|\beste\b|\besa\b|\bese\b)?\s*([a-záéíóúñüÁÉÍÓÚÑÜ][a-záéíóúñüÁÉÍÓÚÑÜ\s]{2,40})/i);
 		let productoBuscado: string;
 		if (busquedaMatch) {
 			productoBuscado = busquedaMatch[1].trim()

@@ -480,7 +480,7 @@ function esInterrupcionFlujo(message: string, flujo: string, context?: any): boo
 
 	// Si el flujo espera una ubicación y el usuario menciona una ciudad, no es interrupción
 	if (flujo === 'esperando_ciudad' || flujo === 'esperando_ciudad_pausado') {
-		if (/(?:desde|soy de|vivo en|estoy en|escribo desde|ubicado en|me encuentro en)\s+[a-záéíóúñ]{3,}/i.test(msg)) {
+		if (/(?:desde|soy de|vivo en|estoy en|escribo desde|ubicado en|me encuentro en)\s+[a-záéíóúñü]{3,}/i.test(msg)) {
 			return false;
 		}
 	}
