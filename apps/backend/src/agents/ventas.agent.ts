@@ -1897,6 +1897,42 @@ export class VentasAgent implements IAgent {
 			};
 		}
 
+		// ── Pregunta sobre envío a una ciudad específica ─────────────────────
+		// Detecta "envían a [ciudad]", "tiene envío a [ciudad]", "llega a [ciudad]"
+		const envioACiudad = lower.match(/(?:env[ií][ao]n?\s*(?:a|para|hasta)|tiene\s*(?:env[ií]o|cobertura)\s*(?:a|para|en|hasta)|llega\s*(?:a|hasta)|hacen\s*(?:env[ií]o|domicilio|entrega)\s*(?:a|para|hasta)|a[úu]n\s*(?:env[ií]an|hacen\s*env[ií]o|tienen\s*cobertura)|cubre\s*(?:a|en|para)|hay\s*cobertura\s*(?:a|en|para|hasta)|flete\s*(?:a|para|hasta)|costo\s*de\s*env[ií]o\s*(?:a|para|hasta))\s+([a-záéíóúñü]{3,})/i);
+		if (envioACiudad) {
+			const ciudadConsulta = envioACiudad[1].toLowerCase().trim();
+			const cobertura = await verificarCobertura(ciudadConsulta);
+			if (cobertura === 'cobertura') {
+				return {
+					response: `¡Sí! Enviamos a *${ciudadConsulta.charAt(0).toUpperCase() + ciudadConsulta.slice(1)}* con envío gratis 🚚✨ ¿Deseas continuar con tu compra? 😊`,
+					metadata: {
+						agentType: 'ventas',
+						flujo: context?.flujo || null,
+						ciudad: ciudadConsulta,
+						ciudadValidada: true,
+						tieneCobertura: true,
+						ultimaBusqueda: context?.ultimaBusqueda,
+						productoCompra: context?.productoCompra || context?.ultimaBusqueda?.results?.[0]?.name,
+					},
+				};
+			} else if (cobertura === 'sin_cobertura') {
+				return {
+					response: `A *${ciudadConsulta.charAt(0).toUpperCase() + ciudadConsulta.slice(1)}* no tenemos cobertura directa, pero podemos enviarte tu producto a través de una transportadora (el flete se calcula al agregar el producto al carrito en la web). ¿Quieres continuar con tu compra? 😊`,
+					metadata: {
+						agentType: 'ventas',
+						flujo: context?.flujo || null,
+						ciudad: ciudadConsulta,
+						ciudadValidada: true,
+						tieneCobertura: false,
+						ultimaBusqueda: context?.ultimaBusqueda,
+						productoCompra: context?.productoCompra || context?.ultimaBusqueda?.results?.[0]?.name,
+					},
+				};
+			}
+			// desconocido → dejar que Gemini responda
+		}
+
 		// ── Si está en flujo de pago pero pide un producto nuevo, reiniciar ──
 		let resetFlujo = false;
 		const esNuevoProductoEnPago = context?.flujo === 'seleccion_pago' && /(?:y\s*(?:de|en|para)\s*(?:los|las|un|una)?|qu[e\u00e9]\s*(?:tal|hay\s*de|me\s*recomiendas|otr[oa]s?\s*opciones)|recomiendas|recomi[e\u00e9]ndame|tienes?\s*(?:televisores?|neveras?|lavadoras?|congeladores?|tvs?|licuadoras?|parlantes?|aires?\s*(?:acondicionado)?|ventiladores?|estufas?|hornos?|microondas?|equipos?\s*de\s*sonido|monitores?|pantallas?|aspiradoras?|planchas?)|(?:y\s*)?(?:en\s*)?(?:\btelevisores\b|\bneveras\b|\blavadoras\b|\bcongeladores\b|\btvs\b|\blicuadoras\b|\bparlantes\b|\bsonido\b|\baire\b|\bventiladores\b|\belectrodom[e\u00e9]sticos\b))/i.test(message);
