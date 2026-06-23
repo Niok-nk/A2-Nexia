@@ -9,8 +9,9 @@ import {
 	DistribuidoresAgent,
 	PagosAgent,
 } from './agents.js';
-import { generateResponse, generateMultimodalResponse } from '../utils/gemini.js';
+import { generateResponse, generateMultimodalResponse, compareProductImages } from '../utils/gemini.js';
 import { cleanResponse } from './helpers.js';
+import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -321,6 +322,38 @@ Categoría:`;
 				}
 				if (imgInfo.tipo === 'danado' && context) {
 					context.productoDanado = true;
+				}
+
+				// ── Buscar en catálogo y comparar imágenes ─────────────────────
+				if (!imgInfo.sku && (imgInfo.categoria || imgInfo.descripcion)) {
+					try {
+						const termino = imgInfo.descripcion || imgInfo.categoria || '';
+						const resultado = await wooCommerceService.searchProducts(termino, 5);
+						if (resultado?.length > 0) {
+							// Descargar imágenes del catálogo
+							const catImages: Array<{ index: number; name: string; base64: string; mimeType: string }> = [];
+							for (let i = 0; i < resultado.length; i++) {
+								const p = resultado[i] as any;
+								const imgUrl = p?.images?.[0]?.src;
+								if (!imgUrl) continue;
+								try {
+									const resp = await fetch(imgUrl);
+									const buf = Buffer.from(await resp.arrayBuffer());
+									const mt = resp.headers.get('content-type') || 'image/jpeg';
+									catImages.push({ index: i, name: p.name, base64: buf.toString('base64'), mimeType: mt });
+								} catch { /* skip */ }
+							}
+							if (catImages.length > 0) {
+								const bestIndex = await compareProductImages(base64, mime, catImages);
+								if (bestIndex !== null) {
+									const match = resultado[bestIndex] as any;
+									message = `${message} [${match.name}]`;
+									if (match.sku) message = `${message} [${match.sku}]`;
+									if (context) context.categoriaSugerida = imgInfo.categoria || undefined;
+								}
+							}
+						}
+					} catch { /* continuar */ }
 				}
 			} catch {
 				// Si falla, continuar con el flujo normal sin datos de imagen

@@ -103,6 +103,35 @@ export const generateMultimodalResponse = async (
 	throw new Error(`Gemini API error (All models failed). Last error: ${lastError}`);
 };
 
+/** Compara la imagen del cliente con múltiples imágenes del catálogo para encontrar el producto que coincide. */
+export const compareProductImages = async (
+	userImageBase64: string,
+	userMimeType: string,
+	catalogImages: Array<{ index: number; name: string; base64: string; mimeType: string }>,
+): Promise<number | null> => {
+	const catalogLines = catalogImages.map((img, i) => `${i + 1}. ${img.name}`).join('\n');
+	const text = `Aquí hay una foto enviada por un cliente. Y a continuación, fotos de productos de nuestro catálogo numeradas:\n${catalogLines}\n\n¿Cuál producto del catálogo coincide con la foto del cliente? Responde SOLO con el número (1-${catalogImages.length}) o "ninguno".`;
+
+	const parts: any[] = [
+		{ text },
+		{ inlineData: { mimeType: userMimeType, data: userImageBase64 } },
+		...catalogImages.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
+	];
+
+	for (const modelName of MODELS) {
+		try {
+			const model = genAI.getGenerativeModel({ model: modelName }, { timeout: REQUEST_TIMEOUT_MS });
+			const result = await model.generateContent({ contents: [{ role: 'user', parts }] });
+			const raw = result.response.text().trim();
+			const num = parseInt(raw, 10);
+			if (num >= 1 && num <= catalogImages.length) return num - 1;
+		} catch {
+			continue;
+		}
+	}
+	return null;
+};
+
 const REQUEST_TIMEOUT_MS = 60_000;
 
 export const getGeminiModel = (systemInstruction?: string) => {
