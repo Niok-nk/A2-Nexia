@@ -268,6 +268,30 @@ export function detectarShortcuts(message: string, categoria: string): Record<st
 	if (/\bbarato\b|\becon[oó]mico\b|\bmenos\b/i.test(lower)) answers.presupuesto = 'bajo';
 	if (/lo que sea|sin l[ií]mite|no importa|\bindistinto\b|\bel mejor\b|\bnecesario\b/i.test(lower)) answers.presupuesto = 'alto';
 	if (/\blisto\b|\bver\b/i.test(lower)) answers.presupuesto = 'ver';
+
+	// Detectar presupuesto numérico (ej: "2000000", "2.000.000", "2 millones")
+	if (!answers.presupuesto) {
+		const millones = lower.match(/(\d+)\s*millones?/i);
+		if (millones) {
+			const val = parseInt(millones[1], 10) * 1000000;
+			if (val >= 100000) answers.presupuesto = String(val);
+		}
+	}
+	if (!answers.presupuesto) {
+		const numFormat = lower.match(/(\d{1,3}\.\d{3}(?:\.\d{3})?)/);
+		if (numFormat) {
+			const val = parseInt(numFormat[1].replace(/\./g, ''), 10);
+			if (val >= 100000 && val <= 50000000) answers.presupuesto = numFormat[1];
+		}
+	}
+	if (!answers.presupuesto) {
+		const nums = lower.match(/\b(\d{4,8})\b/);
+		if (nums) {
+			const val = parseInt(nums[1], 10);
+			if (val >= 100000 && val <= 50000000) answers.presupuesto = nums[1];
+		}
+	}
+
 	return answers;
 }
 

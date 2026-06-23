@@ -1757,7 +1757,10 @@ export class VentasAgent implements IAgent {
 				};
 			}
 		}
-		let catDetectada = detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null;
+		// Si hay imagen, dar prioridad a la categoría extraída de la imagen
+		let catDetectada = (context?.mediaFileName && context?.categoriaSugerida)
+			? context.categoriaSugerida
+			: (detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null);
 		// Si el mensaje actual no tiene categoría pero es pregunta de medidas/specs,
 		// inferir categoría desde el pendingMessage o productoSolicitado anterior
 		if (!catDetectada && esPreguntaEspecificacion(message)) {
