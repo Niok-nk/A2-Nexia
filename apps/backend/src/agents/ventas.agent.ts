@@ -920,12 +920,13 @@ export class VentasAgent implements IAgent {
 
 		// ── SI ESTAMOS ESPERANDO CIUDAD, procesar primero (PASO 2) ─────────
 		if (context?.flujo === 'esperando_ciudad') {
-			let ciudadDetectada = await extraerCiudadDelMensaje(message);
+			const msgParaCiudad = context?.originalMessage || message;
+			let ciudadDetectada = await extraerCiudadDelMensaje(msgParaCiudad);
 			if (!ciudadDetectada) {
-				ciudadDetectada = await detectarCiudadConIA(message);
+				ciudadDetectada = await detectarCiudadConIA(msgParaCiudad);
 			}
 			if (!ciudadDetectada) {
-				const limpio = message.trim().replace(/[.,!?¡¿]+$/g, '');
+				const limpio = msgParaCiudad.trim().replace(/[.,!?¡¿]+$/g, '');
 				if (limpio.length >= 3 && limpio.length <= 30) {
 					ciudadDetectada = limpio.toLowerCase();
 				}
@@ -1148,7 +1149,8 @@ export class VentasAgent implements IAgent {
 
 		// ── PASO 1: Validar cobertura si aún no se hizo ──────────────────────
 		if (!context?.ciudadValidada) {
-			const ciudadDetectada = await extraerCiudadDelMensaje(message);
+			const msgParaCiudad = context?.originalMessage || message;
+			const ciudadDetectada = await extraerCiudadDelMensaje(msgParaCiudad);
 
 			if (!ciudadDetectada) {
 				const esPrimeraVez = !context?.history?.length && !context?.nuevaSesion;

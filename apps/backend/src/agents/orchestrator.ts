@@ -311,11 +311,16 @@ Categoría:`;
 				let imgInfo: { tipo?: string; sku?: string | null; categoria?: string | null; descripcion?: string } = {};
 				try { imgInfo = JSON.parse(jsonText); } catch { /* ignorar */ }
 
-				// Enriquecer el mensaje con lo extraído de la imagen
+				// Guardar el texto original del cliente para extracción de ciudad/dirección
+				if (context) context.originalMessage = message;
+
+				// Reemplazar el mensaje con lo extraído de la imagen (la imagen tiene prioridad)
 				if (imgInfo.sku) {
-					message = `${message} [${imgInfo.sku}]`;
+					message = imgInfo.sku;
+				} else if (imgInfo.categoria) {
+					message = imgInfo.categoria + (imgInfo.descripcion ? ` ${imgInfo.descripcion}` : '');
 				} else if (imgInfo.descripcion && imgInfo.descripcion.length < 40) {
-					message = `${message} [${imgInfo.descripcion}]`;
+					message = imgInfo.descripcion;
 				}
 				if (imgInfo.categoria && context) {
 					context.categoriaSugerida = imgInfo.categoria;
@@ -347,8 +352,7 @@ Categoría:`;
 								const bestIndex = await compareProductImages(base64, mime, catImages);
 								if (bestIndex !== null) {
 									const match = resultado[bestIndex] as any;
-									message = `${message} [${match.name}]`;
-									if (match.sku) message = `${message} [${match.sku}]`;
+									message = match.sku || imgInfo.categoria || '';
 									if (context) context.categoriaSugerida = imgInfo.categoria || undefined;
 								}
 							}
