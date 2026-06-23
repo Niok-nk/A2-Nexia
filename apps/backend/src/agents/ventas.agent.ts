@@ -705,6 +705,14 @@ export class VentasAgent implements IAgent {
 			|| aiClasificacion?.esPreguntaTecnica === true
 			|| aiClasificacion?.intent === 'pregunta_especificacion';
 
+		// ── Agradecimientos sin flujo activo → respuesta cortés, no iniciar ventas ─
+		if (!context?.flujo && !esPreguntaActiva && /^(?:muchas\s*)?gracias\b|(?:muchas\s*)?gracias\s*$|te\s*agradezco|agradecido|gracias\s*por\s*tu\s*ayuda|de\s*nada|ok\s*gracias|dale\s*gracias/i.test(lower)) {
+			return {
+				response: '¡Con gusto! Estoy atenta por si necesitas algo más 😊',
+				metadata: { agentType: 'ventas', flujo: null },
+			};
+		}
+
 		// ── Flujo de esperando_ciudad o esperando_modalidad pausado ──────────
 		if (context?.flujo === 'esperando_ciudad_pausado') {
 			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
@@ -1462,6 +1470,12 @@ export class VentasAgent implements IAgent {
 					ciudadValidada: true,
 				},
 			};
+		}
+
+		// ── Detectar SKU en flujos de pago → salir y buscar producto ─────────
+		const flujoPago = ['seleccion_pago', 'pago_web', 'pago_web_paso', 'pago_completado'].includes(context?.flujo);
+		if (flujoPago && extraerSKU(message)) {
+			context = { ...context, flujo: null, ultimaBusqueda: undefined, terminoBusqueda: undefined, productoSolicitado: undefined, perfilState: undefined };
 		}
 
 		if (context?.flujo === 'pago_web') {
