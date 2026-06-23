@@ -248,7 +248,8 @@ async function flushDebounceBatch(phone: string): Promise<void> {
 	logger.info({ phone, batchSize: batch.entries.length }, '→ flushDebounceBatch: processing batch');
 
 	const combinedBody = batch.entries.map(e => e.body).join('\n').trim() || '[Imagen]';
-	const lastMedia = batch.entries[batch.entries.length - 1].mediaInfo ?? undefined;
+	const lastWithMedia = [...batch.entries].reverse().find(e => e.mediaInfo);
+	const lastMedia = lastWithMedia?.mediaInfo ?? batch.entries[batch.entries.length - 1].mediaInfo ?? undefined;
 
 	try {
 		const result = await processIncomingMessage(
@@ -438,6 +439,7 @@ export async function processIncomingMessage(
 	if (extra?.ultimaBusqueda) context.ultimaBusqueda = extra.ultimaBusqueda;
 	if (extra?.perfilState) context.perfilState = extra.perfilState;
 	if (extra?.productosPreCargados) context.productosPreCargados = extra.productosPreCargados;
+	if (extra?.categoriaSugerida) context.categoriaSugerida = extra.categoriaSugerida;
 	if (extra?.modalidad) context.modalidad = extra.modalidad;
 	if (extra?.flujoAnterior) context.flujoAnterior = extra.flujoAnterior;
 	if (extra?.creditoOptions) context.creditoOptions = extra.creditoOptions;

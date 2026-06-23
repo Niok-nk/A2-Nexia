@@ -1054,7 +1054,7 @@ export class VentasAgent implements IAgent {
 						products = await wooCommerceService.searchProducts(terminoIA, 20);
 					} catch { /* continuar sin productos */ }
 					if (products.length > 0) {
-						const cat = detectarCategoria(msgOriginal) || context?.categoriaSugerida || 'otra';
+						const cat = context?.categoriaSugerida || detectarCategoria(msgOriginal) || 'otra';
 						const esEspecifico = /[A-Z]{2,5}[-][A-Z0-9]+/.test(msgOriginal) || /\d+\s*(?:litros?|kg|pulgadas?|lb|w|vatios?|refrigeraci[oó]n)/i.test(msgOriginal);
 						if (esEspecifico) {
 							const nums = (msgOriginal.match(/\d+[kKlLgG]*/g) || []).map((n: string) => n.toLowerCase());
@@ -1187,7 +1187,7 @@ export class VentasAgent implements IAgent {
 						ciudad: ciudadDetectada,
 						tieneCobertura: true,
 					};
-				const productoDetectado = detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null;
+				const productoDetectado = context?.categoriaSugerida || detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null;
 					return {
 						response: `¡Qué bien! A ${ciudadDetectada.charAt(0).toUpperCase() + ciudadDetectada.slice(1)} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
 						metadata: {

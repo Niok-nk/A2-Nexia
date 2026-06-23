@@ -303,7 +303,7 @@ Categoría:`;
 {
   "tipo": "producto" | "danado" | "otro",
   "sku": "JLC-XXXX" | null,
-  "categoria": "lavadora" | "nevera" | "televisor" | "congelador" | "ventilador" | "cocina" | "audio" | "otra" | null,
+  "categoria": "lavadora" | "nevera" | "televisor" | "congelador" | "ventilador" | "cocina" | "audio" | "vitrina" | "exhibidor" | "minibar" | "otra" | null,
   "descripcion": "descripción corta del producto (máx 20 palabras)"
 }`;
 				const raw = await generateMultimodalResponse(message === '[Imagen]' ? 'Identifica el producto en esta imagen' : `Identifica el producto en esta imagen. Mensaje del cliente: "${message}"`, base64, mime, systemExtract);
