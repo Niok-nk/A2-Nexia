@@ -123,6 +123,15 @@ export async function buscarProductoInteligente(
 			const codigo = sku.replace(/^JLC-/, '');
 			const results2 = await wooCommerceService.searchProducts(codigo, 10);
 			if (results2?.length > 0) return { products: results2, estrategia: 'sku_codigo', sku };
+			// Intentar solo la parte numérica (JLC-386CF → JLC-386)
+			const nums = sku.match(/JLC-(\d+)/i);
+			if (nums) {
+				const numericSku = `JLC-${nums[1]}`;
+				if (numericSku !== sku) {
+					const results3 = await wooCommerceService.searchProducts(numericSku, 10);
+					if (results3?.length > 0) return { products: results3, estrategia: 'sku_numerico', sku };
+				}
+			}
 		} catch { /* continuar */ }
 	}
 
@@ -707,6 +716,7 @@ export class VentasAgent implements IAgent {
 						agentType: 'ventas',
 						flujo: 'esperando_ciudad',
 						pendingMessage: context?.pendingMessage,
+						categoriaSugerida: context?.categoriaSugerida || undefined,
 					},
 				};
 			} else {
@@ -731,6 +741,7 @@ export class VentasAgent implements IAgent {
 					ciudadValidada: true,
 					tieneCobertura: context?.tieneCobertura,
 					pendingMessage: context?.pendingMessage,
+					categoriaSugerida: context?.categoriaSugerida || undefined,
 				},
 			};
 			} else {
@@ -919,6 +930,7 @@ export class VentasAgent implements IAgent {
 						agentType: 'ventas',
 						flujo: 'esperando_ciudad',
 						pendingMessage: context?.pendingMessage,
+						categoriaSugerida: context?.categoriaSugerida || undefined,
 					},
 				};
 			}
@@ -953,6 +965,7 @@ export class VentasAgent implements IAgent {
 					tieneCobertura: true,
 					flujo: 'esperando_modalidad',
 					pendingMessage: context?.pendingMessage,
+					categoriaSugerida: context?.categoriaSugerida || undefined,
 					productoSolicitado: context?.userData?.productoSolicitado || context?.pendingMessage || undefined,
 					ultimaBusqueda: context?.ultimaBusqueda,
 					terminoBusqueda: context?.terminoBusqueda,
@@ -1015,6 +1028,7 @@ export class VentasAgent implements IAgent {
 							ciudadValidada: true,
 							tieneCobertura: context?.tieneCobertura,
 							pendingMessage: context?.pendingMessage,
+							categoriaSugerida: context?.categoriaSugerida || undefined,
 						},
 					};
 				}
@@ -1032,7 +1046,7 @@ export class VentasAgent implements IAgent {
 						products = await wooCommerceService.searchProducts(terminoIA, 20);
 					} catch { /* continuar sin productos */ }
 					if (products.length > 0) {
-						const cat = detectarCategoria(msgOriginal) || 'otra';
+						const cat = detectarCategoria(msgOriginal) || context?.categoriaSugerida || 'otra';
 						const esEspecifico = /[A-Z]{2,5}[-][A-Z0-9]+/.test(msgOriginal) || /\d+\s*(?:litros?|kg|pulgadas?|lb|w|vatios?|refrigeraci[oó]n)/i.test(msgOriginal);
 						if (esEspecifico) {
 							const nums = (msgOriginal.match(/\d+[kKlLgG]*/g) || []).map((n: string) => n.toLowerCase());
@@ -1091,7 +1105,7 @@ export class VentasAgent implements IAgent {
 					}
 				}
 				// Sin resultados de WooCommerce → iniciar perfilado con la categoría detectada
-				const cat = detectarCategoria(msgOriginal) || 'otra';
+				const cat = detectarCategoria(msgOriginal) || context?.categoriaSugerida || 'otra';
 				const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
 				const primerPaso = pasos[0];
 				if (primerPaso) {
@@ -1146,6 +1160,7 @@ export class VentasAgent implements IAgent {
 						agentType: 'ventas',
 						flujo: 'esperando_ciudad',
 						pendingMessage: message,
+						categoriaSugerida: aiClasificacion?.categoriaSugerida || undefined,
 					};
 					if (productoDetectado) meta.productoSolicitado = productoDetectado;
 					return {
@@ -1173,7 +1188,8 @@ export class VentasAgent implements IAgent {
 							ciudadValidada: true,
 							tieneCobertura: true,
 							flujo: 'esperando_modalidad',
-							pendingMessage: message,
+							pendingMessage: context?.pendingMessage || message,
+							categoriaSugerida: context?.categoriaSugerida || undefined,
 							...(productoDetectado && { productoSolicitado: productoDetectado }),
 						},
 					};
@@ -1197,6 +1213,7 @@ export class VentasAgent implements IAgent {
 						modalidad: 'contado',
 						flujo: null,
 						pendingMessage: context?.pendingMessage,
+						categoriaSugerida: context?.categoriaSugerida || undefined,
 						...(productoDetectado && { productoSolicitado: productoDetectado }),
 					},
 				};

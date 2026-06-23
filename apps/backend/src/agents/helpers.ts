@@ -179,6 +179,52 @@ export function resolverRespuestaPerfil(msg: string, field: string): string {
 	return msg;
 }
 
+/** Distancia de Levenshtein para fuzzy matching de categorías */
+function levenshtein(a: string, b: string): number {
+	const m = a.length, n = b.length;
+	const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+	for (let i = 0; i <= m; i++) dp[i][0] = i;
+	for (let j = 0; j <= n; j++) dp[0][j] = j;
+	for (let i = 1; i <= m; i++) {
+		for (let j = 1; j <= n; j++) {
+			dp[i][j] = a[i - 1] === b[j - 1]
+				? dp[i - 1][j - 1]
+				: 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+		}
+	}
+	return dp[m][n];
+}
+
+const CATEGORIA_KEYWORDS: Record<string, string[]> = {
+	lavadora: ['lavadora', 'lavadoras', 'lavar', 'secadora', 'lavasecadora'],
+	televisor: ['televisor', 'televisores', 'tv', 'pantalla', 'smart'],
+	nevera: ['nevera', 'neveras', 'nevecon', 'nevecones', 'refrigerador'],
+	ventilador: ['ventilador', 'ventiladores', 'acondicionado', 'clima'],
+	congelador: ['congelador', 'congeladores'],
+	vitrina: ['vitrina', 'vitrinas'],
+	exhibidor: ['exhibidor', 'exhibidores'],
+	minibar: ['minibar'],
+	audio: ['parlante', 'parlantes', 'bocina', 'sonido', 'audio', 'bafle', 'torre', 'cabina', 'cabinas'],
+	cocina: ['cafetera', 'freidora', 'hervidor', 'horno', 'licuadora', 'olla', 'arrocera', 'exprimidor'],
+};
+
+function detectarCategoriaFuzzy(lower: string): string | null {
+	const words = lower.split(/\s+/).filter(w => w.length > 3);
+	let bestMatch: { cat: string; dist: number } | null = null;
+	for (const word of words) {
+		for (const [cat, keywords] of Object.entries(CATEGORIA_KEYWORDS)) {
+			for (const kw of keywords) {
+				if (word === kw) continue;
+				const dist = levenshtein(word, kw);
+				if (dist <= 2 && (!bestMatch || dist < bestMatch.dist)) {
+					bestMatch = { cat, dist };
+				}
+			}
+		}
+	}
+	return bestMatch?.cat || null;
+}
+
 export function detectarCategoria(msg: string): string | null {
 	const lower = msg.toLowerCase();
 	if (/\blavadora\b|\blavadoras\b|\bsecadora\b|\blavar\b/i.test(lower)) return 'lavadora';
@@ -192,7 +238,7 @@ export function detectarCategoria(msg: string): string | null {
 	if (/\bcabina\b|\bcabinas\b|\bparlante\b|\bparlantes\b|\btorre\s+de\s+sonido\b|\btorres\s+de\s+sonido\b|\bsonido\b|\baudio\b|\bbafle\b|\bbocina\b/i.test(lower)) return 'audio';
 	if (/\bcafetera\b|\bcafeteras\b|\bfreidora\b|\bfreidoras\b|\bhervidor\b|\bhervidores\b|\bhorno\b|\bhornos\b|\blicuadora\b|\blicuadoras\b|\bolla\b|\bollas\b|\barrocera\b|\bexprimidor\b/i.test(lower)) return 'cocina';
 	if (CATEGORIAS_RE.test(msg)) return 'otra';
-	return null;
+	return detectarCategoriaFuzzy(lower);
 }
 
 export async function extraerProductoConIA(mensaje: string): Promise<string | null> {
