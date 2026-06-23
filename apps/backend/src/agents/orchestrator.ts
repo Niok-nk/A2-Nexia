@@ -9,7 +9,7 @@ import {
 	DistribuidoresAgent,
 	PagosAgent,
 } from './agents.js';
-import { generateResponse, generateMultimodalResponse, compareProductImages } from '../utils/gemini.js';
+import { generateResponse, generateMultimodalResponse } from '../utils/gemini.js';
 import { cleanResponse } from './helpers.js';
 import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
 import fs from 'fs/promises';
@@ -298,67 +298,55 @@ Categoría:`;
 					};
 				}
 
-				// Extraer info estructurada del producto en la imagen
-				const systemExtract = `Analiza la imagen y extrae SOLO datos del producto. Responde ÚNICAMENTE con JSON, sin explicación:
-{
-  "tipo": "producto" | "danado" | "otro",
-  "sku": "JLC-XXXX" | null,
-  "categoria": "lavadora" | "nevera" | "televisor" | "congelador" | "ventilador" | "cocina" | "audio" | "vitrina" | "exhibidor" | "minibar" | "otra" | null,
-  "descripcion": "descripción corta del producto (máx 20 palabras)"
-}`;
-				const raw = await generateMultimodalResponse(message === '[Imagen]' ? 'Identifica el producto en esta imagen' : `Identifica el producto en esta imagen. Mensaje del cliente: "${message}"`, base64, mime, systemExtract);
-				const jsonText = cleanResponse(raw).replace(/```json\s*|\s*```/g, '').trim();
-				let imgInfo: { tipo?: string; sku?: string | null; categoria?: string | null; descripcion?: string } = {};
-				try { imgInfo = JSON.parse(jsonText); } catch { /* ignorar */ }
+				// ── Buscar productos relacionados en WooCommerce ──────────────
+				let catProducts: any[] = [];
+				try {
+					const termino = message === '[Imagen]' ? '' : message.slice(0, 60);
+					catProducts = await wooCommerceService.searchProducts(termino || 'producto', 10);
+				} catch { /* sin catalogo */ }
 
-				// Guardar el texto original del cliente para extracción de ciudad/dirección
-				if (context) context.originalMessage = message;
+				// ── Respuesta directa con IA (imagen + texto + contexto) ──────
+				const historyContext = (context?.history?.slice(-6) || []).map((m: any) =>
+					`${m.direction === 'INBOUND' ? 'Cliente' : 'Sara'}: ${m.body}`
+				).join('\n');
 
-				// Reemplazar el mensaje con lo extraído de la imagen (la imagen tiene prioridad)
-				if (imgInfo.sku) {
-					message = imgInfo.sku;
-				} else if (imgInfo.categoria) {
-					message = imgInfo.categoria + (imgInfo.descripcion ? ` ${imgInfo.descripcion}` : '');
-				} else if (imgInfo.descripcion && imgInfo.descripcion.length < 40) {
-					message = imgInfo.descripcion;
-				}
-				if (imgInfo.categoria && context) {
-					context.categoriaSugerida = imgInfo.categoria;
-				}
-				if (imgInfo.tipo === 'danado' && context) {
-					context.productoDanado = true;
-				}
+				const catalogoStr = catProducts.length > 0
+					? catProducts.map((p: any) => `- ${p.name} | SKU: ${p.sku || 'N/A'} | $${parseInt(p.price).toLocaleString('es-CO')} | Stock: ${p.stock_status}`).join('\n')
+					: 'No se encontraron productos en el catálogo.';
 
-				// ── Buscar en catálogo y comparar imágenes ─────────────────────
-				if (!imgInfo.sku && (imgInfo.categoria || imgInfo.descripcion)) {
-					try {
-						const termino = imgInfo.descripcion || imgInfo.categoria || '';
-						const resultado = await wooCommerceService.searchProducts(termino, 5);
-						if (resultado?.length > 0) {
-							// Descargar imágenes del catálogo
-							const catImages: Array<{ index: number; name: string; base64: string; mimeType: string }> = [];
-							for (let i = 0; i < resultado.length; i++) {
-								const p = resultado[i] as any;
-								const imgUrl = p?.images?.[0]?.src;
-								if (!imgUrl) continue;
-								try {
-									const resp = await fetch(imgUrl);
-									const buf = Buffer.from(await resp.arrayBuffer());
-									const mt = resp.headers.get('content-type') || 'image/jpeg';
-									catImages.push({ index: i, name: p.name, base64: buf.toString('base64'), mimeType: mt });
-								} catch { /* skip */ }
-							}
-							if (catImages.length > 0) {
-								const bestIndex = await compareProductImages(base64, mime, catImages);
-								if (bestIndex !== null) {
-									const match = resultado[bestIndex] as any;
-									message = match.sku || imgInfo.categoria || '';
-									if (context) context.categoriaSugerida = imgInfo.categoria || undefined;
-								}
-							}
-						}
-					} catch { /* continuar */ }
-				}
+				const systemDirect = `Eres Sara, asesora comercial de JLC Electronics Colombia, la marca de los colombianos.
+
+INSTRUCCIONES:
+- Analiza la imagen enviada por el cliente y responde de forma NATURAL, amable y coherente.
+- Tu mensaje debe integrar TODO: el producto de la imagen, el texto del cliente y el historial.
+- NO inventes precios, SKUs ni disponibilidad. Usa SOLO los datos del catálogo proporcionados.
+- Si el cliente pregunta por un producto específico, identifícalo en la imagen y nómbralo correctamente.
+- Si el cliente menciona una ciudad, indícale si hay cobertura (envío gratis a toda Colombia).
+- Sé breve y directa (máximo 3 párrafos).
+
+CONTEXTO DE LA CONVERSACIÓN:
+${historyContext}
+
+CATÁLOGO wooCommerce (usa solo estos datos si son relevantes):
+${catalogoStr}
+
+DATOS DEL CLIENTE:
+- Ciudad: ${context?.ciudad || 'no especificada'} ${context?.ciudadValidada ? '(validada)' : ''}
+- Cobertura: ${context?.tieneCobertura ? 'Sí' : 'Pendiente'}
+- Modalidad: ${context?.modalidad || 'no especificada'}
+${context?.userData?.nombre ? `- Nombre: ${context.userData.nombre}` : ''}
+
+Ahora responde al cliente de forma natural, integrando la imagen con su mensaje y el contexto.`;
+				const raw = await generateMultimodalResponse(message, base64, mime, systemDirect);
+				const responseText = sanitizarNumeros(cleanResponse(raw));
+				return {
+					agentType: 'ventas',
+					response: responseText,
+					metadata: {
+						flujo: context?.flujo || null,
+						agentType: 'ventas',
+					},
+				};
 			} catch {
 				// Si falla, continuar con el flujo normal sin datos de imagen
 			}
