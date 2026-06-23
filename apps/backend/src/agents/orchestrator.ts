@@ -11,6 +11,7 @@ import {
 } from './agents.js';
 import { generateResponse, generateMultimodalResponse } from '../utils/gemini.js';
 import { cleanResponse } from './helpers.js';
+import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -300,7 +301,22 @@ REGLAS:
 
 				const userPrompt = message === '[Imagen]' ? 'Analiza esta imagen y responde apropiadamente.' : message;
 				const raw = await generateMultimodalResponse(userPrompt, base64, mime, systemText);
-				const response = sanitizarNumeros(cleanResponse(raw));
+				let response = sanitizarNumeros(cleanResponse(raw));
+
+				// Validar contra catálogo: si la IA mencionó un SKU con precio, verificar que exista
+				const skuMatch = response.match(/\bJLC[\s-]?([A-Z0-9]{3,15})\b/i);
+				if (skuMatch) {
+					const sku = `JLC-${skuMatch[1].toUpperCase()}`;
+					try {
+						const products = await wooCommerceService.searchProducts(sku, 5);
+						if (!products?.length) {
+							// SKU no existe en el catálogo → quitar precio inventado
+							response = response.replace(/\$\s*[\d.,]+\s*/g, '');
+							response += ' Déjame consultar el precio exacto y disponibilidad en nuestro catálogo y te confirmo 😊';
+						}
+					} catch { /* continuar */ }
+				}
+
 				const metadata: Record<string, any> = { flujo: null, agentType: 'ventas' };
 				if (enFlujoPago) {
 					metadata.notificarComprobante = true;
