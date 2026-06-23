@@ -11,7 +11,6 @@ import {
 } from './agents.js';
 import { generateResponse, generateMultimodalResponse } from '../utils/gemini.js';
 import { cleanResponse } from './helpers.js';
-import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -264,8 +263,8 @@ Categoría:`;
 		const hasHistory = Array.isArray(context?.history) && context.history.length > 0 && context?.nuevaSesion !== true;
 
 		// ─── IMAGEN DEL CLIENTE ────────────────────────────────────────────
-		// Si el cliente envió una imagen, analizarla con Gemini Vision
-		// independientemente del flujo o agente activo.
+		// Analizar la imagen con Gemini Vision para extraer info estructurada,
+		// enriquecer el mensaje y continuar al flujo normal de clasificación.
 		if (context?.mediaFileName) {
 			const mediaPath = safeMediaPath(context.mediaFileName);
 			if (!mediaPath) {
@@ -280,51 +279,51 @@ Categoría:`;
 				const base64 = imgBuffer.toString('base64');
 				const mime = context.mediaMimeType || 'image/jpeg';
 				const enFlujoPago = ['esperando_comprobante', 'pago_medios', 'pago_web', 'pago_completado', 'seleccion_pago'].includes(context?.flujo);
-				const userDataStr = context?.userData
-					? Object.entries(context.userData).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join('\n')
-					: '';
-				const systemText =
-`Eres Sara, asesora comercial de JLC Electronics Colombia. Cálida, cercana, femenina, mensajes MUY cortos (máximo 280 caracteres y 2 frases), máximo 1 emoji.
 
-El cliente ha enviado una imagen. Analízala y responde combinando lo que ves con su mensaje: "${message}".
-${userDataStr ? `\nDatos del cliente:\n${userDataStr}\n` : ''}
-${context?.ciudad ? `Ciudad: ${context.ciudad}.` : ''}
-
-REGLAS:
-- Si la imagen muestra PRODUCTO (vitrina, nevera, lavadora, TV, etc.), identifícalo y responde con la información que puedas dar. Guíalo a la web o pregunta algo relevante.
-- Si la imagen es COMPROBANTE DE PAGO, recibo o transferencia, agradécele y dile que el pago ha quedado registrado. Pídele el número de transacción si es necesario.
-- Si la imagen es PRODUCTO DAÑADO o con falla, dile que el servicio técnico puede ayudarle y que lo escalarás.
-- Si la imagen es otra cosa, responde con naturalidad.
-- NO preguntes "¿desde dónde nos escribes?" ni entres en flujos de perfilado. Responde directamente sobre lo que ves.
-- Si no entiendes qué muestra la imagen, pregunta amablemente al cliente.
-- Responde en máximo 280 caracteres y 2 frases.`;
-
-				const userPrompt = message === '[Imagen]' ? 'Analiza esta imagen y responde apropiadamente.' : message;
-				const raw = await generateMultimodalResponse(userPrompt, base64, mime, systemText);
-				let response = sanitizarNumeros(cleanResponse(raw));
-
-				// Validar contra catálogo: si la IA mencionó un SKU con precio, verificar que exista
-				const skuMatch = response.match(/\bJLC[\s-]?([A-Z0-9]{3,15})\b/i);
-				if (skuMatch) {
-					const sku = `JLC-${skuMatch[1].toUpperCase()}`;
-					try {
-						const products = await wooCommerceService.searchProducts(sku, 5);
-						if (!products?.length) {
-							// SKU no existe en el catálogo → quitar precio inventado
-							response = response.replace(/\$\s*[\d.,]+\s*/g, '');
-							response += ' Déjame consultar el precio exacto y disponibilidad en nuestro catálogo y te confirmo 😊';
-						}
-					} catch { /* continuar */ }
-				}
-
-				const metadata: Record<string, any> = { flujo: null, agentType: 'ventas' };
+				// Si está en flujo de pago, responder directamente (comprobante)
 				if (enFlujoPago) {
-					metadata.notificarComprobante = true;
-					metadata.pipelineStage = 'VENTA_CERRADA';
+					const systemPago = `Eres Sara, asesora comercial de JLC Electronics Colombia. El cliente ha enviado una imagen de un comprobante de pago. Agradécele y dile que el pago ha quedado registrado. Pídele el número de transacción si es necesario. Mensaje MUY corto, máximo 2 frases.`;
+					const raw = await generateMultimodalResponse(message === '[Imagen]' ? 'Analiza este comprobante' : message, base64, mime, systemPago);
+					const response = sanitizarNumeros(cleanResponse(raw));
+					return {
+						agentType: 'ventas',
+						response,
+						metadata: {
+							flujo: null,
+							agentType: 'ventas',
+							notificarComprobante: true,
+							pipelineStage: 'VENTA_CERRADA',
+						},
+					};
 				}
-				return { agentType: 'ventas', response, metadata };
+
+				// Extraer info estructurada del producto en la imagen
+				const systemExtract = `Analiza la imagen y extrae SOLO datos del producto. Responde ÚNICAMENTE con JSON, sin explicación:
+{
+  "tipo": "producto" | "danado" | "otro",
+  "sku": "JLC-XXXX" | null,
+  "categoria": "lavadora" | "nevera" | "televisor" | "congelador" | "ventilador" | "cocina" | "audio" | "otra" | null,
+  "descripcion": "descripción corta del producto (máx 20 palabras)"
+}`;
+				const raw = await generateMultimodalResponse(message === '[Imagen]' ? 'Identifica el producto en esta imagen' : `Identifica el producto en esta imagen. Mensaje del cliente: "${message}"`, base64, mime, systemExtract);
+				const jsonText = cleanResponse(raw).replace(/```json\s*|\s*```/g, '').trim();
+				let imgInfo: { tipo?: string; sku?: string | null; categoria?: string | null; descripcion?: string } = {};
+				try { imgInfo = JSON.parse(jsonText); } catch { /* ignorar */ }
+
+				// Enriquecer el mensaje con lo extraído de la imagen
+				if (imgInfo.sku) {
+					message = `${message} [${imgInfo.sku}]`;
+				} else if (imgInfo.descripcion && imgInfo.descripcion.length < 40) {
+					message = `${message} [${imgInfo.descripcion}]`;
+				}
+				if (imgInfo.categoria && context) {
+					context.categoriaSugerida = imgInfo.categoria;
+				}
+				if (imgInfo.tipo === 'danado' && context) {
+					context.productoDanado = true;
+				}
 			} catch {
-				// Si falla, continuar con el flujo normal
+				// Si falla, continuar con el flujo normal sin datos de imagen
 			}
 		}
 
