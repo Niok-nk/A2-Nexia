@@ -102,6 +102,12 @@ export class Orchestrator {
 		const cleaned = m.replace(/[.,!?¡¿…]+$/g, '').trim();
 		if (greetings.includes(cleaned)) return true;
 
+		// En modo estricto: detectar saludos compuestos ("hola, buenas tardes", "holi, buenas noches")
+		if (strict) {
+			const parts = cleaned.split(/[,;]\s*/).map(p => p.trim()).filter(p => p.length > 0);
+			if (parts.length > 1 && parts.every(p => greetings.includes(p))) return true;
+		}
+
 		// En modo NO estricto (primer mensaje, sin historial):
 		//   - Saludos con coma o algo después corto
 		//   - Patrones de presentación: "me llamo...", "soy...", etc.
