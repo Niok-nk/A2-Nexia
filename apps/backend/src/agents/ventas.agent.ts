@@ -1156,28 +1156,21 @@ export class VentasAgent implements IAgent {
 				const esPrimeraVez = !context?.history?.length && !context?.nuevaSesion;
 				const productoDetectado = detectarCategoria(message);
 
-				// Si el mensaje tiene intención clara de producto (no es solo un saludo),
-				// saltar la pregunta de ciudad y dejar que Gemini maneje la interacción
-				// con el contexto completo del producto.
-				if (productoDetectado && !esPrimeraVez && message.length >= 10) {
-					context = { ...context, ciudadValidada: true, productoSolicitado: productoDetectado };
-				} else {
-					const saludo = getSaludo();
-					const intro = esPrimeraVez
-						? `${saludo} 👋 Soy ${AGENT_NAME}, tu asesora en JLC Electronics, la marca de los colombianos.\n\n`
-						: '';
-					const meta: any = {
-						agentType: 'ventas',
-						flujo: 'esperando_ciudad',
-						pendingMessage: message,
-						categoriaSugerida: aiClasificacion?.categoriaSugerida || undefined,
-					};
-					if (productoDetectado) meta.productoSolicitado = productoDetectado;
-					return {
-						response: `${intro}¿Desde dónde nos escribes? 📍`,
-						metadata: meta,
-					};
-				}
+				const saludo = getSaludo();
+				const intro = esPrimeraVez
+					? `${saludo} 👋 Soy ${AGENT_NAME}, tu asesora en JLC Electronics, la marca de los colombianos.\n\n`
+					: '';
+				const meta: any = {
+					agentType: 'ventas',
+					flujo: 'esperando_ciudad',
+					pendingMessage: message,
+					categoriaSugerida: aiClasificacion?.categoriaSugerida || undefined,
+				};
+				if (productoDetectado) meta.productoSolicitado = productoDetectado;
+				return {
+					response: `${intro}¿Desde dónde nos escribes? 📍`,
+					metadata: meta,
+				};
 			} else {
 				// Ciudad detectada en el mensaje → validar cobertura
 				const cobertura = await verificarCobertura(ciudadDetectada);
