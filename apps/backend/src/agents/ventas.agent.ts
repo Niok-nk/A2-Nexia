@@ -667,6 +667,16 @@ export class VentasAgent implements IAgent {
 			context?.history?.slice(-4).map((h: any) => `${h.role === 'user' ? 'Cliente' : 'Asistente'}: ${h.parts?.[0]?.text || ''}`).join('\n') || ''
 		) : null;
 
+		// ── Redirigir a servicio técnico si el regex lo detecta ──────────────
+		if (!context?.flujo) {
+			const msgNFC = message.toLowerCase().normalize('NFC');
+			const esServicioTecnico = /\b(?:servicio\s+t[eé]cnico|reparaci[oó]n|reparar|mantenimiento|no\s+enciende|no\s+funciona|no\s+enfr[ií]a|no\s+centrifuga|da[ñn]ado|da[ñn]ada|falla|aver[ií]a|garant[ií]a|cambio|reembolso|devoluci[oó]n|reclamaci[oó]n|t[eé]cnico\s+a\s+casa|mandar\s+t[eé]cnico|visita\s+t[eé]cnica)\b/i.test(msgNFC);
+			if (esServicioTecnico) {
+				const { ServicioTecnicoAgent } = await import('./servicio-tecnico.agent.js');
+				return new ServicioTecnicoAgent().handle(message, context);
+			}
+		}
+
 		// ── ¿El usuario está haciendo una pregunta activa? ───────────────────
 		// Si es una pregunta del usuario (no respuesta a pregunta del bot),
 		// saltamos todos los flujos automáticos y dejamos que la IA responda.
