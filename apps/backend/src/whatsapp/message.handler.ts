@@ -465,6 +465,18 @@ export async function processIncomingMessage(
 	// 7. Enrutar al orquestador
 	const { agentType, response, metadata } = await orchestrator.route(body, context);
 
+	// Si el orquestador describió la imagen, actualizar el mensaje entrante
+	// para que el historial refleje la descripción y el data-extractor pueda usarla
+	if (metadata?.imagenDescripcion && body.includes('[Imagen]')) {
+		const enrichedBody = body.replace('[Imagen]', `[Imagen: ${metadata.imagenDescripcion}]`);
+		await prisma.message.updateMany({
+			where: { contactId: contact.id, direction: 'INBOUND' },
+			orderBy: { sentAt: 'desc' },
+			take: 1,
+			data: { body: enrichedBody },
+		}).catch(e => logger.warn({ error: e.message }, 'No se pudo enriquecer el body del mensaje INBOUND'));
+	}
+
 	// 8. Persistir respuesta OUTBOUND
 	const stageActual = !esNuevaSesion && lead?.stage ? lead.stage : 'INITIAL';
 	await prisma.message.create({
