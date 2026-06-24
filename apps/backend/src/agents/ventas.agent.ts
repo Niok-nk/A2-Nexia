@@ -304,11 +304,11 @@ export const CREDITO_STEPS: CreditoStep[] = [
 ];
 
 export function sanitizarNumerosVentas(texto: string): string {
-	const AUTORIZADO = '3187408190';
+	const AUTORIZADOS = ['3187408190', '3207881151', '3207881110', '3148028482'];
 	const patron = /(\+?57[\s-]*)?\b3\d{2}[\s-]*\d{3}[\s-]*\d{4}\b/g;
 	let result = texto.replace(patron, (match) => {
 		const soloDigitos = match.replace(/\D/g, '').replace(/^57/, '');
-		if (soloDigitos === AUTORIZADO) return match;
+		if (AUTORIZADOS.includes(soloDigitos)) return match;
 		return '+57 318 740 8190';
 	});
 	result = result.replace(/\bescr[ií]benos\s+al\s+whatsapp\s+de\s+cartera\b/gi, 'contáctanos al');
