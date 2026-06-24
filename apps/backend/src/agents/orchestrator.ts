@@ -396,14 +396,12 @@ Responde corto.`;
 						agentType: 'ventas',
 						imagenTipo: 'producto',
 						imagenDescripcion: analisis?.descripcion,
+						...(!productoDetectado ? { productoSolicitado: analisis?.producto || undefined } : {}),
 						...(productoDetectado
 							? {
-								productoCompra: productoDetectado.name,
-								productoURL: productoDetectado.permalink,
 								ultimaBusqueda: { results: catProducts.slice(0, 6), categoria: null, productoIndex: 0 },
-								productoSolicitado: productoDetectado.name,
 							}
-							: { productoSolicitado: analisis?.producto || undefined }),
+							: {}),
 					};
 
 					if (yaTieneCiudad) {
