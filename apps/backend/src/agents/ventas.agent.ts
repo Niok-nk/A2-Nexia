@@ -2273,7 +2273,9 @@ ${ciudadStr ? `Ciudad del cliente: ${ciudadStr}.` : ''} ${envioStr ? `Condición
 ${userDataStr}
 
 POLÍTICAS DE LA EMPRESA —debes cumplirlas:
-- El precio NO incluye flete. Si preguntan por envío, indica que se calcula al agregar el producto al carrito en la web.
+${context?.tieneCobertura
+	? '- El precio incluye envío gratis. Si preguntan por flete, confirma que aplica envío gratis a su ciudad.'
+	: '- El precio NO incluye flete. Si preguntan por envío, indica que se calcula al agregar el producto al carrito en la web.'}
 - No menciones entrega en primer piso a menos que el cliente pregunte explícitamente.
 - No confirmes despacho si el cliente no ha pagado.
 - Si el cliente dice que ya pagó, pídele el comprobante o número de transacción.
