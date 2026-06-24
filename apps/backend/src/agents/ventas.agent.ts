@@ -1063,6 +1063,7 @@ export class VentasAgent implements IAgent {
 										tieneCobertura: context?.tieneCobertura,
 										modalidad: 'contado',
 										productosPreCargados: products,
+										ultimaBusqueda: { results: products, categoria: cat, productoIndex: 0 },
 									},
 								};
 							}
