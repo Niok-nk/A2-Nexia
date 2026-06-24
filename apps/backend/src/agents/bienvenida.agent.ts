@@ -29,7 +29,7 @@ async function generarBienvenidaIA(recurrente: boolean, nombreCliente?: string):
 	try {
 		const raw = await generateResponse(
 			`Clima: ${saludo}. Contexto: ${esRecurrente}.${nombreCtx}`,
-			`Eres ${AGENT_NAME}, asesora virtual de JLC Electronics, la marca de los colombianos.
+			`Eres ${AGENT_NAME}, asesora de JLC Electronics, la marca de los colombianos.
 Genera un mensaje de bienvenida PERSONALIZADO y natural (máximo 3 oraciones) para este cliente, con tono ${tono}.
 Debe incluir:
 - El clima (${saludo}) al inicio
@@ -42,7 +42,12 @@ Tono cálido, femenino, español colombiano.
 Incluye 1 o 2 emojis de forma natural para dar calidez 😊✨💙.`
 		);
 		const limpio = raw.replace(/["""*]/g, '').trim();
-		if (limpio.length > 20) return limpio;
+		if (limpio.length > 20) {
+			if (!recurrente && /(?:^|\s)(?:de\s+nuevo|volver\s+(?:a\s+)?(?:saludar|verte)|volverte\s+(?:a\s+)?saludar|otra\s+vez|de\s+vuelta|otra\s+ocasi[oó]n)/i.test(limpio)) {
+				return null; // IA dijo "de nuevo" siendo primera vez → descartar
+			}
+			return limpio;
+		}
 	} catch {}
 	return null;
 }
