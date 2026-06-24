@@ -17,11 +17,257 @@ import {
 	detectarCiudadConIA,
 	AGENT_NAME,
 	getSaludo,
-	resolverOpcion
+	resolverOpcion,
+	detectarPagoConfirmado,
+	clasificarIntencionConIA,
+	sanitizarURLs
 } from './helpers.js';
 import { generateResponse } from '../utils/gemini.js';
 import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
 import { sendMessage as sendWA } from '../whatsapp/whatsapp.js';
+
+// ─── BÚSQUEDA INTELIGENTE DE PRODUCTOS ───────────────────────────────────────
+//
+// Maneja tres tipos de búsqueda que el text-search genérico falla:
+//   1. SKU / referencia (ej: "JLC-21215", "JLC-500W", "JLC-55A71SGO")
+//   2. Specs de potencia (ej: "500W", "2600W RMS") + categoría
+//   3. Texto libre normal
+//
+// Intenta múltiples estrategias en orden de especificidad y devuelve el
+// primer conjunto de resultados que coincida.
+
+const CATEGORIAS_PRODUCTO = ['nevera', 'nevecon', 'refrigerador', 'refri', 'lavadora', 'televisor', 'tv', 'congelador', 'parlante', 'sonido', 'licuadora', 'horno', 'microondas', 'estufa', 'ventilador', 'plancha', 'aspiradora', 'cafetera', 'freidora', 'minibar', 'exhibidor', 'hervidor', 'arrocera'];
+
+/** Extrae un SKU/referencia tipo "JLC-21215", "JLC-55A71SGO" o código alfanumérico pelado como "36215PRO". */
+function extraerSKU(texto: string): string | null {
+	// Patrón 1: JLC seguido de guión opcional y alfanuméricos (mínimo 3 chars)
+	const match = texto.match(/\bJLC[\s-]?([A-Z0-9]{3,15})\b/i);
+	if (match) {
+		return `JLC-${match[1].toUpperCase()}`;
+	}
+	// Patrón 2: Código alfanumérico pelado (ej: "36215PRO", "6615N")
+	// Al menos 5 caracteres, mezcla de dígitos y letras, sin espacios
+	const bare = texto.match(/\b(\d{2,}[A-Z]{2,}\d*|[A-Z]{2,}\d{3,})\b/i);
+	if (bare && bare[1].length >= 5) {
+		return bare[1].toUpperCase();
+	}
+	return null;
+}
+
+/** Extrae una spec de capacidad (litros, kilos, pulgadas) del texto: { valor, unidad } */
+function extraerCapacidad(mensaje: string): { valor: number; unidad: string; query: string } | null {
+	const t = mensaje.toLowerCase();
+	const patrones = [
+		{ regex: /(\d{2,4})\s*(?:kilos|kilogramos|kg)\b/, unidad: 'kg', label: 'kilos' },
+		{ regex: /(\d{2,4})\s*(?:litros|lt|l)\b/, unidad: 'L', label: 'litros' },
+		{ regex: /(\d{2,4})\s*(?:pulgadas|pulg)\b/, unidad: '"', label: 'pulgadas' },
+	];
+	for (const p of patrones) {
+		const match = t.match(p.regex);
+		if (match) {
+			return { valor: parseInt(match[1], 10), unidad: p.unidad, query: `${match[1]} ${p.unidad}` };
+		}
+	}
+	return null;
+}
+
+/** Extrae una spec de potencia tipo "500W", "2600W RMS" del texto. */
+function extraerPotencia(texto: string): string | null {
+	const match = texto.match(/(\d{2,5})\s*w(?:\s*rms)?/i);
+	if (match) {
+		return `${match[1]}W`;
+	}
+	return null;
+}
+
+/** Detecta la categoría mencionada en el texto. */
+function detectarCategoriaTexto(texto: string): string | null {
+	const lower = texto.toLowerCase();
+	for (const cat of CATEGORIAS_PRODUCTO) {
+		const match = cat === 'refri' ? /\brefri\b/.test(lower) : lower.includes(cat);
+		if (match) {
+			// Normalizar sinónimos
+			if (cat === 'tv') return 'televisor';
+			if (cat === 'sonido') return 'parlante';
+			if (cat === 'refrigerador' || cat === 'refri') return 'nevera';
+			return cat;
+		}
+	}
+	return null;
+}
+
+/**
+ * Búsqueda inteligente. Recibe el mensaje del cliente y opcionalmente la
+ * categoría/contexto conocido. Devuelve productos + cómo se encontraron.
+ */
+export async function buscarProductoInteligente(
+	mensaje: string,
+	categoriaContexto?: string | null
+): Promise<{ products: any[]; estrategia: string; sku?: string }> {
+	const sku = extraerSKU(mensaje);
+	const potencia = extraerPotencia(mensaje);
+	const categoria = detectarCategoriaTexto(mensaje) || categoriaContexto || null;
+
+	// ── Estrategia 1: Búsqueda por SKU exacto ──────────────────────────
+	if (sku) {
+		try {
+			// Intentar método dedicado de SKU si existe
+			if (typeof (wooCommerceService as any).getProductBySku === 'function') {
+				const bySku = await (wooCommerceService as any).getProductBySku(sku);
+				if (bySku) return { products: [bySku], estrategia: 'sku', sku };
+			}
+			// Fallback: buscar el SKU como texto
+			const results = await wooCommerceService.searchProducts(sku, 10);
+			if (results?.length > 0) return { products: results, estrategia: 'sku', sku };
+			// Intentar sin el prefijo JLC- (solo el código)
+			const codigo = sku.replace(/^JLC-/, '');
+			const results2 = await wooCommerceService.searchProducts(codigo, 10);
+			if (results2?.length > 0) return { products: results2, estrategia: 'sku_codigo', sku };
+			// Intentar solo la parte numérica (JLC-386CF → JLC-386)
+			const nums = sku.match(/JLC-(\d+)/i);
+			if (nums) {
+				const numericSku = `JLC-${nums[1]}`;
+				if (numericSku !== sku) {
+					const results3 = await wooCommerceService.searchProducts(numericSku, 10);
+					if (results3?.length > 0) return { products: results3, estrategia: 'sku_numerico', sku };
+				}
+			}
+		} catch { /* continuar */ }
+	}
+
+	// ── Estrategia 2: Categoría + capacidad (ej: "nevera 254 litros", "lavadora 19 kilos") ──
+	if (categoria) {
+		const capacidad = extraerCapacidad(mensaje);
+		if (capacidad) {
+			try {
+				const query = `${categoria} ${capacidad.query}`;
+				const results = await wooCommerceService.searchProducts(query, 20);
+				if (results?.length > 0) return { products: results, estrategia: 'categoria_capacidad' };
+				// Fallback: solo buscar por capacidad
+				const results2 = await wooCommerceService.searchProducts(capacidad.query, 20);
+				if (results2?.length > 0) return { products: results2, estrategia: 'capacidad' };
+			} catch { /* continuar */ }
+		}
+	}
+
+	// ── Estrategia 3: Categoría + potencia (ej: "parlante 500W") ────────
+	if (potencia && categoria) {
+		try {
+			const query = `${categoria} ${potencia}`;
+			const results = await wooCommerceService.searchProducts(query, 20);
+			if (results?.length > 0) {
+				// Filtrar para priorizar los que realmente mencionan la potencia
+				const conPotencia = results.filter((p: any) =>
+					p.name?.toLowerCase().includes(potencia.toLowerCase())
+				);
+				if (conPotencia.length > 0) return { products: conPotencia, estrategia: 'categoria_potencia' };
+				return { products: results, estrategia: 'categoria_potencia_aprox' };
+			}
+		} catch { /* continuar */ }
+	}
+
+	// ── Estrategia 4: Solo potencia / solo capacidad, buscar en toda la tienda ──
+	if (potencia && !categoria) {
+		try {
+			const results = await wooCommerceService.searchProducts(potencia, 20);
+			if (results?.length > 0) {
+				const conPotencia = results.filter((p: any) =>
+					p.name?.toLowerCase().includes(potencia.toLowerCase())
+				);
+				if (conPotencia.length > 0) return { products: conPotencia, estrategia: 'potencia' };
+				return { products: results, estrategia: 'potencia_aprox' };
+			}
+		} catch { /* continuar */ }
+	}
+	if (!categoria) {
+		const capacidad = extraerCapacidad(mensaje);
+		if (capacidad) {
+			try {
+				const results = await wooCommerceService.searchProducts(capacidad.query, 20);
+				if (results?.length > 0) return { products: results, estrategia: 'capacidad_solo' };
+			} catch { /* continuar */ }
+		}
+	}
+
+	// ── Estrategia 5: Categoría sola ────────────────────────────────────
+	if (categoria) {
+		try {
+			const results = await wooCommerceService.searchProducts(categoria, 20);
+			if (results?.length > 0) return { products: results, estrategia: 'categoria' };
+		} catch { /* continuar */ }
+	}
+
+	// ── Estrategia 6: Texto libre (limpiar palabras de relleno) ─────────
+	const textoLimpio = mensaje
+		.toLowerCase()
+		.replace(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa|info de|informacion de|\bel\b|\bla\b|\blos\b|\blas\b|\bun\b|\buna\b|\beste\b|\besta\b|\bese\b|\besa\b)\s*/gi, '')
+		.replace(/[.,!?¡¿]+/g, '')
+		.trim();
+	if (textoLimpio.length >= 3) {
+		try {
+			const results = await wooCommerceService.searchProducts(textoLimpio, 20);
+			if (results?.length > 0) return { products: results, estrategia: 'texto' };
+		} catch { /* continuar */ }
+	}
+
+	// ── Estrategia 6: Palabras clave individuales ───────────────────────
+	const palabras = textoLimpio.split(/\s+/).filter((w) => w.length > 3);
+	for (const palabra of palabras) {
+		try {
+			const results = await wooCommerceService.searchProducts(palabra, 20);
+			if (results?.length > 0) return { products: results, estrategia: 'palabra_clave' };
+		} catch { /* continuar */ }
+	}
+
+	return { products: [], estrategia: 'sin_resultados', sku: sku || undefined };
+}
+
+/**
+ * Detecta si el mensaje es una PREGUNTA sobre especificaciones, medidas o
+ * características del producto. Estas preguntas deben responderse SIEMPRE,
+ * tienen prioridad sobre cualquier flujo de compra o pago.
+ */
+export function esPreguntaEspecificacion(texto: string): boolean {
+	const t = texto.toLowerCase();
+	// Palabras de especificación técnica (incluye capacidad: kilos, litros, pulgadas)
+	const tieneSpec = /(?:\bmedida\b|\bmedidas\b|\bmide\b|\bmiden\b|cu[aá]nto mide|\bdimensi[oó]n\b|\bdimensiones\b|\balto\b|\bancho\b|\blargo\b|\bprofundidad\b|\bfondo\b|\baltura\b|\banchura\b|\bcent[ií]metro\b|\bcm\b|\bmetro\b|\bpulgada\b|\btama[ñn]o\b|\bcapacidad\b|\blitro\b|\blitros\b|\blt\b|\bkilo\b|\bkilogramo\b|\bkg\b|\bpeso\b|\bconsumo\b|\bvoltaje\b|\bpotencia\b|\bwatt\b|\bvatio\b|\bcolor\b|\bcolores\b|\bgarant[ií]a\b|especificaci|caracter[ií]stica|ficha t[eé]cnica|\bcabe\b|\bcaben\b|\bentra\b|cu[aá]nto pesa|\bmaterial\b|\bfunci[oó]n\b|\bfunciones\b|\bprograma\b|tuber[ií]a|tuber[ií]as|tuber[ií]a\s*de|cobre|aluminio|acero|pl[aá]stico|vidrio|resisten)\)/i.test(t);
+	// Capacidad numérica (ej: "19 kilos", "254 litros", "50 pulgadas", "18kg") como pregunta implícita
+	const tieneCapacidadNumerica = /\b\d{2,4}\s*(?:kilos|kilogramos|kg|litros|lt|pulgadas|pulg)\b/i.test(t);
+	// Forma interrogativa
+	const esPregunta = /[?¿]/.test(t) || /^(?:cu[aá]l|cu[aá]nto|cu[aá]nta|qu[eé]|c[oó]mo|d[oó]nde|tiene|tienen|me\s+(?:das|pasas|dices|confirmas|puedes)|podr[ií]as|sabes)/i.test(t);
+	return (tieneSpec && esPregunta) || tieneCapacidadNumerica;
+}
+
+/** Detecta si el mensaje pide información/descripción de un producto (no es intención de compra) */
+export function esPreguntaInfo(texto: string): boolean {
+	return /\b(?:descr[ií]beme|descr[ií]belo|describir|descripci[oó]n|cu[aá]ntame\s*m[aá]s|dime\s*m[aá]s|m[aá]s\s*info(?:rmaci[oó]n)?|m[aá]s\s*detalles|c[oó]mo\s*es\s*(?:el|la|ese|esta)|h[aá]blame\s*de|qu[eé]\s*incluye|qu[eé]\s*tiene|qu[eé]\s*trae|qu[eé]\s*hace|detalles?\s*del\s*producto)\b/i.test(texto);
+}
+
+/** Convierte texto de presupuesto a un techo numérico en pesos. */
+function parsearPresupuesto(texto: string): number {
+	if (!texto) return 0;
+	const t = texto.toLowerCase().trim();
+
+	// Mapeo de rangos cualitativos
+	if (t === 'bajo') return 800000;
+	if (t === 'medio') return 2500000;
+	if (t === 'alto') return 99000000;
+
+	// Extraer número directo (ej: "1000000", "1.000.000", "1 millón")
+	if (/mill[oó]n/.test(t)) {
+		const m = t.match(/(\d+(?:[.,]\d+)?)\s*mill/);
+		if (m) return parseFloat(m[1].replace(',', '.')) * 1000000;
+		return 1000000;
+	}
+	const num = t.replace(/[^\d]/g, '');
+	if (num) {
+		const valor = parseInt(num);
+		// Si parece estar en miles (ej: "1000" → probablemente $1.000.000)
+		if (valor < 10000) return valor * 1000;
+		return valor;
+	}
+	return 0;
+}
 
 // ─── PASOS DEL FORMULARIO DE CRÉDITO ─────────────────────────────────────────
 
@@ -53,19 +299,22 @@ export const CREDITO_STEPS: CreditoStep[] = [
 	{ field: 'ingresosMensuales',  pregunta: '¿Cuánto ganas al mes aproximadamente?' },
 	{ field: 'gastosMensuales',    pregunta: '¿Y cuánto gastas al mes más o menos?' },
 	{ field: 'otrosIngresos',      pregunta: '¿Tienes otros ingresos? Si no, escribe "No".' },
-	{
-		field: 'reportadoDataCredito',
-		pregunta: '¿Estás reportado en DataCrédito?\n1️⃣ Sí\n2️⃣ No\n3️⃣ No sé',
-		opciones: ['Sí', 'No', 'No sé'],
-	},
-	{
-		field: 'dispuestoSaldarDeuda',
-		pregunta: '¿Estarías dispuesto/a a saldar esa deuda para aspirar a un nuevo crédito?\n1️⃣ Sí\n2️⃣ No',
-		opciones: ['Sí', 'No'],
-	},
 	{ field: 'producto',           pregunta: '¿Qué producto te gustaría financiar?' },
 	{ field: 'skuProducto',        pregunta: 'Por último, ¿tienes el código o referencia del producto? Lo ves debajo del nombre en la página. Si no lo tienes, escribe "No sé".' },
 ];
+
+export function sanitizarNumerosVentas(texto: string): string {
+	const AUTORIZADOS = ['3187408190', '3207881151', '3207881110', '3148028482'];
+	const patron = /(\+?57[\s-]*)?\b3\d{2}[\s-]*\d{3}[\s-]*\d{4}\b/g;
+	let result = texto.replace(patron, (match) => {
+		const soloDigitos = match.replace(/\D/g, '').replace(/^57/, '');
+		if (AUTORIZADOS.includes(soloDigitos)) return match;
+		return '+57 318 740 8190';
+	});
+	result = result.replace(/\bescr[ií]benos\s+al\s+whatsapp\s+de\s+cartera\b/gi, 'contáctanos al');
+	result = result.replace(/\bwhatsapp\s+de\s+cartera\b/gi, 'whatsapp');
+	return result;
+}
 
 export function formatearResumenCredito(data: CreditoData): string {
 	return `
@@ -91,8 +340,6 @@ export function formatearResumenCredito(data: CreditoData): string {
 - Ingresos mensuales: ${data.ingresosMensuales}
 - Gastos mensuales: ${data.gastosMensuales}
 - Otros ingresos: ${data.otrosIngresos}
-- Reportado en DataCrédito: ${data.reportadoDataCredito}
-- Dispuesto a saldar deuda: ${data.dispuestoSaldarDeuda}
 
 🛒 Producto de interés
 - Producto: ${data.producto}
@@ -101,8 +348,8 @@ export function formatearResumenCredito(data: CreditoData): string {
 }
 
 export async function enviarResumenWhatsApp(resumen: string): Promise<void> {
-	const WHATSAPP_CARTERA = process.env.WA_CARTERA || '573007215438';
-	await sendWA(WHATSAPP_CARTERA, resumen);
+	const WHATSAPP_CREDITO = process.env.WA_CREDITO || process.env.WA_ESCALAMIENTO || '573187408190';
+	await sendWA(WHATSAPP_CREDITO, resumen);
 }
 
 /**
@@ -151,24 +398,9 @@ REGLAS:
 	return null;
 }
 
-async function generarMensajeSinCobertura(ciudad: string, mensajeUsuario: string): Promise<string> {
-	const ctx = mensajeUsuario
-		? `El usuario mencionó su ciudad (${ciudad}) y previamente dijo: "${mensajeUsuario}".`
-		: `El usuario dijo que es de ${ciudad}.`;
-	try {
-		return await generateResponse(
-			ctx,
-			`Eres un asesor de ventas amable y natural. El usuario es de ${ciudad}, donde NO tenemos cobertura directa pero podemos enviar por transportadora (el flete va incluido en el precio total, el cliente paga de contado todo incluido). Redacta un mensaje personalizado (máximo 2 oraciones) que:
-- NO diga "qué bien" ni "excelente" (porque no hay cobertura directa)
-- Informe amablemente que no tenemos cobertura directa pero que enviamos por transportadora (flete a cargo del cliente dentro del pago total)
-- NO menciones "pago contra entrega", "contra entrega" ni "pagar al recibir"
-- Pregunte qué producto o referencia busca
-- Use un tono natural, no robotizado
-NO incluyas saludos formales, solo el cuerpo del mensaje.`
-		);
-	} catch {
-		return `En ${ciudad.charAt(0).toUpperCase() + ciudad.slice(1)} no tenemos cobertura directa, pero podemos enviarte por transportadora (el flete va incluido en el pago total). ¿Qué producto o referencia buscas? 😊`;
-	}
+async function generarMensajeSinCobertura(ciudad: string, _mensajeUsuario: string): Promise<string> {
+	const ciudadCap = ciudad.charAt(0).toUpperCase() + ciudad.slice(1);
+	return `En ${ciudadCap} no tenemos cobertura directa, pero podemos enviarte por transportadora. ¿Qué producto o referencia buscas? 😊`;
 }
 
 export class VentasAgent implements IAgent {
@@ -179,6 +411,41 @@ export class VentasAgent implements IAgent {
 		message: string,
 		context: any
 	): Promise<AgentResponse> {
+		const DEPARTAMENTOS_COLOMBIA = [
+			'amazonas', 'antioquia', 'arauca', 'atlántico', 'atlantico', 'bolívar', 'bolivar',
+			'boyacá', 'boyaca', 'caldas', 'caquetá', 'caqueta', 'casanare', 'cauca', 'césar', 'cesar',
+			'chocó', 'choco', 'córdoba', 'cordoba', 'cundinamarca', 'guainía', 'guainia',
+			'guaviare', 'huila', 'la guajira', 'magdalena', 'meta', 'nariño', 'narino',
+			'norte de santander', 'putumayo', 'quindío', 'quindio', 'risaralda', 'san andrés',
+			'santander', 'sucre', 'tolima', 'valle del cauca', 'valle', 'vaupés', 'vaupes', 'vichada',
+		];
+
+		function esDepartamentoValido(v: string): boolean {
+			return DEPARTAMENTOS_COLOMBIA.some((d) => v.toLowerCase().includes(d));
+		}
+
+		// Pre-poblar departamento si ya se conoce la ciudad
+		if (context?.ciudad && context?.userData && !context.userData.departamento) {
+			const CIUDAD_A_DEPARTAMENTO: Record<string, string> = {
+				pasto: 'Nariño', tumaco: 'Nariño', ipiales: 'Nariño', samaniego: 'Nariño',
+				barbacoas: 'Nariño', sandoná: 'Nariño', sandona: 'Nariño',
+				popayán: 'Cauca', popayan: 'Cauca', quilichao: 'Cauca', miranda: 'Cauca',
+				'puerto tejada': 'Cauca', piendamó: 'Cauca', piendamo: 'Cauca',
+				mocoa: 'Putumayo', 'puerto asís': 'Putumayo', 'puerto asis': 'Putumayo',
+				orito: 'Putumayo', sibundoy: 'Putumayo', villagarzón: 'Putumayo', villagarzon: 'Putumayo',
+				neiva: 'Huila', pitalito: 'Huila', garzón: 'Huila', garzon: 'Huila', campoalegre: 'Huila',
+				cali: 'Valle del Cauca', buenaventura: 'Valle del Cauca', palmira: 'Valle del Cauca',
+				tuluá: 'Valle del Cauca', tulua: 'Valle del Cauca', buga: 'Valle del Cauca',
+				cartago: 'Valle del Cauca', jamundí: 'Valle del Cauca', jamundi: 'Valle del Cauca',
+				yumbo: 'Valle del Cauca',
+				'bogotá': 'Cundinamarca', 'bogota': 'Cundinamarca',
+			};
+			const ciudadLower = context.ciudad.toLowerCase().trim();
+			if (CIUDAD_A_DEPARTAMENTO[ciudadLower]) {
+				context.userData = { ...context.userData, departamento: CIUDAD_A_DEPARTAMENTO[ciudadLower] };
+			}
+		}
+
 		const creditoData: CreditoData = {
 			...context?.creditoData,
 			...(context?.userData?.nombre ? { nombres: context.userData.nombre } : {}),
@@ -233,6 +500,69 @@ export class VentasAgent implements IAgent {
 				const valor = stepAnterior.opciones
 					? resolverOpcion(message, stepAnterior.opciones)
 					: message.trim();
+
+				// Validación específica por campo
+				if (stepAnterior.field === 'departamento' && !esDepartamentoValido(valor)) {
+					const pista = creditoData.ciudad ? ` (recuerda que ${creditoData.ciudad} queda en el departamento del Cauca, Nariño, etc.)` : '';
+					return {
+						response: `Mmm, "${valor}" no me suena a un departamento de Colombia 😅 ¿En qué departamento queda tu ciudad?${pista}`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'credito',
+							creditoData,
+							creditoStep: stepIndex,
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+						},
+					};
+				}
+				if (stepAnterior.field === 'personasACargo' && valor === '0' && !context?._personas0ok) {
+					context._personas0ok = true;
+					return {
+						response: '¿Seguro que no tienes ninguna persona a cargo? Puede ser hijos, padres u otros familiares que dependan de ti. Si es así, escribe "0" de nuevo. 😊',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'credito',
+							creditoData,
+							creditoStep: stepIndex,
+						},
+					};
+				}
+				if (stepAnterior.field === 'ingresosMensuales') {
+					const num = parseInt(valor.replace(/\D/g, ''), 10);
+					if (isNaN(num) || num <= 0) {
+						return {
+							response: '¿Me puedes decir cuánto ganas al mes aproximadamente? Un valor numérico, por favor 😊',
+							metadata: { agentType: 'ventas', flujo: 'credito', creditoData, creditoStep: stepIndex },
+						};
+					}
+				}
+				if (stepAnterior.field === 'cedula') {
+					const dig = valor.replace(/\D/g, '');
+					if (dig.length < 6 || dig.length > 12) {
+						return {
+							response: 'La cédula debe tener entre 6 y 12 dígitos. ¿Me la confirmas? 😊',
+							metadata: { agentType: 'ventas', flujo: 'credito', creditoData, creditoStep: stepIndex },
+						};
+					}
+				}
+				if (stepAnterior.field === 'celular') {
+					const dig = valor.replace(/\D/g, '');
+					if (dig.length < 10) {
+						return {
+							response: 'El celular debe tener al menos 10 dígitos. ¿Me lo escribes completo? 😊',
+							metadata: { agentType: 'ventas', flujo: 'credito', creditoData, creditoStep: stepIndex },
+						};
+					}
+				}
+				if (stepAnterior.field === 'direccion' && valor.length < 5) {
+					return {
+						response: '¿Me das la dirección más completa? Incluye barrio, calle y número si es posible 😊',
+						metadata: { agentType: 'ventas', flujo: 'credito', creditoData, creditoStep: stepIndex },
+					};
+				}
+
 				creditoData[stepAnterior.field] = valor;
 			}
 		}
@@ -249,9 +579,10 @@ export class VentasAgent implements IAgent {
 			let transicion = '';
 			if (completados === 1) transicion = '¡Gracias! ';
 			else if (completados === 3) transicion = 'Vamos muy bien 💪 ';
-			else if (completados === 6) transicion = 'Ya casi terminamos la parte personal. ';
+			else if (completados === 5) transicion = 'Seguimos con la información. ';
+			else if (completados === 8) transicion = 'Ya casi terminamos la parte personal. ';
 			else if (completados === 11) transicion = 'Casi listo, solo faltan unos pocos datos más. ';
-			else if (completados >= 15) transicion = '¡Ya casi terminamos! ';
+			else if (completados >= 13) transicion = '¡Ya casi terminamos! ';
 			else if (completados > 0 && completados % 3 === 0) transicion = 'Perfecto. ';
 
 			if (siguientePaso.field === 'skuProducto') {
@@ -300,10 +631,12 @@ export class VentasAgent implements IAgent {
 
 		const resumen = formatearResumenCredito(creditoData);
 
+		let creditoNotificado = false;
 		try {
 			await enviarResumenWhatsApp(resumen);
-		} catch {
-			console.error('Error enviando resumen de crédito por WhatsApp');
+			creditoNotificado = true;
+		} catch (e) {
+			console.error('Error enviando resumen de crédito por WhatsApp', e);
 		}
 
 		return {
@@ -315,6 +648,10 @@ export class VentasAgent implements IAgent {
 				flujo: 'credito_completado',
 				modalidad: null,
 				creditoData,
+				// Solo pedir al handler que reintente si el envío directo falló
+				// (evita doble notificación al +57 318 740 8190)
+				notificarCredito: !creditoNotificado,
+				creditoResumen: resumen,
 			},
 		};
 	}
@@ -323,9 +660,32 @@ export class VentasAgent implements IAgent {
 	async handle(message: string, context: any): Promise<AgentResponse> {
 		const lower = message.toLowerCase().trim();
 
+		// ── Clasificación con IA (antes de regex) ─────────────────────────────
+		// Corre en paralelo para no bloquear; solo para mensajes sin flujo activo.
+		const aiClasificacion = !context?.flujo ? await clasificarIntencionConIA(
+			message,
+			context?.history?.slice(-4).map((h: any) => `${h.role === 'user' ? 'Cliente' : 'Asistente'}: ${h.parts?.[0]?.text || ''}`).join('\n') || ''
+		) : null;
+
+		// ── ¿El usuario está haciendo una pregunta activa? ───────────────────
+		// Si es una pregunta del usuario (no respuesta a pregunta del bot),
+		// saltamos todos los flujos automáticos y dejamos que la IA responda.
+		const esPreguntaActiva = /[?¿]/.test(message)
+			|| /^(?:cu[aá]l|cu[aá]nto|cu[aá]nta|qu[eé]|c[oó]mo|d[oó]nde|tiene|tienen|son\s+de|es\s+de|me\s+(?:das|pasas|dices|confirmas|puedes)|podr[ií]as|sabes)/i.test(message)
+			|| aiClasificacion?.esPreguntaTecnica === true
+			|| aiClasificacion?.intent === 'pregunta_especificacion';
+
+		// ── Agradecimientos sin flujo activo → respuesta cortés, no iniciar ventas ─
+		if (!context?.flujo && !esPreguntaActiva && /^(?:muchas\s*)?gracias\b|(?:muchas\s*)?gracias\s*$|te\s*agradezco|agradecido|gracias\s*por\s*tu\s*ayuda|de\s*nada|ok\s*gracias|dale\s*gracias/i.test(lower)) {
+			return {
+				response: '¡Con gusto! Estoy atenta por si necesitas algo más 😊',
+				metadata: { agentType: 'ventas', flujo: null },
+			};
+		}
+
 		// ── Flujo de esperando_ciudad o esperando_modalidad pausado ──────────
 		if (context?.flujo === 'esperando_ciudad_pausado') {
-			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
 			if (quiereContinuar) {
 				context.flujo = 'esperando_ciudad';
 				return {
@@ -334,6 +694,7 @@ export class VentasAgent implements IAgent {
 						agentType: 'ventas',
 						flujo: 'esperando_ciudad',
 						pendingMessage: context?.pendingMessage,
+						categoriaSugerida: context?.categoriaSugerida || undefined,
 					},
 				};
 			} else {
@@ -346,7 +707,7 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (context?.flujo === 'esperando_modalidad_pausado') {
-			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
 			if (quiereContinuar) {
 				context.flujo = 'esperando_modalidad';
 			return {
@@ -358,6 +719,7 @@ export class VentasAgent implements IAgent {
 					ciudadValidada: true,
 					tieneCobertura: context?.tieneCobertura,
 					pendingMessage: context?.pendingMessage,
+					categoriaSugerida: context?.categoriaSugerida || undefined,
 				},
 			};
 			} else {
@@ -387,7 +749,7 @@ export class VentasAgent implements IAgent {
 		}
 
 		// Detectar problema web desde mensaje libre (sin flujo activo)
-		const esProblemaWeb = !context?.flujo && /(?:problem[aeo]|error|fall[oóae]|no\s*(?:funcion[ae]|carg[aeo]|abre|sirve|dej[ao]|pued[eo])|pagina\s*(?:no|da|tien)|web\s*(?:no|mal|error)|trab[ae]ad[ao]|congel[ao]|se\s*(?:qued[oó]|trab[oó])|no\s*(?:carg[ao]|proces[oa]|redireccion[ae]|muestra))\b/i.test(lower);
+		const esProblemaWeb = !context?.flujo && /\b(?:problem[aeo]|error|fall[oóae]|no\s*(?:funcion[ae]|carg[aeo]|abre|sirve|dej[ao]|pued[eo])|pagina\s*(?:no|da|tien)|web\s*(?:no|mal|error)|trab[ae]ad[ao]|congel[ao]|se\s*(?:qued[oó]|trab[oó])|no\s*(?:carg[ao]|proces[oa]|redireccion[ae]|muestra))\b/i.test(lower);
 
 		if (esProblemaWeb) {
 			return {
@@ -403,7 +765,7 @@ export class VentasAgent implements IAgent {
 		// ── Flujo de crédito activo o pausado ──────────────────────────────────
 		if (context?.flujo === 'credito' || context?.flujo === 'credito_pausado') {
 			if (context?.flujo === 'credito_pausado') {
-				const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar|reproducir/i.test(lower);
+				const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b|\breproducir\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
 				if (quiereContinuar) {
 					context.flujo = 'credito';
 				} else {
@@ -415,13 +777,26 @@ export class VentasAgent implements IAgent {
 				}
 			}
 			if (context.flujo === 'credito') {
-				return this.manejarFlujoCredito(message, context);
+				// Si el usuario ya inició el formulario y el mensaje es una consulta no
+				// relacionada, salir del flujo para que el procesamiento normal la maneje
+				const stepActual = context?.creditoStep ?? 0;
+				if (stepActual > 0) {
+					const esConsulta = /[¿?]|quiero (?:ver|que me muestre|saber|comprar|buscar)|\bmuestra\b|hay.*(?:m[aá]s|otro|alguna)|no\s+(?:me gusta|quiero|gracias)|\btienes\b.*(?:de |con )|\bcapacidad\b|\bkilos\b|\bkg\b|\blitros\b|\blt\b|\bpulgadas\b|\bpotencia\b|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|\bpresupuesto\b|\bcu[aá]nto\b|\bprecio\b|especificaciones?|caracter[ií]sticas?|detalles?|\bmodelo\b|\breferencia\b|garant[ií]a|dimensiones|\bmedidas\b|\bvenden\b|\btienen\b|\bbusco\b|\bnecesito\b|\bcat[aá]logo\b/i.test(message);
+					if (esConsulta) {
+						context.flujo = 'credito_pausado';
+						// No se retorna — el flujo normal procesa el mensaje
+					} else {
+						return this.manejarFlujoCredito(message, context);
+					}
+				} else {
+					return this.manejarFlujoCredito(message, context);
+				}
 			}
 		}
 
 		// ── Flujo de pago o perfilando pausado ─────────────────────────────────
 		if (context?.flujo === 'pago_pausado') {
-			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
 			if (quiereContinuar) {
 				context.flujo = context.flujoAnterior || 'seleccion_pago';
 			} else {
@@ -434,21 +809,13 @@ export class VentasAgent implements IAgent {
 		}
 
 		if (context?.flujo === 'perfilando_pausado') {
-			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar/i.test(lower);
-			const mencionaProducto = context?.ultimaBusqueda?.results?.length > 0 && (
-				/\b(?:primero|primera|segundo|segunda|tercero|tercera|[1-3])\b/i.test(lower) ||
-				/(?:me (?:interesa|gusta|llama|llam[oó])|quiero|prefiero|ese|esa|este|esta|ese modelo|esa referencia)/i.test(lower)
-			);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
 			if (quiereContinuar) {
 				context.flujo = 'perfilando';
-			} else if (mencionaProducto) {
-				context.flujo = null;
 			} else {
+				// Cualquier otro mensaje (pago, consulta, producto, etc.) sale del pausado
+				// y se procesa normalmente en el flujo general
 				context.flujo = null;
-				return {
-					response: 'Perfecto, cuéntame entonces en qué producto estás interesado y te busco las mejores opciones. 😊',
-					metadata: { agentType: 'ventas', flujo: null },
-				};
 			}
 		}
 
@@ -469,10 +836,10 @@ export class VentasAgent implements IAgent {
 				const precioStr = selected.price ? ` tiene un valor de *$${Number(selected.price).toLocaleString('es-CO')}*` : '';
 				const linkStr = selected.permalink ? `\nAquí tienes el enlace del producto:\n${selected.permalink}` : '';
 				const ciudadStr = context?.ciudad ? ` con envío gratis a ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
-				const opcionPuntoFisico = context?.tieneCobertura ? '\n3️⃣ Paga en un punto físico' : '';
+				const opcionPuntoFisico = context?.tieneCobertura ? '\n3️⃣ Pagar en un punto físico (solo necesito tu nombre y cédula para reservarlo)' : '';
 				
 				return {
-					response: `¡Perfecto! El *${selected.name}*${precioStr}${ciudadStr}.${linkStr}\n\n¿Cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\n2️⃣ Directamente en nuestra página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te doy las instrucciones paso a paso. 😊`,
+					response: `¡Perfecto! El *${selected.name}*${precioStr}${ciudadStr}.${linkStr}\n\n¿Cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te acompaño paso a paso. 😊`,
 					nextStage: 'PROPOSAL',
 					metadata: {
 						agentType: 'ventas',
@@ -487,21 +854,27 @@ export class VentasAgent implements IAgent {
 					},
 				};
 			} else {
-				const listaNombres = ultimosProductos.slice(0, 3).map((p: any, i: number) => {
-					const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
-					return `${i + 1}️⃣ *${p.name}* (${precio})`;
-				}).join('\n');
-				return {
-					response: `Disculpa, no logré captar tu elección. Por favor escríbeme el número de la opción que prefieres:\n\n${listaNombres}`,
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'seleccion_pago_ambiguo',
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						tieneCobertura: context?.tieneCobertura,
-						ultimaBusqueda: context?.ultimaBusqueda,
-					},
-				};
+				// Si el mensaje es una consulta sobre otros productos (no un intento de selección fallido),
+				// salir del flujo para que el procesamiento normal lo maneje
+				const esConsultaProducto = /[¿?]|quiero (?:ver|que me muestre|saber)|\bmuestra\b|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|\btienes\b.*(?:de |con )|\bcapacidad\b|\bkilos\b|\bkg\b|\blitros\b|\blt\b|\bpulgadas\b|\bpotencia\b|m[aá]s (?:grande|peque|chico|barato|caro)|m[aá]s grande|m[aá]s peque|otro modelo|otra opcion|otras opciones|no tiene|b[uú]sca|b[uú]squeda|recomiend|\bpresupuesto\b/i.test(message);
+				if (esConsultaProducto) {
+					context.flujo = null;
+					// No se retorna — el flujo normal procesa el mensaje
+				} else {
+					const p = ultimosProductos[0];
+					const precio = p?.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
+					return {
+						response: `Te recomiendo este:\n*${p?.name}* (${precio})\n${p?.permalink}\n\n¿Te gusta o prefieres ver algo diferente? 😊`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'seleccion_pago_ambiguo',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							ultimaBusqueda: context?.ultimaBusqueda,
+						},
+					};
+				}
 			}
 		}
 
@@ -517,12 +890,13 @@ export class VentasAgent implements IAgent {
 
 		// ── SI ESTAMOS ESPERANDO CIUDAD, procesar primero (PASO 2) ─────────
 		if (context?.flujo === 'esperando_ciudad') {
-			let ciudadDetectada = await extraerCiudadDelMensaje(message);
+			const msgParaCiudad = context?.originalMessage || message;
+			let ciudadDetectada = await extraerCiudadDelMensaje(msgParaCiudad);
 			if (!ciudadDetectada) {
-				ciudadDetectada = await detectarCiudadConIA(message);
+				ciudadDetectada = await detectarCiudadConIA(msgParaCiudad);
 			}
 			if (!ciudadDetectada) {
-				const limpio = message.trim().replace(/[.,!?¡¿]+$/g, '');
+				const limpio = msgParaCiudad.trim().replace(/[.,!?¡¿]+$/g, '');
 				if (limpio.length >= 3 && limpio.length <= 30) {
 					ciudadDetectada = limpio.toLowerCase();
 				}
@@ -535,6 +909,7 @@ export class VentasAgent implements IAgent {
 						agentType: 'ventas',
 						flujo: 'esperando_ciudad',
 						pendingMessage: context?.pendingMessage,
+						categoriaSugerida: context?.categoriaSugerida || undefined,
 					},
 				};
 			}
@@ -569,6 +944,7 @@ export class VentasAgent implements IAgent {
 					tieneCobertura: true,
 					flujo: 'esperando_modalidad',
 					pendingMessage: context?.pendingMessage,
+					categoriaSugerida: context?.categoriaSugerida || undefined,
 					productoSolicitado: context?.userData?.productoSolicitado || context?.pendingMessage || undefined,
 					ultimaBusqueda: context?.ultimaBusqueda,
 					terminoBusqueda: context?.terminoBusqueda,
@@ -595,8 +971,8 @@ export class VentasAgent implements IAgent {
 
 		// ── SI ESTAMOS ESPERANDO MODALIDAD (contado / crédito) ─────────────
 		if (context?.flujo === 'esperando_modalidad') {
-			const quiereCredito = /cr[eé]dito|a cr[eé]dito|financiar|financiaci[oó]n|cuotas|pagar a cuotas|^\s*1\s*$/i.test(lower);
-			const quiereContado = /contado|efectivo|pago inmediato|precio de contado|contadito|^\s*2\s*$/i.test(lower);
+			const quiereCredito = /\bcr[eé]dito\b|a cr[eé]dito|\bfinanciar\b|\bfinanciaci[oó]n\b|\bcuotas\b|pagar a cuotas|^\s*1\s*$/i.test(lower);
+			const quiereContado = /\b(?:contado|efectivo|pago\s+inmediato|precio\s+de\s+contado|contadito)\b|^\s*2\s*$/i.test(lower);
 
 			if (quiereCredito) {
 				return {
@@ -615,16 +991,61 @@ export class VentasAgent implements IAgent {
 				};
 			}
 
+			// Si el mensaje es una consulta no relacionada, salir del flujo
+			if (!quiereContado) {
+				const esConsulta = /[¿?]|quiero (?:ver|que me muestre|saber|comprar|pagar|adquirir)|\bmuestra\b|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|\btienes\b.*(?:de |con )|\bcapacidad\b|\bkilos\b|\bkg\b|\blitros\b|\blt\b|\bpulgadas\b|\bpotencia\b|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|\bpresupuesto\b|\bcu[aá]nto\b|\bprecio\b|especificaciones?|caracter[ií]sticas?|detalles?|[¿¡]+\s*(?:contado|cr[eé]dito|efectivo|transferencia|tarjeta|nequi|pago)/i.test(message);
+				if (esConsulta) {
+					context.flujo = null;
+					// No se retorna — el flujo normal procesa el mensaje
+				} else {
+					return {
+						response: `Disculpa, no entendí. ¿La compra sería al *contado* o a *crédito*?\n\nResponde *1* o *contado* si pagas de contado, o *2* o *crédito* si deseas financiar.`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'esperando_modalidad',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							pendingMessage: context?.pendingMessage,
+							categoriaSugerida: context?.categoriaSugerida || undefined,
+						},
+					};
+				}
+			}
+
 			if (quiereContado) {
 				const msgOriginal = context?.pendingMessage || '';
-				const terminoIA = await extraerProductoConIA(msgOriginal);
+				let terminoIA = await extraerProductoConIA(msgOriginal);
+				if (!terminoIA && msgOriginal.length > 3) {
+					terminoIA = msgOriginal;
+				}
 				if (terminoIA) {
 					let products: any[] = [];
 					try {
 						products = await wooCommerceService.searchProducts(terminoIA, 20);
 					} catch { /* continuar sin productos */ }
 					if (products.length > 0) {
-						const cat = detectarCategoria(msgOriginal) || 'otra';
+						const cat = context?.categoriaSugerida || detectarCategoria(msgOriginal) || 'otra';
+						const esEspecifico = /[A-Z]{2,5}[-][A-Z0-9]+/.test(msgOriginal) || /\d+\s*(?:litros?|kg|pulgadas?|lb|w|vatios?|refrigeraci[oó]n)/i.test(msgOriginal);
+						if (esEspecifico) {
+							const nums = (msgOriginal.match(/\d+[kKlLgG]*/g) || []).map((n: string) => n.toLowerCase());
+							const filtrados = products.filter(p => nums.some((n: string) => p.name.toLowerCase().includes(n)));
+							const finales = filtrados.length > 0 ? filtrados.slice(0, 1) : products.slice(0, 1);
+							const lista = finales.map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}\n   ${p.permalink}`).join('\n');
+							return {
+								response: `¡Perfecto! Te recomiendo empezar con este:\n\n${lista}\n\n¿Te gusta o prefieres algo diferente? 😊`,
+								metadata: {
+									agentType: 'ventas',
+									modalidad: 'contado',
+									ciudad: context?.ciudad,
+									ciudadValidada: true,
+									tieneCobertura: context?.tieneCobertura,
+									terminoBusqueda: terminoIA,
+									ultimaBusqueda: { results: finales, categoria: cat, productoIndex: 0 },
+									flujo: null,
+								},
+							};
+						}
 						const shortcuts = detectarShortcuts(msgOriginal, cat);
 						const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
 						const camposOk = camposPerfilCompletados(shortcuts);
@@ -646,9 +1067,9 @@ export class VentasAgent implements IAgent {
 								};
 							}
 						}
-						const lista = products.slice(0, 6).map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
+						const lista = products.slice(0, 1).map((p, i) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}\n   ${p.permalink}`).join('\n');
 						return {
-							response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
+							response: `¡Perfecto! Te recomiendo empezar con este:\n\n${lista}\n\n¿Te gusta o prefieres algo diferente? 😊`,
 							metadata: {
 								agentType: 'ventas',
 								modalidad: 'contado',
@@ -661,6 +1082,25 @@ export class VentasAgent implements IAgent {
 							},
 						};
 					}
+				}
+				// Sin resultados de WooCommerce → iniciar perfilado con la categoría detectada
+				const cat = detectarCategoria(msgOriginal) || context?.categoriaSugerida || 'otra';
+				const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
+				const primerPaso = pasos[0];
+				if (primerPaso) {
+					return {
+						response: `¡Perfecto! ${primerPaso.pregunta}`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'perfilando',
+							perfilState: { categoria: cat, step: 1, answers: {}, terminoOriginal: msgOriginal },
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							modalidad: 'contado',
+							productoSolicitado: msgOriginal,
+						},
+					};
 				}
 				return {
 					response: `¡Perfecto! Cuéntame, ¿qué estás buscando? 😊`,
@@ -675,79 +1115,82 @@ export class VentasAgent implements IAgent {
 				};
 			}
 
-			return {
-				response: `Disculpa, no entendí. ¿La compra sería al *contado* o a *crédito*?\n\nResponde *1* o *contado* si pagas de contado, o *2* o *crédito* si deseas financiar.`,
-				metadata: {
-					agentType: 'ventas',
-					flujo: 'esperando_modalidad',
-					ciudad: context?.ciudad,
-					ciudadValidada: true,
-					tieneCobertura: context?.tieneCobertura,
-					pendingMessage: context?.pendingMessage,
-				},
-			};
 		}
 
-		// ── PASO 1: Validar cobertura si aún no se hizo (mejoras #2 y #4) ─────
+		// ── PASO 1: Validar cobertura si aún no se hizo ──────────────────────
 		if (!context?.ciudadValidada) {
-			const ciudadDetectada = await extraerCiudadDelMensaje(message);
+			const msgParaCiudad = context?.originalMessage || message;
+			const ciudadDetectada = await extraerCiudadDelMensaje(msgParaCiudad);
 
 			if (!ciudadDetectada) {
 				const esPrimeraVez = !context?.history?.length && !context?.nuevaSesion;
+				const productoDetectado = detectarCategoria(message);
+
 				const saludo = getSaludo();
 				const intro = esPrimeraVez
 					? `${saludo} 👋 Soy ${AGENT_NAME}, tu asesora en JLC Electronics, la marca de los colombianos.\n\n`
 					: '';
+				const meta: any = {
+					agentType: 'ventas',
+					flujo: 'esperando_ciudad',
+					pendingMessage: message,
+					categoriaSugerida: aiClasificacion?.categoriaSugerida || undefined,
+				};
+				if (productoDetectado) meta.productoSolicitado = productoDetectado;
 				return {
 					response: `${intro}¿Desde dónde nos escribes? 📍`,
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'esperando_ciudad',
-						pendingMessage: message,
-					},
+					metadata: meta,
 				};
-			}
+			} else {
+				// Ciudad detectada en el mensaje → validar cobertura
+				const cobertura = await verificarCobertura(ciudadDetectada);
 
-			const cobertura = await verificarCobertura(ciudadDetectada);
+				if (cobertura === 'cobertura') {
+					context = {
+						...context,
+						ciudadValidada: true,
+						ciudad: ciudadDetectada,
+						tieneCobertura: true,
+					};
+				const productoDetectado = context?.categoriaSugerida || detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null;
+					return {
+						response: `¡Qué bien! A ${ciudadDetectada.charAt(0).toUpperCase() + ciudadDetectada.slice(1)} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
+						metadata: {
+							agentType: 'ventas',
+							ciudad: ciudadDetectada,
+							ciudadValidada: true,
+							tieneCobertura: true,
+							flujo: 'esperando_modalidad',
+							pendingMessage: context?.pendingMessage || message,
+							categoriaSugerida: context?.categoriaSugerida || undefined,
+							...(productoDetectado && { productoSolicitado: productoDetectado }),
+						},
+					};
+				}
 
-			if (cobertura === 'cobertura') {
 				context = {
 					...context,
 					ciudadValidada: true,
 					ciudad: ciudadDetectada,
-					tieneCobertura: true,
+					tieneCobertura: false,
 				};
+				const msgSinCobertura = (await generarMensajeSinCobertura(ciudadDetectada, context?.pendingMessage || '')).trim();
+				const productoDetectado = context?.pendingMessage ? detectarCategoria(context.pendingMessage) : null;
 				return {
-					response: `¡Qué bien! A ${ciudadDetectada.charAt(0).toUpperCase() + ciudadDetectada.slice(1)} te llega con envío gratis 🚚\n\n¿La compra sería al *contado* o a *crédito*?`,
+					response: msgSinCobertura,
 					metadata: {
 						agentType: 'ventas',
 						ciudad: ciudadDetectada,
 						ciudadValidada: true,
-						tieneCobertura: true,
-						flujo: 'esperando_modalidad',
-						pendingMessage: message,
+						tieneCobertura: false,
+						modalidad: 'contado',
+						flujo: null,
+						pendingMessage: context?.pendingMessage,
+						categoriaSugerida: context?.categoriaSugerida || undefined,
+						...(productoDetectado && { productoSolicitado: productoDetectado }),
 					},
 				};
 			}
-
-			context = {
-				...context,
-				ciudadValidada: true,
-				ciudad: ciudadDetectada,
-				tieneCobertura: false,
-			};
-			const msgSinCobertura = (await generarMensajeSinCobertura(ciudadDetectada, context?.pendingMessage || '')).trim();
-			return {
-				response: msgSinCobertura,
-				metadata: {
-					agentType: 'ventas',
-					ciudad: ciudadDetectada,
-					ciudadValidada: true,
-					tieneCobertura: false,
-					modalidad: 'contado',
-					flujo: null,
-				},
-			};
 		}
 
 		// ── PASO 3: Si eligió crédito → iniciar formulario ──────────────────
@@ -785,15 +1228,24 @@ export class VentasAgent implements IAgent {
 		}
 
 		// ── PASO 4: Detectar intención de compra ─────────────────────────────
-		const quiereComprar = /\b(?:comprar(?:lo|la)?|lo quiero|la quiero|quiero(?: esa| esta| ese| este| comprar)?|c[oó]mo (?:compro|hago|puedo pagar|le hago|le hago para pagar|pago)|quiero pagar|proceder|concretar|compralo|c[oó]mpralo|reservar|apartar|d[áa]le|confirmo compra|ya lo quiero|me gusta(?: esa| esta| ese| el| la)?|esa me gusta|esta me gusta|si continuemos|si sigamos|sigamos adelante|seguimos|continuemos)\b|\bcompr(?:o|ar)\s+(?:esa|esta|este|ese|eso|esas|esos|estes)\b|\b(?:el de \d+|la de \d+|el primero|el segundo|la primera|la segunda|me quedo con|me interesa(?!\s+(?:saber|conocer|verificar|preguntar|consultar))(?: el| la)?|prefiero(?: el| la)?|lo compro|la compro|eso quiero|eso me sirve|eso me gusta|me llevo(?: el| la)?)\b|\b(?:el (?:de \d+|primero|segundo)|la (?:de \d+|primera|segunda))\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
+		const quiereComprarRaw = /\b(?:comprar(?:lo|la)?|lo quiero|la quiero|quiero(?: esa| esta| ese| este| comprar)?|c[oó]mo (?:compro|hago|puedo pagar|le hago|le hago para pagar|pago)|quiero pagar|proceder|concretar|compralo|c[oó]mpralo|reservar|apartar|d[áa]le|confirmo compra|ya lo quiero|me gusta(?: esa| esta| ese| el| la)?|esa me gusta|esta me gusta|si continuemos|si sigamos|sigamos adelante|seguimos|continuemos)\b|\bcompr(?:o|ar)\s+(?:esa|esta|este|ese|eso|esas|esos|estes)\b|\b(?:el de \d+|la de \d+|el primero|el segundo|la primera|la segunda|me quedo con|me interesa(?!\s+(?:saber|conocer|verificar|preguntar|consultar))(?: el| la)?|prefiero(?: el| la)?|lo compro|la compro|eso quiero|eso me sirve|eso me gusta|me llevo(?: el| la)?)\b|\b(?:el (?:de \d+|primero|segundo)|la (?:de \d+|primera|segunda))\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
+
+		// Si el mensaje es una pregunta sobre medidas/specs, NO es intención de compra
+		// aunque mencione "la 3" o "prefiero" — primero hay que responder la duda.
+		// También excluir preguntas de precio ("que precio tiene la de 15")
+		const esPreguntaPrecio = /\b(?:precio|cu[aá]nto\s+(?:cuesta|cuestan|vale|valen|es|son)|qu[eé]\s+precio\s+tiene)\b/i.test(message);
+		const quiereComprar = quiereComprarRaw && !esPreguntaEspecificacion(message) && !esPreguntaPrecio && !esPreguntaInfo(message);
 
 		const puedeComprar = context?.modalidad === 'contado' || 
 			(context?.ultimaBusqueda?.results?.length > 0 && context?.modalidad !== 'credito');
 
-		if (quiereComprar && puedeComprar) {
+		const esNegacionLocal = /^(?:no\s+|tampoco|nunca|jam[aá]s|ni\s*lo\s*quiero)/i.test(message);
+		// Si ya está en flujo de pago, no re-detectar compra
+		const yaEnPago = context?.flujo && (context.flujo.startsWith('pago_') || context.flujo === 'seleccion_pago');
+		if (quiereComprar && puedeComprar && !esNegacionLocal && !yaEnPago) {
 			const tieneCobertura = context?.tieneCobertura;
 			const opcionPuntoFisico = tieneCobertura
-				? '\n3️⃣ Paga en un punto físico'
+				? '\n3️⃣ Pagar en un punto físico (solo necesito tu nombre y cédula para reservarlo)'
 				: '';
 
 			const ultimosProductos = context?.ultimaBusqueda?.results ?? [];
@@ -814,23 +1266,31 @@ export class VentasAgent implements IAgent {
 				const matchResult = await matchProductoDesdeMsg(message, ultimosProductos, lastAssistantMsg);
 				
 				if (!matchResult) {
-					// No se pudo identificar → preguntar con lista numerada
-					const listaNombres = ultimosProductos.slice(0, 3).map((p: any, i: number) => {
-						const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
-						return `${i + 1}️⃣ *${p.name}* (${precio})`;
-					}).join('\n');
-					
-					return {
-						response: `¡Ay, qué bien! Pero para darte las instrucciones exactas necesito saber cuál te llevas 😊 Escríbeme el número:\n\n${listaNombres}`,
-						metadata: {
-							agentType: 'ventas',
-							flujo: 'seleccion_pago_ambiguo',
-							ciudad: context?.ciudad,
-							ciudadValidada: true,
-							tieneCobertura: context?.tieneCobertura,
-							ultimaBusqueda: context?.ultimaBusqueda,
-						},
-					};
+					// Mensaje vago positivo ("me gusta", "lo quiero") sin referencia a producto específico
+					// → asumir el primer producto para no romper la conversación
+					// Pero si pide descripción/info, no es compra, dejar fluir
+					const mensajeTrim = message.trim();
+					const esVagoPositivo = !esPreguntaInfo(mensajeTrim) && /^(?:(?:si|sí)\s+)?(?:me gusta|lo quiero|me interesa|d[aá]le|proceder|concretar|continuemos|sigamos|seguimos|me quedo con|compro eso|la compro|lo compro|eso quiero|eso me sirve|me llevo)$|^(?:si|sí)\s+(?:continuemos|sigamos(?: adelante)?|seguimos)$/i.test(mensajeTrim);
+					if (esVagoPositivo) {
+						productoSolicitado = ultimosProductos[0].name;
+						productoURL = ultimosProductos[0].permalink;
+						pPrice = ultimosProductos[0].price;
+					} else {
+						// No se pudo identificar → mostrar el primero y preguntar
+						const p = ultimosProductos[0];
+						const precio = p?.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar';
+						return {
+							response: `Te recomiendo este:\n*${p?.name}* (${precio})\n${p?.permalink}\n\n¿Te gusta o prefieres ver algo diferente? 😊`,
+							metadata: {
+								agentType: 'ventas',
+								flujo: 'seleccion_pago_ambiguo',
+								ciudad: context?.ciudad,
+								ciudadValidada: true,
+								tieneCobertura: context?.tieneCobertura,
+								ultimaBusqueda: context?.ultimaBusqueda,
+							},
+						};
+					}
 				}
 				
 				productoSolicitado = matchResult.name;
@@ -842,7 +1302,7 @@ export class VentasAgent implements IAgent {
 			const linkStr = productoURL ? `\nAquí tienes el enlace del producto:\n${productoURL}` : '';
 			const ciudadStr = context?.ciudad ? ` con envío gratis a ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
 			
-			const opcionesMsg = `¡Excelente elección! El *${productoSolicitado || 'producto'}*${precioStr}${ciudadStr}.${linkStr}\n\nPara continuar con tu compra, ¿cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\n2️⃣ Directamente en nuestra página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te doy las instrucciones paso a paso. 😊`;
+			const opcionesMsg = `¡Excelente elección! El *${productoSolicitado || 'producto'}*${precioStr}${ciudadStr}.${linkStr}\n\nPara continuar con tu compra, ¿cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te acompaño paso a paso. 😊`;
 
 			return {
 				response: opcionesMsg,
@@ -864,7 +1324,7 @@ export class VentasAgent implements IAgent {
 		if (preguntaPago && context?.modalidad === 'contado' && !context?.flujo?.startsWith('pago_') && context?.flujo !== 'seleccion_pago') {
 			const tieneCobertura = context?.tieneCobertura;
 			return {
-				response: `Claro, estas son las opciones:\n1️⃣ Medios de pago autorizados\n2️⃣ Paga directamente en nuestra página web${tieneCobertura ? '\n3️⃣ Paga en un punto físico' : ''}\n¿Cuál prefieres?`,
+				response: `Claro, estas son las opciones:\n1️⃣ Por transferencia bancaria (medios autorizados)\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${tieneCobertura ? '\n3️⃣ Pagar en un punto físico' : ''}\n¿Cuál prefieres?`,
 				nextStage: 'PROPOSAL',
 				metadata: {
 					agentType: 'ventas',
@@ -929,7 +1389,7 @@ export class VentasAgent implements IAgent {
 				mensajeCliente: message,
 			});
 			const rawWp = await generateResponse(usr2, sys2);
-			const respWp = cleanResponse(rawWp);
+			const respWp = sanitizarNumerosVentas(cleanResponse(rawWp));
 			return {
 				response: `${respWp}\n\n_(Paso ${pasoActual} de ${PASOS_WEB.length}: ${PASOS_WEB[pasoActual - 1]} — dime “listo” cuando termines 😊)_`,
 				metadata: {
@@ -945,7 +1405,7 @@ export class VentasAgent implements IAgent {
 
 		// ── Manejo de pago completado o fallido ───────────────────────────────
 		if (context?.flujo === 'pago_completado') {
-			const noPudo = /no\s*(?:pude|puedo|logr[eé]|me\s*dej[oó])|problema|error|fallo|fall[oó]|no\s*sirv[eió]/i.test(lower);
+			const noPudo = /\b(?:no\s*(?:pude|puedo|logr[eé]|me\s*dej[oó]|sirv[eió])|problema|error|fallo|fall[oó])\b/i.test(lower);
 			if (noPudo) {
 				const ciudadCap = context?.ciudad ? context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1) : '';
 				const productoInfo = context?.productoURL || 'producto pendiente';
@@ -956,7 +1416,7 @@ export class VentasAgent implements IAgent {
 				} catch { /* no bloquear */ }
 
 				return {
-					response: `No te preocupes, ya le notifiqué a nuestro equipo comercial para que te ayude directamente. Un asesor te va a escribir por aquí en un momentico. 💪`,
+					response: `No te preocupes, ya le notifiqué a nuestro equipo comercial para que te ayude directamente. Un asesor te va a escribir por aquí en un momentico. 😊`,
 					metadata: {
 						agentType: 'ventas',
 						flujo: null,
@@ -977,8 +1437,14 @@ export class VentasAgent implements IAgent {
 			};
 		}
 
+		// ── Detectar SKU en flujos de pago → salir y buscar producto ─────────
+		const flujoPago = ['seleccion_pago', 'pago_web', 'pago_web_paso', 'pago_completado'].includes(context?.flujo);
+		if (flujoPago && extraerSKU(message)) {
+			context = { ...context, flujo: null, ultimaBusqueda: undefined, terminoBusqueda: undefined, productoSolicitado: undefined, perfilState: undefined };
+		}
+
 		if (context?.flujo === 'pago_web') {
-			const quiereAyuda = /\bs[íi]\b|sip|dale|ok|bueno|claro|si gracias|si por favor|me acompañas|guíame|ayúdame|paso a paso/i.test(lower);
+			const quiereAyuda = /\bs[íi]\b|\bsip\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|si gracias|si por favor|me acompañas|guíame|ayúdame|paso a paso/i.test(lower);
 			if (quiereAyuda) {
 				return {
 					response: `¡Con mucho gusto te acompaño! 😊\n\nPaso 1 de 5: Abre el enlace del producto y dale clic en el botón *Añadir al carrito* 🛒\n\nDime "listo" cuando lo hayas hecho.`,
@@ -1004,7 +1470,7 @@ export class VentasAgent implements IAgent {
 		}
 
 		// ── PASO 4d: Confirmación de pago realizado ──
-		const yaPago = /\b(?:ya pagu[eé]|pago realizado|ya transfer[ií]|ya realic[eé] el pago|ya hice el pago|pago hecho|listo el pago|comprobante enviado)\b/i.test(message);
+		const yaPago = detectarPagoConfirmado(message);
 		if (yaPago && context?.modalidad === 'contado') {
 			return {
 				response: `¡Perfecto! Para confirmar tu pago, ¿me puedes compartir el comprobante o el número de transacción? (Puedes enviar una captura de pantalla / pantallazo o foto). 😊\n\nUna vez enviado, nuestro equipo verificará el pago en un tiempo máximo de 1 hora y procederemos con el despacho inmediato de tu pedido con envío gratis. En ese momento te enviaremos el número de guía para que puedas rastrearlo.`,
@@ -1020,22 +1486,27 @@ export class VentasAgent implements IAgent {
 
 		// ── PASO 4e: Ya estamos esperando el comprobante ────────────────────
 		if (context?.flujo === 'esperando_comprobante') {
-			const productoSolicitado = context?.productoSolicitado || context?.userData?.productoSolicitado || 'tu producto';
-			const ciudad = context?.ciudad || context?.userData?.ciudad || '';
-			const tieneCiudad = !!ciudad;
-			const responseParts = [
-				`¡Ay, qué chévere! Ya recibí tu comprobante, así que voy a confirmar el pago de ${productoSolicitado} para dejarla reservada y lista para el envío${tieneCiudad ? ` a ${ciudad}` : ''}. Tan pronto el equipo lo verifique, te estaré contando. ¡Muchas gracias por tu compra! 😊`,
-			];
-			return {
-				response: responseParts.join('\n\n'),
-				metadata: {
-					agentType: 'ventas',
-					flujo: null,
-					ciudad: context?.ciudad,
-					ciudadValidada: true,
-					tieneCobertura: context?.tieneCobertura,
-				},
-			};
+			// Si pregunta algo, salir del flujo para que Gemini responda
+			if (/[¿?]/.test(message)) {
+				context.flujo = null;
+			} else {
+				const productoSolicitado = context?.productoSolicitado || context?.userData?.productoSolicitado || 'tu producto';
+				const ciudad = context?.ciudad || context?.userData?.ciudad || '';
+				const tieneCiudad = !!ciudad;
+				const responseParts = [
+					`¡Ay, qué chévere! Ya recibí tu comprobante, así que voy a confirmar el pago de ${productoSolicitado} para dejarla reservada y lista para el envío${tieneCiudad ? ` a ${ciudad}` : ''}. Tan pronto el equipo lo verifique, te estaré contando. ¡Muchas gracias por tu compra! 😊`,
+				];
+				return {
+					response: responseParts.join('\n\n'),
+					metadata: {
+						agentType: 'ventas',
+						flujo: null,
+						ciudad: context?.ciudad,
+						ciudadValidada: true,
+						tieneCobertura: context?.tieneCobertura,
+					},
+				};
+			}
 		}
 
 		// ── PASO 5: Flujo de selección de pago ──────────────────────────────
@@ -1044,58 +1515,104 @@ export class VentasAgent implements IAgent {
 			const ultimosProductos = context?.ultimaBusqueda?.results ?? [];
 			const productoURL = context?.productoURL ?? ultimosProductos[0]?.permalink;
 
-			if (/1|transferencia|medios de pago|medios autorizados/i.test(opcion)) {
+			// PRIORIDAD: si el cliente hace una pregunta (medidas, specs, etc.)
+			// en vez de elegir, salir del flujo de pago y responder la pregunta.
+			if (esPreguntaEspecificacion(message) && context?.ultimaBusqueda?.results?.length > 0) {
+				context = { ...context, flujo: null };
+			} else {
+				// Matching ANCLADO: la opción debe SER el número/palabra, no contenerlo.
+				const esOpcion1 = /^\s*1\s*[.)]?\s*$/.test(opcion) || /^(?:transferencia|medios?\s*(?:de\s*pago|autorizados?)|consignaci[oó]n)\b/i.test(opcion);
+				const esOpcion2 = /^\s*2\s*[.)]?\s*$/.test(opcion) || /^(?:p[aá]gina\s*web|web|en\s*l[íi]nea|online|pse|tarjeta|nequi)\b|\bp[aá]gina\b|\bvoy\s*a\s*pagar\b/i.test(opcion);
+				const esOpcion3 = /^\s*3\s*[.)]?\s*$/.test(opcion) || /^(?:punto\s*f[íi]sico|f[íi]sico|tienda|presencial)\b/i.test(opcion);
+
+				if (esOpcion1) {
+					return {
+						response: `Estos son nuestros medios de pago autorizados:\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\nAhí verás todas las cuentas disponibles (Bancolombia, Davivienda, Nequi, etc.). Una vez realices la transferencia, por favor compárteme tu nombre completo, número de cédula y el comprobante de pago${context?.tieneCobertura ? ' para programar tu envío gratis' : ' y coordinamos el despacho por transportadora'} de inmediato.\n\n¿Pudiste completar el pago o te surgió alguna duda? 😊`,
+						nextStage: 'PROPOSAL',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'pago_medios',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							productoURL,
+						},
+					};
+				}
+				if (esOpcion2) {
+					const productLink = productoURL
+						? `\n\nLink del producto:\n${productoURL}`
+						: '';
+					return {
+						response: `Puedes pagar directamente en nuestra página web.${productLink}\n\n¿Quieres que te acompañe paso a paso con el proceso?`,
+						nextStage: 'PROPOSAL',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'pago_web',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							productoURL,
+						},
+					};
+				}
+				if (context?.tieneCobertura && esOpcion3) {
+					return {
+						response: `¡Claro! Para reservarte el producto en el punto más cercano, necesito tu nombre completo y número de cédula. 😊`,
+						nextStage: 'PROPOSAL',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'pago_fisico',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							notificarPuntoFisico: true,
+						},
+					};
+				}
+				// Si el mensaje es una consulta no relacionada con pago, salir del flujo
+				if (/[¿?]|quiero (?:ver|que me muestre|saber|comprar|buscar)|\bmuestra\b|hay.*(?:m[aá]s|otro)|no\s+(?:me gusta|quiero|gracias)|\btienes\b.*(?:de |con )|\btiene\b|\bcapacidad\b|\bkilos\b|\bkg\b|\blitros\b|\blt\b|\bpulgadas\b|\bpotencia\b|m[aá]s (?:grande|peque|chico|barato|caro)|otro modelo|otra opcion|b[uú]sca|b[uú]squeda|recomiend|\bpresupuesto\b|\bcu[aá]nto\b|\bprecio\b|especificaciones?|caracter[ií]sticas?|detalles?|\bmodelo\b|\breferencia\b|\bmedidas\b/i.test(message)) {
+					context = { ...context, flujo: null };
+				} else {
+					return {
+						response: `Por favor elige una opción:\n1️⃣ Por transferencia bancaria (medios autorizados)\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${context?.tieneCobertura ? '\n3️⃣ Pagar en un punto físico' : ''}\n¿Cuál prefieres?`,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'seleccion_pago',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+						},
+					};
+				}
+			}
+		}
+
+		// ── Continuación pago físico: usuario ya dio nombre + cédula ────
+		if (context?.flujo === 'pago_fisico') {
+			// Si pregunta algo en vez de dar datos, salir del flujo
+			if (/[¿?]/.test(message)) {
+				context.flujo = null;
+			} else {
+				const cedulaMatch = message.match(/\b\d{5,12}\b/);
+				const nombre = message.replace(/\b\d{5,12}\b/g, '').trim();
+				const tieneNombre = nombre.length >= 3;
+				const tieneCedula = !!cedulaMatch;
+
+				if (tieneNombre || tieneCedula) {
+					return {
+						response: `¡Gracias! Tu solicitud de compra en punto físico quedó registrada. Un asesor se comunicará contigo para coordinar la entrega. Si necesitas algo más, acá estoy para ayudarte 😊💙`,
+						nextStage: 'TRANSFER',
+						metadata: {
+							agentType: 'ventas',
+							flujo: null,
+							nombreCliente: nombre.length >= 3 ? nombre : undefined,
+							cedulaCliente: cedulaMatch ? cedulaMatch[0] : undefined,
+						},
+					};
+				}
 				return {
-					response: `Estos son nuestros medios de pago autorizados:\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\nAhí verás todas las cuentas disponibles (Bancolombia, Davivienda, Nequi, etc.). Una vez realices la transferencia, por favor compárteme tu nombre completo, número de cédula y el comprobante de pago${context?.tieneCobertura ? ' para programar tu envío gratis' : ' y coordinamos el despacho por transportadora'} de inmediato.\n\n¿Pudiste completar el pago o te surgió alguna duda? 😊`,
-					nextStage: 'PROPOSAL',
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'pago_medios',
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						productoURL,
-					},
+					response: `¿Me confirmas tu nombre completo y número de cédula para la reserva? 😊`,
+					metadata: { agentType: 'ventas', flujo: 'pago_fisico' },
 				};
 			}
-			if (/2|p[aá]gina web|web|en l[íi]nea|online/i.test(opcion)) {
-				const productLink = productoURL
-					? `\n\nLink del producto:\n${productoURL}`
-					: '';
-				return {
-					response: `Puedes pagar directamente en nuestra página web.${productLink}\n\n¿Quieres que te acompañe paso a paso con el proceso?`,
-					nextStage: 'PROPOSAL',
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'pago_web',
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						productoURL,
-					},
-				};
-			}
-			if (context?.tieneCobertura && /3|punto físico|físico|tienda/i.test(opcion)) {
-				return {
-					response: `¡Claro! Para reservarte el producto en el punto más cercano, necesito tu nombre completo y número de cédula. 😊`,
-					nextStage: 'PROPOSAL',
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'pago_fisico',
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						notificarPuntoFisico: true,
-					},
-				};
-			}
-			return {
-				response: `Por favor elige una opción:\n1️⃣ Medios de pago autorizados\n2️⃣ Paga directamente en nuestra página web${context?.tieneCobertura ? '\n3️⃣ Paga en un punto físico' : ''}\n¿Cuál prefieres?`,
-				metadata: {
-					agentType: 'ventas',
-					flujo: 'seleccion_pago',
-					ciudad: context?.ciudad,
-					ciudadValidada: true,
-					tieneCobertura: context?.tieneCobertura,
-				},
-			};
 		}
 
 		// ── PASO 6: Detectar datos personales del cliente ──────────────────
@@ -1120,6 +1637,10 @@ export class VentasAgent implements IAgent {
 		const perfilState = context?.perfilState as { categoria: string; step: number; answers: Record<string, string> } | undefined;
 
 		if (context?.flujo === 'perfilando' && perfilState) {
+			// Si pregunta algo en vez de responder perfil, salir del flujo
+			if (/[¿?]/.test(message)) {
+				context.flujo = null;
+			} else {
 			const pasos = PROFILING_STEPS[perfilState.categoria] || PROFILING_STEPS.otra;
 			const pasoActual = pasos[perfilState.step - 1];
 			if (pasoActual) {
@@ -1131,26 +1652,36 @@ export class VentasAgent implements IAgent {
 
 			if (camposOk >= pasos.length || perfilState.step > pasos.length) {
 				const terminoBusqueda = (perfilState as any).terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
-				if (context?.productosPreCargados?.length > 0) {
-					const products = context.productosPreCargados;
-					const lista = products.slice(0, 6).map((p: any, i: number) => `${i + 1}. *${p.name}* — $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n');
-					return {
-						response: `¡Perfecto! Estos son algunos productos que encontré:\n\n${lista}\n\n¿Te gusta alguno? Cuéntame cuál para darte más detalles 😊`,
-						metadata: {
-							agentType: 'ventas',
-							modalidad: 'contado',
-							ciudad: context?.ciudad,
-							ciudadValidada: true,
-							tieneCobertura: context?.tieneCobertura,
-							terminoBusqueda,
-							ultimaBusqueda: { results: products, categoria: perfilState.categoria, productoIndex: 0 },
-							flujo: null,
-							presupuesto: perfilState.answers.presupuesto,
-							productoSolicitado: terminoBusqueda,
-						},
-					};
+
+			// Consultar WooCommerce fresco con el término del perfil
+			let products: any[] = [];
+			const terminoOriginal = (perfilState as any).terminoOriginal;
+			const terminoBusquedaPerfil = terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
+			if (terminoBusquedaPerfil) {
+				try {
+					const resultado = await buscarProductoInteligente(terminoBusquedaPerfil, perfilState.categoria);
+					if (resultado.products.length > 0) products = resultado.products;
+				} catch { /* fall through */ }
+			}
+
+				// Aplicar filtro de presupuesto si el cliente lo dio
+				const presupuestoRaw = perfilState.answers.presupuesto;
+				if (presupuestoRaw && products.length > 0) {
+					const techo = parsearPresupuesto(presupuestoRaw);
+					if (techo > 0) {
+						const dentroPresupuesto = products.filter((p: any) => {
+							const precio = parseFloat(p.price || '0');
+							return precio > 0 && precio <= techo * 1.15; // 15% de margen
+						});
+						if (dentroPresupuesto.length > 0) {
+							products = dentroPresupuesto.sort((a: any, b: any) =>
+								parseFloat(a.price || '0') - parseFloat(b.price || '0')
+							);
+						}
+					}
 				}
-				context = { ...context, flujo: null, terminoBusqueda };
+
+				context = { ...context, flujo: null, terminoBusqueda, ultimaBusqueda: products.length > 0 ? { results: products, categoria: perfilState.categoria, productoIndex: 0 } : context?.ultimaBusqueda };
 				if (perfilState.answers.presupuesto) {
 					datosPersonales.presupuesto = perfilState.answers.presupuesto;
 				}
@@ -1170,15 +1701,16 @@ export class VentasAgent implements IAgent {
 					},
 				};
 			}
+			}
 		}
 
 		const CATEGORIAS = CATEGORIAS_RE;
 		const esCategoriaSola = CATEGORIAS.test(message) && message.split(/\s+/).length <= 4;
-		const esBusquedaCategoria = CATEGORIAS.test(message) && /(?:busco|quiero|necesito|me interesa|tiene[ns]?|hay|venden|muestra|quisiera|info de|informacion de|precio de|precios de|cuesta|cuestan|vale|valen|consulta|tambi[eé]n)/i.test(message);
+		const esBusquedaCategoria = CATEGORIAS.test(message) && /(?:\bbusco\b|\bquiero\b|\bnecesito\b|me interesa|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bquisiera\b|info de|informacion de|precio de|precios de|\bcuesta\b|\bcuestan\b|\bvale\b|\bvalen\b|\bconsulta\b|\btambi[eé]n\b)/i.test(message);
 		const categoriaGeneral = esCategoriaSola || esBusquedaCategoria;
 
 		if (categoriaGeneral) {
-			const nuevaCategoria = detectarCategoria(message);
+			const nuevaCategoria = detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null;
 			const categoriaAnterior = context?.ultimaBusqueda?.categoria;
 			if (nuevaCategoria && categoriaAnterior && nuevaCategoria !== categoriaAnterior) {
 				context = {
@@ -1190,45 +1722,101 @@ export class VentasAgent implements IAgent {
 				};
 			}
 		}
-		const catDetectada = detectarCategoria(message);
-		if ((categoriaGeneral || catDetectada) && context?.flujo !== 'perfilando') {
+		// Si hay imagen, dar prioridad a la categoría extraída de la imagen
+		let catDetectada = (context?.mediaFileName && context?.categoriaSugerida)
+			? context.categoriaSugerida
+			: (detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null);
+		// Si el mensaje actual no tiene categoría pero es pregunta de medidas/specs,
+		// inferir categoría desde el pendingMessage o productoSolicitado anterior
+		if (!catDetectada && esPreguntaEspecificacion(message)) {
+			const textoAnterior = context?.pendingMessage || context?.userData?.productoSolicitado || '';
+			if (textoAnterior) catDetectada = detectarCategoria(textoAnterior);
+		}
+		// Si el mensaje es una pregunta general (?, cuánto, qué, tiene, son de, etc.)
+		// sobre un producto, NO iniciar perfilación — es una consulta de especificación.
+		if ((categoriaGeneral || catDetectada) && context?.flujo !== 'perfilando' && !esPreguntaActiva) {
 			const cat = catDetectada;
 			if (cat) {
-				const terminoParaBuscar = message.toLowerCase().replace(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa)\s*/gi, '').trim();
+				const terminoParaBuscar = message.toLowerCase().replace(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa)\s*/gi, '').trim();
 				let productosDisponibles: any[] = [];
+				let estrategiaBusqueda = 'sin_resultados';
 				try {
-					productosDisponibles = await wooCommerceService.searchProducts(terminoParaBuscar, 20);
+					const resultado = await buscarProductoInteligente(terminoParaBuscar, cat);
+					productosDisponibles = resultado.products;
+					estrategiaBusqueda = resultado.estrategia;
 					if (productosDisponibles.length === 0) {
 						productosDisponibles = await wooCommerceService.searchProducts(cat, 20);
+						estrategiaBusqueda = 'categoria';
 					}
 				} catch { /* continuar sin productos */ }
 
 				if (productosDisponibles.length === 0) {
-					return {
-						response: `En este momento no tenemos ${terminoParaBuscar} disponible en nuestro catálogo. ¿Hay algo más en lo que te pueda ayudar? 😊`,
-						metadata: {
-							agentType: 'ventas',
-							ciudadValidada: context?.ciudadValidada,
-							ciudad: context?.ciudad,
-							modalidad: context?.modalidad,
-							tieneCobertura: context?.tieneCobertura,
-							productoSolicitado: terminoParaBuscar,
-							...datosPersonales,
-						},
-					};
+					// Sin resultados → la IA responde naturalmente según el contexto
+					context = { ...context, flujo: null, terminoBusqueda: terminoParaBuscar, ultimaBusqueda: undefined };
 				}
 
 				const shortcuts = detectarShortcuts(message, cat);
 				const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
 				const campos = camposPerfilCompletados(shortcuts);
 
-				if (campos >= pasos.length) {
+				// Si el cliente está preguntando por medidas/specs, NO perfilar por
+				// presupuesto.
+				if (esPreguntaEspecificacion(message)) {
+					// ¿Mencionó una referencia/SKU o producto específico?
+					const sku = extraerSKU(message);
+					const resultadoEspecifico = (sku || message.length > 25)
+						? await buscarProductoInteligente(message, cat)
+						: { products: [], estrategia: 'sin_resultados' };
+
+					// Identificar el producto exacto si lo encontramos
+					let productoExacto: any = null;
+					if (resultadoEspecifico.products.length > 0) {
+						if (sku) {
+							productoExacto = resultadoEspecifico.products.find((p: any) =>
+								(p.sku && p.sku.toUpperCase().includes(sku.replace(/^JLC-/, ''))) ||
+								(p.name && p.name.toUpperCase().includes(sku.replace(/^JLC-/, '')))
+							) || resultadoEspecifico.products[0];
+						} else {
+							productoExacto = resultadoEspecifico.products[0];
+						}
+					}
+
+					// Si identificamos el producto específico → responder sobre ÉL
+					if (productoExacto) {
+						context = {
+							...context,
+							flujo: null,
+							ultimaBusqueda: { results: [productoExacto, ...resultadoEspecifico.products.filter((p: any) => p.id !== productoExacto.id)], categoria: cat, productoIndex: 0 },
+							terminoBusqueda: productoExacto.name,
+							productoSolicitado: productoExacto.name,
+						};
+						// Cae al bloque de preguntaSeguimiento/Gemma más abajo para
+						// responder las medidas usando los Detalles del catálogo.
+					} else {
+						// No identificó producto exacto → pasar productos disponibles a la IA
+						const terminoLegible = (context?.pendingMessage && detectarCategoria(context.pendingMessage)) || cat;
+						context = {
+							...context,
+							flujo: null,
+							ultimaBusqueda: { results: productosDisponibles, categoria: cat, productoIndex: 0 },
+							terminoBusqueda: terminoLegible,
+							productoSolicitado: terminoLegible,
+						};
+					}
+				}
+
+				if (esPreguntaEspecificacion(message)) {
+					// El producto ya fue identificado arriba; saltar el perfilamiento
+				} else if (productosDisponibles.length > 0 && estrategiaBusqueda !== 'categoria' && estrategiaBusqueda !== 'texto' && estrategiaBusqueda !== 'palabra_clave' && estrategiaBusqueda !== 'sin_resultados') {
+					// La búsqueda encontró un producto específico (SKU, capacidad, potencia)
+					// → no preguntar presupuesto, dejar que Gemini presente el producto
+				} else if (campos >= pasos.length) {
 					const terminoBusqueda = terminoParaBuscar;
 					context = { ...context, terminoBusqueda };
 				} else {
 					const primerPaso = pasos.find(p => !shortcuts[p.field]);
 					if (primerPaso) {
-						const prodMatch = message.match(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa|info de|informacion de)\s*(?:un[oa]?|unas?|disponible|esta|este|esa|ese)?\s*([a-záéíóúñÁÉÍÓÚÑ][a-záéíóúñÁÉÍÓÚÑ\s]{2,40})/i);
+						const prodMatch = message.match(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa|info de|informacion de)\s*(?:\bun[oa]?\b|\bunas?\b|\bdisponible\b|\besta\b|\beste\b|\besa\b|\bese\b)?\s*([a-záéíóúñüÁÉÍÓÚÑÜ][a-záéíóúñüÁÉÍÓÚÑÜ\s]{2,40})/i);
 						return {
 							response: primerPaso.pregunta,
 							metadata: {
@@ -1255,27 +1843,164 @@ export class VentasAgent implements IAgent {
 			}
 		}
 
-		// ── Preguntas sobre la identidad del agente ─────────────────────────
-		if (/c[oó]mo te llamas|qui[eé]n eres|te llamas|como te llam|como es tu nombre|cu[aá]l es tu nombre|eres humana|eres robot|eres inteligencia|qui[eé]n soy|qui[eé]n es sara|sara qui[eé]n|presentate|pres[eé]ntate/i.test(message)) {
+		// ── Identidad y despedidas ahora las maneja la IA directamente ────
+
+		// ── Seguimiento post-compra (ya pagó / guía / cuándo llega) ─────────
+		// NO mostrar números de cartera; confirmar registro y escalar internamente.
+		const yaCompro = /(?:\bya\b\s*(?:compr[éeó]|pagu[éeó]|cancel[éeó]|realic[éeé]|\bhice\b\s*(?:el|la)\s*(?:compra|pago|transferencia))|qued[óo]\s*pag[ao]|\bhice\b\s*la\s*compra|complet[éeó]\s*(?:el|la)\s*(?:compra|pago))/i.test(lower);
+		const preguntaEnvio = /(?:gu[ií]a|despacho|cu[aá]ndo\s*(?:llega|recibo|lo\s*recibo|me\s*llega)|estado\s*(?:de\s*)?(?:mi\s*)?pedido|rastre|tracking|seguimiento|cu[aá]nto\s*(?:tarda|demora|se\s*demora)|correo\s*con\s*la\s*gu[ií]a)/i.test(lower);
+		const pideCartera = /\bcartera\b/i.test(lower);
+
+		// Post-purchase: ya compró y pregunta por envío/guía
+		if (yaCompro && preguntaEnvio && !pideCartera) {
 			return {
-				response: `Soy ${AGENT_NAME}, tu asesora virtual de JLC Electronics, la marca de los colombianos. 😊 ¿En qué te puedo ayudar?`,
+				response: `¡Qué buena noticia! 🎉 Tu pedido ya quedó registrado; el equipo te confirma el despacho y la guía muy pronto por aquí.`,
 				metadata: {
 					agentType: 'ventas',
-					ciudadValidada: context?.ciudadValidada,
+					flujo: null,
+					notificarPostCompra: true, // el handler escala al +57 318 740 8190
 					ciudad: context?.ciudad,
+					ciudadValidada: context?.ciudadValidada,
+					...datosPersonales,
 				},
 			};
 		}
 
-		// ── Despedidas ───────────────────────────────────────────────────────
-		if (/^(?:chao|adi[oó]s|bye|nos vemos|hasta luego|hasta pronto|cuídese|cuídate|gracias.*(?:chao|adi[oó]s|bye)|ya me voy|me retiro|buenas noches|buen día|buena tarde|que tengas buen|que est[eé]s bien|fue un placer|un placer|nos hablamos|luego|despu[eé]s te escribo|quedo atenta|quedo atento|gracias por todo|muchas gracias.*(?:adi[oó]s|bye|chao)|me voy|chao gracias|adi[oó]s gracias)\s*$/i.test(message.trim().toLowerCase())) {
+		// Pre-purchase: pregunta por tiempo de envío sin haber comprado aún
+		if (preguntaEnvio && !context?.flujo) {
 			return {
-				response: `¡Hasta luego! ${context?.userData?.nombre ? `Fue un placer ayudarte, ${context.userData.nombre.split(/\s+/)[0]}. ` : ''}Cuando necesites algo más, aquí estaré. ¡Cuídate mucho! 😊`,
+				response: `Los envíos aproximadamente tardan entre 3 a 10 días hábiles, dependiendo de la ciudad. Apenas se despacha te compartimos la guía para que puedas hacer seguimiento. ¿Te gustaría continuar con tu compra? 😊`,
 				metadata: {
 					agentType: 'ventas',
 					flujo: null,
-					ciudadValidada: context?.ciudadValidada,
 					ciudad: context?.ciudad,
+					ciudadValidada: context?.ciudadValidada,
+				},
+			};
+		}
+
+		// ── Preguntas de stock/disponibilidad → escalar a Cris ─────────────
+		const preguntaStock = /(?:hay\s*(?:en\s*)?stock|disponible|disponibilidad|cu[aá]ndo\s*(?:llega|llegar[aá]|est[aá]|hay)|tiempo\s*(?:de\s*)?entrega|demora|cu[aá]nto\s*(?:demora|tarda)|lo\s*tiene\s*(?:en\s*)?stock|est[aá]\s*(?:disponible|en\s*stock)|fecha\s*(?:de\s*)?entrega|llega\s*(?:a\s*)?(?:mi\s*)?ciudad)/i.test(message);
+		if (preguntaStock && !context?.flujo && !esPreguntaActiva) {
+			const ciudad = context?.ciudad || context?.userData?.ciudad || '';
+			const producto = context?.ultimaBusqueda?.results?.[0]?.name || context?.productoSolicitado || context?.terminoBusqueda || '';
+			return {
+				response: `Déjame confirmar disponibilidad y tiempo de entrega${ciudad ? ` para ${ciudad}` : ''}${producto ? ` del producto ${producto}` : ''} con el equipo; te confirmamos por aquí muy pronto 😊`,
+				metadata: {
+					agentType: 'ventas',
+					flujo: null,
+					notificarPostCompra: true,
+					ciudad: context?.ciudad,
+					ciudadValidada: context?.ciudadValidada,
+				},
+			};
+		}
+
+		// ── Pregunta sobre envío a una ciudad específica ─────────────────────
+		// Detecta "envían a [ciudad]", "tiene envío a [ciudad]", "llega a [ciudad]"
+		const envioACiudad = lower.match(/(?:env[ií][ao]n?\s*(?:a|para|hasta)|tiene\s*(?:env[ií]o|cobertura)\s*(?:a|para|en|hasta)|llega\s*(?:a|hasta)|hacen\s*(?:env[ií]o|domicilio|entrega)\s*(?:a|para|hasta)|a[úu]n\s*(?:env[ií]an|hacen\s*env[ií]o|tienen\s*cobertura)|cubre\s*(?:a|en|para)|hay\s*cobertura\s*(?:a|en|para|hasta)|flete\s*(?:a|para|hasta)|costo\s*de\s*env[ií]o\s*(?:a|para|hasta))\s+([a-záéíóúñü]{3,})/i);
+		if (envioACiudad) {
+			const ciudadConsulta = envioACiudad[1].toLowerCase().trim();
+			const cobertura = await verificarCobertura(ciudadConsulta);
+			if (cobertura === 'cobertura') {
+				return {
+					response: `¡Sí! Enviamos a *${ciudadConsulta.charAt(0).toUpperCase() + ciudadConsulta.slice(1)}* con envío gratis 🚚✨ ¿Deseas continuar con tu compra? 😊`,
+					metadata: {
+						agentType: 'ventas',
+						flujo: context?.flujo || null,
+						ciudad: ciudadConsulta,
+						ciudadValidada: true,
+						tieneCobertura: true,
+						ultimaBusqueda: context?.ultimaBusqueda,
+						productoCompra: context?.productoCompra || context?.ultimaBusqueda?.results?.[0]?.name,
+					},
+				};
+			} else if (cobertura === 'sin_cobertura') {
+				return {
+					response: `A *${ciudadConsulta.charAt(0).toUpperCase() + ciudadConsulta.slice(1)}* no tenemos cobertura directa, pero podemos enviarte tu producto a través de una transportadora (el flete se calcula al agregar el producto al carrito en la web). ¿Quieres continuar con tu compra? 😊`,
+					metadata: {
+						agentType: 'ventas',
+						flujo: context?.flujo || null,
+						ciudad: ciudadConsulta,
+						ciudadValidada: true,
+						tieneCobertura: false,
+						ultimaBusqueda: context?.ultimaBusqueda,
+						productoCompra: context?.productoCompra || context?.ultimaBusqueda?.results?.[0]?.name,
+					},
+				};
+			}
+			// desconocido → dejar que Gemini responda
+		}
+
+		// ── Si está en flujo de pago pero pide un producto nuevo, reiniciar ──
+		let resetFlujo = false;
+		const esNuevoProductoEnPago = context?.flujo === 'seleccion_pago' && /(?:y\s*(?:de|en|para)\s*(?:los|las|un|una)?|qu[e\u00e9]\s*(?:tal|hay\s*de|me\s*recomiendas|otr[oa]s?\s*opciones)|recomiendas|recomi[e\u00e9]ndame|tienes?\s*(?:televisores?|neveras?|lavadoras?|congeladores?|tvs?|licuadoras?|parlantes?|aires?\s*(?:acondicionado)?|ventiladores?|estufas?|hornos?|microondas?|equipos?\s*de\s*sonido|monitores?|pantallas?|aspiradoras?|planchas?)|(?:y\s*)?(?:en\s*)?(?:\btelevisores\b|\bneveras\b|\blavadoras\b|\bcongeladores\b|\btvs\b|\blicuadoras\b|\bparlantes\b|\bsonido\b|\baire\b|\bventiladores\b|\belectrodom[e\u00e9]sticos\b))/i.test(message);
+		if (esNuevoProductoEnPago) {
+			context = { ...context, flujo: null, ultimaBusqueda: undefined, terminoBusqueda: message };
+			resetFlujo = true;
+		}
+
+		// ── Nueva compra: el cliente quiere empezar de cero con otro producto ──
+		const esNuevaCompra = !esNuevoProductoEnPago && !context?.flujo && /(?:quiero\s*(?:comprar|buscar|ver)\s*(?:otro|un\s*nuevo|algo\s*diferente|otra\s*cosa)|busco\s*(?:otro|algo\s*m[aá]s|otra\s*cosa)|necesito\s*(?:otro|algo\s*diferente)|otr[oa]\s*(?:producto|opcion|alternativa|cosa)|quiero\s*(?:empezar\s*de\s*nuevo|comenzar\s*otra\s*vez|algo\s*distinto)|voy\s*a\s*(?:comprar|buscar)\s*(?:otro|un\s*nuevo)|me\s*recomiendas\s*(?:otro|algo\s*diferente|otra\s*marca))\b/i.test(lower) && !esPreguntaActiva;
+		if (esNuevaCompra) {
+			const cat = detectarCategoria(message) || aiClasificacion?.categoriaSugerida || null;
+			if (cat) {
+				context = { ...context, flujo: null, ultimaBusqueda: undefined, terminoBusqueda: undefined, productoSolicitado: undefined, perfilState: undefined };
+				resetFlujo = true;
+			} else {
+				return {
+					response: `¡Claro! ¿Qué tipo de producto estás buscando? 😊`,
+					metadata: { agentType: 'ventas', flujo: null },
+				};
+			}
+		}
+
+		// ── Detectar intención de compra ("me gusta", "cómo pago", "lo quiero") ─
+		const tieneProductos = context?.ultimaBusqueda?.results?.length > 0;
+		const esNegacion = /^(?:no\s+|tampoco|nunca|jam[aá]s|ni\s*lo\s*quiero)/i.test(message);
+		const compraIntencion = !esNegacion && !esPreguntaInfo(message) && /(?:\bme\b\s*gusta|\blo\b\s*quiero|\blo\b\s*compro|c[oó]mo\s*(?:pago|compro|adquiero|puedo\s*(?:pagar|comprar|adquirir)|\ble\b\s*(?:hago|hago\s*(?:para\s*)?pagar))|quiero\s*(?:comprar|pagar|adquirir|lle[vv]armelo|\bese\b)|\bdalo\b|res[eé]rvalo|\blo\b\s*reservo|\bcomprar\b|\bpagar\b)/i.test(message);
+
+		// Intentar emparejar el precio mencionado en el mensaje con un producto de la búsqueda anterior
+		function extraerPrecio(texto: string): number | null {
+			const colMatch = texto.match(/\d{1,3}\.\d{3}(?:\.\d{3})*/);
+			if (colMatch) return parseInt(colMatch[0].replace(/\./g, ''), 10);
+			const nums = texto.match(/\d{4,9}/g);
+			if (nums) {
+				for (const n of nums) {
+					const val = parseInt(n, 10);
+					if (val >= 100000 && val <= 50000000) return val;
+				}
+			}
+			return null;
+		}
+
+		const precioMencionado = extraerPrecio(message);
+		let productoPorPrecio: any = null;
+		if (precioMencionado && context?.ultimaBusqueda?.results) {
+			productoPorPrecio = context.ultimaBusqueda.results.find((p: any) => {
+				const pp = parseFloat(p.price || '0');
+				return pp > 0 && Math.abs(pp - precioMencionado) / precioMencionado < 0.1;
+			}) || null;
+		}
+
+		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago' && !resetFlujo && !esPreguntaActiva) {
+			const prod = productoPorPrecio || context?.ultimaBusqueda?.results?.[0];
+			const productoURL = prod?.permalink || context?.productoURL;
+			const nombreProducto = prod?.name || context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			const ref = prod?.sku ? ` (ref. ${prod.sku})` : '';
+			return {
+				response: `¡Con gusto! Te ayudo con el pago de ${nombreProducto}${ref} 😊 ¿Cómo prefieres pagar?\n\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${context?.tieneCobertura ? '\n3️⃣ Pagar en un punto físico' : ''}`,
+				nextStage: 'PROPOSAL',
+				metadata: {
+					agentType: 'ventas',
+					flujo: 'seleccion_pago',
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					tieneCobertura: context?.tieneCobertura,
+					productoURL,
+					productoSolicitado: nombreProducto,
+					ultimaBusqueda: context?.ultimaBusqueda,
+					...datosPersonales,
 				},
 			};
 		}
@@ -1284,9 +2009,9 @@ export class VentasAgent implements IAgent {
 		const ciudadStr = context?.ciudad ? `En ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
 		const envioStr = context?.tieneCobertura
 			? 'tienes envío gratis'
-			: 'pago de contado (flete por transportadora incluido en el pago total)';
+			: 'envío por transportadora (el flete se calcula en la web al agregar el producto al carrito)';
 
-		const pideMas = /(?:tienes\s*mas|hay\s*m[áa]s|m[áa]s\s*opciones|otr[oa]s?\s*opciones|quiero\s*ver\s*m[áa]s|mu[ée]strame\s*m[áa]s|busco\s*otr[oa]|alg[úu]n\s*otr[oa]|otr[oa]s?\s*opciones|diferente)/i.test(message);
+		const pideMas = /(?:tienes\s*mas|hay\s*m[áa]s|m[áa]s\s*opciones|otr[oa]s?\s*opciones|quiero\s*ver\s*m[áa]s|mu[ée]strame\s*m[áa]s|busco\s*otr[oa]|alg[úu]n\s*otr[oa]|otr[oa]s?\s*opciones|diferente|es\s*(?:el|la)\s*mismo|el\s*mismo|lo\s*mismo|la\s*misma)/i.test(message);
 		const pideMasEconomico = /(?:m[áa]s\s*(?:econ[oó]mic[oa]s?|barat[oa]s?|econ[oó]mic[oa])|algo\s*(?:m[áa]s\s*)?(?:econ[oó]mico|barato)|m[áa]s\s*barato|menos\s*costoso|de\s*menor\s*precio|hay\s*(?:algo\s*)?m[áa]s\s*barat)/i.test(message);
 
 		let products: any[] = [];
@@ -1295,7 +2020,7 @@ export class VentasAgent implements IAgent {
 		let terminoBusqueda = context?.terminoBusqueda || message;
 
 		const STOPWORDS_PRODUCTO = /\s+(?:de|del|la|el|los|las|un|una|unos|unas|por|para|con|que|y|o|en|a|al|JLC|Electronics|marca|modelo|referencia|producto|electrodoméstico|electrodomestico)\b.*/i;
-		const busquedaMatch = message.match(/(?:busco|quiero|necesito|tiene[ns]?|hay|venden|muestra|muestrame|quisiera|me interesa|info de|informacion de)\s*(?:un[oa]?|unas?|disponible|esta|este|esa|ese)?\s*([a-záéíóúñÁÉÍÓÚÑ][a-záéíóúñÁÉÍÓÚÑ\s]{2,40})/i);
+		const busquedaMatch = message.match(/(?:\bbusco\b|\bquiero\b|\bnecesito\b|\btiene[ns]?\b|\bhay\b|\bvenden\b|\bmuestra\b|\bmuestrame\b|\bquisiera\b|me interesa|info de|informacion de)\s*(?:\bun[oa]?\b|\bunas?\b|\bdisponible\b|\besta\b|\beste\b|\besa\b|\bese\b)?\s*([a-záéíóúñüÁÉÍÓÚÑÜ][a-záéíóúñüÁÉÍÓÚÑÜ\s]{2,40})/i);
 		let productoBuscado: string;
 		if (busquedaMatch) {
 			productoBuscado = busquedaMatch[1].trim()
@@ -1307,174 +2032,225 @@ export class VentasAgent implements IAgent {
 			productoBuscado = terminoBusqueda;
 		}
 
-		const preguntaSeguimiento = /(?:especificaciones?|caracter[ií]sticas?|detalles?|d[ée]tal|cu[aá]nto cuesta|cu[aá]nto vale|cu[aá]l es|en qu[eé] se diferencia|diferencia|c[oó]mo es|descr[ií]belo|dimensiones|medidas|capacidad|color|modelo|referencia|precio|m[aá]s info|m[aá]s informaci[oó]n|primero|segunda?|tercero|este|ese|aquel|me gusta|prefiero|quiero|detalles|garantia|la primera opci[oó]n|el primero|la primera)/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
+		const preguntaSeguimiento = /\b(?:especificaciones?|caracter[ií]sticas?|detalles?|d[ée]tal|cu[aá]nto cuesta|cu[aá]nto vale|cu[aá]l es|en qu[eé] se diferencia|diferencia|c[oó]mo es|descr[ií]belo|dimensiones|medidas|capacidad|color|modelo|referencia|precio|m[aá]s info|m[aá]s informaci[oó]n|primero|segunda?|tercero|este|ese|aquel|me gusta|prefiero|quiero|detalles|garantia|la primera opci[oó]n|el primero|la primera)\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
 
 		if (preguntaSeguimiento) {
-			products = context.ultimaBusqueda.results.slice(0, 6);
-			hayProductos = true;
-			// Conservar el término y categoría de búsqueda originales
-			productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			try {
+				const termino = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || terminoBusqueda || message;
+				const categoriaCtx = context?.ultimaBusqueda?.categoria || detectarCategoria(termino);
+				const resultado = await buscarProductoInteligente(termino, categoriaCtx);
+				products = resultado.products?.slice(0, 10) || [];
+				hayProductos = products.length > 0;
+				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			} catch {
+				products = context?.ultimaBusqueda?.results?.slice(0, 10) || [];
+				hayProductos = products.length > 0;
+				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
+			}
+		}
+
+		// ── BÚSQUEDA EN WOOCOMMERCE PARA CUALQUIER MENCIÓN DE PRODUCTO ──────
+		// Cada vez que el cliente menciona un producto (SKU, categoría, link,
+		// pregunta activa sobre producto), buscar en WooCommerce para tener
+		// datos frescos en el prompt de la IA y evitar que invente información.
+		if (products.length === 0 && esPreguntaActiva) {
+			const sku = extraerSKU(message);
+			const pideLink = /\b(?:link|enlace|url)\b/i.test(message);
+			const prodPrevio = context?.userData?.productoSolicitado || context?.productoSolicitado || context?.terminoBusqueda;
+			const cat = catDetectada || context?.ultimaBusqueda?.categoria || (prodPrevio ? detectarCategoria(prodPrevio) : null);
+			if (sku || cat || (pideLink && prodPrevio)) {
+				try {
+					const termino = sku || prodPrevio || message;
+					const resultado = await buscarProductoInteligente(termino, cat);
+					if (resultado.products.length > 0) {
+						products = resultado.products;
+						hayProductos = true;
+						productoIndex = 0;
+						productoBuscado = resultado.products[0]?.name || productoBuscado;
+					}
+				} catch {
+					// continuar sin productos
+				}
+			}
 		}
 
 		if (pideMas || pideMasEconomico) {
 			const busquedaGuardada = context?.ultimaBusqueda;
-			if (busquedaGuardada?.results?.length > 0) {
-				products = busquedaGuardada.results;
-
-				if (pideMasEconomico) {
-					products = [...products].sort((a: any, b: any) => {
-						const pa = parseFloat(a.price || '999999999');
-						const pb = parseFloat(b.price || '999999999');
-						return pa - pb;
-					});
-					productoIndex = 0;
-					
-					const catBusqueda = busquedaGuardada.categoria || context?.terminoBusqueda || '';
-					if (catBusqueda) {
-						try {
-							const masProductos = await wooCommerceService.searchProducts(catBusqueda, 20);
-							if (masProductos?.length > 0) {
-								const idsExistentes = new Set(products.map((p: any) => p.id));
-								const nuevos = masProductos.filter((p: any) => !idsExistentes.has(p.id));
-								products = [...products, ...nuevos].sort((a: any, b: any) => {
+			const catBusqueda = busquedaGuardada?.categoria || context?.terminoBusqueda || '';
+			
+			if (catBusqueda) {
+				try {
+					const masProductos = await wooCommerceService.searchProducts(catBusqueda, pideMasEconomico ? 40 : 30);
+					if (masProductos?.length > 0) {
+						const idSet = new Set(masProductos.map((p: any) => p.id));
+						// Incluir productos previos que no aparecieron en la nueva búsqueda
+						const previos = (busquedaGuardada?.results || []).filter((p: any) => !idSet.has(p.id));
+						products = [...masProductos, ...previos];
+						if (pideMasEconomico) {
+							products.sort((a: any, b: any) => {
+								const pa = parseFloat(a.price || '999999999');
+								const pb = parseFloat(b.price || '999999999');
+								return pa - pb;
+							});
+							productoIndex = 0;
+						} else {
+							productoIndex = (busquedaGuardada?.productoIndex ?? 0) + 1;
+						}
+						hayProductos = true;
+						productoBuscado = catBusqueda;
+					} else {
+						// Sin resultados nuevos → usar los previos
+						const previos = busquedaGuardada?.results || [];
+						if (previos.length > 0) {
+							products = [...previos];
+							if (pideMasEconomico) {
+								products.sort((a: any, b: any) => {
 									const pa = parseFloat(a.price || '999999999');
 									const pb = parseFloat(b.price || '999999999');
 									return pa - pb;
 								});
+								productoIndex = 0;
 							}
-						} catch { /* continuar con lo que tenemos */ }
+							hayProductos = true;
+							productoBuscado = catBusqueda;
+						}
 					}
-				} else {
-					productoIndex = (busquedaGuardada.productoIndex ?? 0) + 1;
-					if (productoIndex >= products.length) {
-						let terminoReSearch = busquedaGuardada.categoria || context?.terminoBusqueda || '';
-						if (!terminoReSearch) {
-							const primerProd = products[0]?.name || '';
-							const catMatch = primerProd.match(/(?:Nevera|Lavadora|Televisor|TV|Congelador|Parlante|Licuadora|Horno|Microondas|Estufa|Ventilador|Aire|Plancha|Aspiradora)/i);
-							if (catMatch) terminoReSearch = catMatch[0].toLowerCase();
+				} catch {
+					// Fallback a productos previos
+					const previos = busquedaGuardada?.results || [];
+					if (previos.length > 0) {
+						products = [...previos];
+						if (pideMasEconomico) {
+							products.sort((a: any, b: any) => {
+								const pa = parseFloat(a.price || '999999999');
+								const pb = parseFloat(b.price || '999999999');
+								return pa - pb;
+							});
+							productoIndex = 0;
 						}
-						if (terminoReSearch) {
-							try {
-								const masProductos = await wooCommerceService.searchProducts(terminoReSearch, 20);
-								if (masProductos?.length > 0) {
-									const idsExistentes = new Set(products.map((p: any) => p.id));
-									const nuevos = masProductos.filter((p: any) => !idsExistentes.has(p.id));
-									if (nuevos.length > 0) {
-										products = [...products, ...nuevos];
-										productoIndex = busquedaGuardada.productoIndex ?? 0;
-									} else {
-										productoIndex = products.length;
-									}
-								} else {
-									productoIndex = products.length;
-								}
-							} catch {
-								productoIndex = products.length;
-							}
-						} else {
-							productoIndex = products.length;
-						}
+						hayProductos = true;
+						productoBuscado = catBusqueda;
 					}
 				}
-			} else {
-				return {
-					response: `${ciudadStr} ${envioStr}. ¿Qué referencia o modelo buscas? Así te muestro lo que tenemos disponible 😊`,
-					metadata: { agentType: 'ventas', ciudad: context?.ciudad, ciudadValidada: context?.ciudadValidada },
-				};
+			}
+			if (!hayProductos) {
+				products = [];
 			}
 		}
 
-		if (products.length === 0) {
-			// Si ya hay resultados de una búsqueda anterior y el mensaje actual
-			// no contiene un término de producto claro, reusar los anteriores
+		// ── Tamaños relativos: "el más pequeño", "el más grande", "mediano" ──
+		let esTamanoRelativo = false;
+		const tamanoRelativo = (() => {
+			if (!context?.ultimaBusqueda?.categoria) return null;
+			if (/\b(m[áa]s\s*peque[ñn]o|m[áa]s\s*chico|el\s*menor|el\s*m[íi]nimo)\b/i.test(message)) return 'menor';
+			if (/\b(m[áa]s\s*grande|m[áa]s\s*capacidad|el\s*mayor|el\s*m[áa]ximo)\b/i.test(message)) return 'mayor';
+			if (/\b(mediano|intermedio|un\s*mediano)\b/i.test(message)) return 'mediano';
+			return null;
+		})();
+
+		if (tamanoRelativo && context?.ultimaBusqueda?.categoria) {
+			esTamanoRelativo = true;
+			const categoria = context.ultimaBusqueda.categoria;
+			try {
+				const masProductos = await wooCommerceService.searchProducts(categoria, 30);
+				if (masProductos?.length > 1) {
+					function extraerCapacidadProducto(p: any): number {
+						// Buscar en el nombre: "251L", "254 Litros", "19kg", "50 Pulgadas"
+						const nameCap = extraerCapacidad(p.name || '');
+						if (nameCap) return nameCap.valor;
+						// Buscar en atributos
+						if (p.attributes?.length > 0) {
+							for (const attr of p.attributes) {
+								const val = attr.options?.[0] || '';
+								const cap = extraerCapacidad(`${attr.name}: ${val}`);
+								if (cap) return cap.valor;
+							}
+						}
+						// Buscar en descripción corta
+						if (p.short_description) {
+							const cap = extraerCapacidad(p.short_description);
+							if (cap) return cap.valor;
+						}
+						// Fallback a precio
+						return parseFloat(p.price || '0') || 0;
+					}
+
+					const conCapacidad = masProductos
+						.map((p: any) => ({ ...p, _cap: extraerCapacidadProducto(p) }))
+						.sort((a: any, b: any) => a._cap - b._cap);
+
+					if (tamanoRelativo === 'menor') {
+						products = [conCapacidad[0]];
+					} else if (tamanoRelativo === 'mayor') {
+						products = [conCapacidad[conCapacidad.length - 1]];
+					} else {
+						const mid = Math.floor(conCapacidad.length / 2);
+						products = [conCapacidad[mid]];
+					}
+					hayProductos = true;
+					productoIndex = 0;
+					productoBuscado = products[0]?.name || categoria;
+				}
+			} catch { /* fall through */ }
+		}
+
+		if (!esTamanoRelativo && products.length === 0) {
+			// Si el mensaje referencia un producto guardado previamente, ajustar el término
 			const productoPrevio = context?.userData?.productoSolicitado || context?.productoSolicitado;
-			if (context?.ultimaBusqueda?.results?.length > 0 && !/comprar|cotizar|busco|quiero|necesito|hay|venden|tienes/i.test(message)) {
-				products = context.ultimaBusqueda.results.slice(0, 6);
-				hayProductos = true;
-				productoBuscado = context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
-			} else if (productoPrevio && !productoBuscado.includes(productoPrevio) && productoBuscado === terminoBusqueda && terminoBusqueda === message) {
-				// El mensaje actual no parece contener un producto, usar el producto previo de UserData
+			if (productoPrevio && !productoBuscado.includes(productoPrevio) && productoBuscado === terminoBusqueda && terminoBusqueda === message) {
 				productoBuscado = productoPrevio;
 				terminoBusqueda = productoPrevio;
 			}
 
-			const esConsultaProducto = /(?:tiene[ns]?|hay|venden|busco|quiero|necesito|me interesa|consulta|precio|cu[aá]nto)/i.test(message);
+			// Siempre consultar WooCommerce fresco (sin reusar cache)
+			try {
+				const categoriaCtx = context?.ultimaBusqueda?.categoria || detectarCategoria(terminoBusqueda);
+				const resultado = await buscarProductoInteligente(message, categoriaCtx);
+				products = resultado.products;
 
-			if (context?.productosPreCargados?.length > 0) {
-				products = context.productosPreCargados;
-				hayProductos = true;
-			} else {
-				try {
-					if (!products || products.length === 0) {
-						products = await wooCommerceService.searchProducts(terminoBusqueda, 20);
-					}
-
-					if (!products || products.length === 0) {
-						const palabrasClave = terminoBusqueda
-							.toLowerCase()
-							.replace(/[.,!?¡¿]+/g, '')
-							.split(/\s+/)
-							.filter((w: string) => w.length > 3)
-							.filter((w: string) => !['para', 'con', 'mas', 'más', 'que', 'una', 'uno', 'las', 'los', 'del', 'por', 'pero', 'esta', 'todo', 'como', 'entre', 'sobre', 'cuando', 'donde', 'tiene', 'ser', 'desde', 'hasta', 'cada'].includes(w));
-
-						for (const keyword of palabrasClave) {
-							const results = await wooCommerceService.searchProducts(keyword, 20);
-							if (results && results.length > 0) {
-								products = results;
-								break;
-							}
-						}
-					}
-
-					if (!products || products.length === 0) {
-						const categoriaFallback = await detectarCategoria(message);
-						if (categoriaFallback) {
-							const results = await wooCommerceService.searchProducts(categoriaFallback, 20);
-							if (results?.length > 0) products = results;
-						}
-					}
-
-					if ((!products || products.length === 0) && esConsultaProducto) {
-						const nombreProducto = busquedaMatch?.[1]?.trim().toLowerCase() || terminoBusqueda.toLowerCase();
-						return {
-							response: `En este momento no tenemos ${nombreProducto} disponible en nuestro catálogo. ¿Hay algo más en lo que te pueda ayudar? 😊`,
-							metadata: {
-								agentType: 'ventas',
-								ciudadValidada: context?.ciudadValidada,
-								ciudad: context?.ciudad,
-								...datosPersonales,
-							},
-						};
-					}
-
-					if (!products || products.length === 0) {
-						return {
-							response: `Cuéntame, ¿qué producto te gustaría ver? Tenemos neveras, lavadoras, televisores, congeladores, parlantes, y más. 😊`,
-							metadata: {
-								agentType: 'ventas',
-								ciudadValidada: context?.ciudadValidada,
-								ciudad: context?.ciudad,
-								modalidad: context?.modalidad,
-								tieneCobertura: context?.tieneCobertura,
-								...datosPersonales,
-							},
-						};
-					}
-
-					hayProductos = products?.length > 0;
-				} catch {
-					// products = []
+				if (resultado.estrategia.startsWith('sku') || resultado.estrategia.startsWith('potencia') || resultado.estrategia.startsWith('categoria_potencia')) {
+					terminoBusqueda = resultado.sku || extraerPotencia(message) || terminoBusqueda;
 				}
+
+				hayProductos = products?.length > 0;
+			} catch {
+				// products = []
 			}
 		}
 
+		function htmlToCleanText(html: string, isPrimary: boolean): string {
+			if (!html) return '';
+			// Preservar tablas: convertir <tr> en saltos de línea y <td>/<th> en pipe
+			let txt = html
+				.replace(/<\/tr>/gi, '\n')
+				.replace(/<\/td>/gi, ' | ')
+				.replace(/<\/th>/gi, ' | ')
+				.replace(/<br\s*\/?>/gi, '\n')
+				.replace(/<li>/gi, '\n- ')
+				.replace(/<\/li>/gi, '')
+				.replace(/<\/?(?:ul|ol)>/gi, '\n');
+			// Remover el resto de etiquetas HTML
+			txt = txt.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
+			const maxLen = isPrimary ? 5000 : 1200;
+			return txt.length > maxLen ? txt.slice(0, maxLen - 3) + '...' : txt;
+		}
+
+		if (productoIndex >= products.length) productoIndex = 0;
 		const productListStr = products.length > 0
-			? products.slice(0, 6).map((p: any, i: number) => {
+			? products.slice(productoIndex, productoIndex + 10).map((p: any, i: number) => {
 				const precio = p.price ? `$${Number(p.price).toLocaleString('es-CO')}` : 'Consultar precio';
-				// Limpiar descripción HTML y truncar a 200 chars para dar contexto al LLM
-				const rawDesc: string = (p.short_description || p.description || '').replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
-				const desc = rawDesc.length > 200 ? rawDesc.slice(0, 197) + '...' : rawDesc;
-				return `${i + 1}. ${p.name} - ${precio}\n   Enlace: ${p.permalink}${desc ? `\n   Detalles: ${desc}` : ''}`;
+				const desc = htmlToCleanText(p.description || p.short_description || '', i === 0);
+				// Incluir atributos estructurados (dimensiones, capacidad, etc.)
+				let attrs = '';
+				if (p.attributes?.length > 0) {
+					const relevantes = p.attributes.filter((a: any) =>
+						a.options?.length && ['alto', 'ancho', 'largo', 'profundidad', 'fondo', 'capacidad', 'peso', 'volumen', 'medidas', 'dimensiones', 'tamaño', 'color', 'material', 'potencia', 'voltaje', 'consumo', 'garantía'].some(k => a.name?.toLowerCase().includes(k.toLowerCase()))
+					);
+					if (relevantes.length > 0) {
+						attrs = '\n   ' + relevantes.map((a: any) => `${a.name}: ${a.options.join(', ')}`).join('\n   ');
+					}
+				}
+				return `${i + 1}. ${p.name} - ${precio}\n   Enlace: ${p.permalink}${desc ? `\n   Detalles: ${desc}` : ''}${attrs}`;
 			}).join('\n\n')
 			: 'No se encontraron productos.';
 
@@ -1482,46 +2258,75 @@ export class VentasAgent implements IAgent {
 
 		const { system, user } = buildGemmaPrompt({
 			instruccion: `Eres ${AGENT_NAME}, asesora comercial y experta en electrodomésticos de JLC Electronics Colombia.
+
 Personalidad y Estilo:
-- Tono 100% cálido, cercano, servicial y FEMENINO. Eres como una amiga que asesora con criterio y cariño.
-- Español colombiano natural (usa expresiones como "¡Ay, qué chévere!", "Te cuento que...", "Mira, te recomiendo...", "Qué pena pero...", "¡Ay, me alegra!").
-- EVITA palabras masculinas o de jerga: NO uses "bacano", "buenazo", "genial" — usa "chévere", "qué maravilla", "ideal", "perfecto".
-- Muestra criterio y opinión propia sobre los productos para guiar al cliente.
-- Mensajes cortos tipo WhatsApp (máximo 1-3 frases por respuesta). Nada de listados enormes.
-- IMPORTANTE: Usa el género gramatical correcto según el producto. Televisores y ventiladores son MASCULINOS ("el de 55 pulgadas", "el ventilador"). Neveras y lavadoras son FEMENINAS ("la nevera de 20 pies"). NO digas "la de 55 pulgadas" para un televisor.
+${aiClasificacion ? 'Análisis de intención (referencia): el cliente parece estar interesado en "' + aiClasificacion.intent + '"' + (aiClasificacion.categoriaSugerida ? ', categoría sugerida: ' + aiClasificacion.categoriaSugerida : '') + '.\n' : ''}
+- Cálida, cercana y femenina, como una amiga que sabe de electrodomésticos.
+- Español colombiano natural y espontáneo, nunca robótico.
+- MENSAJES CORTOS: 1-2 frases máximo. Es WhatsApp, no un correo. Ve al grano con calidez.
+- MÁXIMO 1 emoji por mensaje (a veces ninguno). No saturar de emojis.
+- Da tu opinión y criterio para guiar al cliente, pero breve.
+- Género correcto: televisores/ventiladores MASCULINO, neveras/lavadoras FEMENINO.
+- Si preguntan quién eres o se despiden, responde con naturalidad y brevedad. No alargues despedidas.
 
 ${ciudadStr ? `Ciudad del cliente: ${ciudadStr}.` : ''} ${envioStr ? `Condición de envío: ${envioStr}.` : ''}
 ${userDataStr}
-POLÍTICA DE ENTREGA: Los transportadores entregan el producto en la puerta del negocio o domicilio (primer piso). No ingresan al interior del local ni suben a segundos pisos por políticas de la empresa. El cliente debe asegurarse de tener personal disponible para recibir.
+
+POLÍTICAS DE LA EMPRESA —debes cumplirlas:
+${context?.tieneCobertura
+	? '- El precio incluye envío gratis. Si preguntan por flete, confirma que aplica envío gratis a su ciudad.'
+	: '- El precio NO incluye flete. Si preguntan por envío, indica que se calcula al agregar el producto al carrito en la web.'}
+- No menciones entrega en primer piso a menos que el cliente pregunte explícitamente.
+- No confirmes despacho si el cliente no ha pagado.
+- Si el cliente dice que ya pagó, pídele el comprobante o número de transacción.
+- Si preguntan por garantía del producto, responde brevemente que tienen 1 año de garantía cubriendo defectos de fábrica, y que la factura de compra es el respaldo. No deriven a servicio técnico ni des números de contacto. La venta la gestionas tú.
+- Si preguntan por la calidad de un producto, responde con honestidad destacando sus ventajas. No preguntes presupuesto ni desvíes la pregunta.
+- Si el cliente confirma que quiere un producto ("me gusta", "lo quiero", "dále", etc.), ofrécele las opciones de pago directamente. No preguntes cuál ni vuelvas a listar productos.
+- NUNCA preguntes "¿Seguimos buscando?" ni "¿Seguimos buscando el producto ideal para ti?". Cuando el cliente muestre interés, ofrécele ir al pago. Si el cliente pide otra opción, muestra un producto diferente. Siempre busca cerrar la venta, no alargar la búsqueda.
+- Si preguntan por opciones de pago, no las enumeres; guíalos a pagar en la web.
+- Si necesitan ayuda para pagar, ofrécete a escalar al equipo de soporte. Si el cliente insiste en un contacto, entrega el número +573187408190.
+- NUNCA menciones "cartera" ni "WhatsApp de cartera" NI números de cartera (314 422 9949, 315 721 2367). Tampoco redirijas al cliente a cartera desde ventas. Si el cliente pide cartera explícitamente o escalar para envío/despacho, entrega únicamente +573187408190.
+- Para seguimiento post-compra (guía de despacho, "ya compré", "cuándo llega", estado del pedido): dile con calidez que ya quedó registrado y que el equipo le confirma el despacho y la guía pronto. NO menciones cartera. Si insiste en un contacto para coordinar envío, entrega el número +573187408190.
+- No digas "generé tu orden". Di que el producto queda reservado pendiente de pago.
+- No compartas direcciones de agencias físicas.
+- Si el cliente dice "no me gusta esa marca" o algo similar, explícale que todos los electrodomésticos son JLC, marca propia colombiana, y ofrécele mostrarle otros modelos del mismo tipo (nunca sugerir otras marcas ni saltar a pago).
+ 
 REGLAS DE CATÁLOGO:
-- Si el cliente pregunta por detalles, especificaciones, características o diferencias de un producto que YA está en el CATÁLOGO, respóndele usando la información de "Detalles" del catálogo. NO hagas una nueva búsqueda.
-- Si el cliente menciona "la primera opción", "el de 55", "el primero", o algo similar, identifica a qué producto del catálogo se refiere y dale la información pedida.
-- Recomienda máximo 1-2 productos del CATÁLOGO con nombre, precio y enlace.
-- Si hay productos, preséntalos de forma natural y breve.
-- Si NO hay productos en el catálogo, dilo honestamente.
-- NUNCA inventes productos, precios ni disponibilidad.
-- NUNCA compartas direcciones de agencias físicas.
-- NUNCA contradigas la condición de envío ya comunicada al cliente.
-- Si el cliente ya dio datos (nombre, cédula, ciudad, presupuesto), úsalos sin pedirlos de nuevo.
-- Si el cliente pide un producto NUEVO o diferente al anterior, ayúdale con eso.
-- PROHIBIDO confirmar envío o despacho si el cliente no ha pagado. Di "tan pronto se confirme el pago".
-- Si el cliente dice que ya pagó, pide el comprobante o número de transacción.
-- NUNCA compartas números de WhatsApp de cartera, correos de facturación ni números de soporte de pago.
-- NUNCA digas "generé tu orden de compra" ni "tu orden quedó lista". Di que el producto queda reservado pendiente a su pago.
-- Si NO encontraste el producto exacto que busca, NO le recomiendes productos de otra categoría.
-- NUNCA recomiendes productos que el cliente NO pidió.`,
+- Muestra SOLO 1 producto a la vez. Elige el mejor candidato según lo que sepas del cliente. Si el cliente pide "ver opciones", no le muestres todo el catálogo — elige UN producto y preséntalo, luego pregunta algo para seguir perfilando (uso, capacidad que necesita, etc.).
+- NO preguntes por presupuesto si el cliente ya te dio el dato, ya viste el precio del producto o ya mostraste el precio. Si el cliente ya sabe qué producto quiere y su precio, ofrécele las opciones de pago directamente para cerrar la venta.
+- Siempre incluye el enlace del producto al presentarlo, pero SOLO si tienes el enlace real del catálogo (campo "Enlace:" de los datos del producto). NUNCA inventes, generes ni construyas URLs. Si el producto no tiene enlace real, no compartas ningún link. Nunca preguntes si quiere el enlace.
+- Si el cliente pregunta detalles/especificaciones de un producto del catálogo, responde usando su información de "Detalles".
+- Si el cliente pide "más información" de un producto que YA fue identificado y mostrado, dale los detalles disponibles y OFRÉCELE ir al pago. No preguntes presupuesto ni entres en perfilado.
+- Si el cliente ya identificó un producto (por nombre, número o SKU), concéntrate en ese producto.
+- Si no hay productos en el catálogo, dilo con honestidad y pregunta qué busca. NUNCA compartas enlaces de productos que no estén en el catálogo.
+- Si el cliente pide una opción más económica o más barata, preséntale el producto más económico disponible en el catálogo. No digas que es el "único" modelo disponible ni que no hay más opciones. Si solo hay un producto en el catálogo, preséntalo como la mejor opción disponible.
+- Si el cliente es de Crédito, NUNCA mostrar precios de productos.
+- Si el cliente pide un producto nuevo o diferente, ayúdale con eso.
+- Si menciona un SKU o referencia que SÍ está en el catálogo, confírmaselo y dale el enlace.
+- Si menciona un SKU o referencia que NO está, dilo naturalmente sin afirmar que "no existe".
+- No inventes productos, precios ni disponibilidad.
+- No recomiendes productos de otra categoría si no encontraste lo que busca.
+- Si el cliente ha enviado una imagen (tú no la ves, pero el mensaje contiene "[Imagen]"), significa que el cliente compartió una foto. Guíalo con naturalidad preguntando de qué producto se trata o pídele que describa la imagen si necesitas más contexto.`,
 			ejemplos: [
 				{
+					cliente: '¿Tienen el parlante JLC-21215 de 500W?',
+					asistente: 'Déjame confirmarte disponibilidad y precio de esa referencia, un momentico 😊',
+				},
+				{
 					cliente: 'Busco una nevera',
-					asistente: 'Tenemos varias opciones en neveras. Te recomiendo la Nevera JLC No Frost 251L por $1.399.900. ¿Te interesa o quieres ver más opciones?',
+					asistente: 'Tenemos la Nevera JLC No Frost 251L por $1.399.900. ¿Para cuántas personas la necesitas? Así te confirmo si es el tamaño ideal 😊',
 				},
 				{
-					cliente: 'también quiero una lavadora',
-					asistente: 'Claro, tenemos lavadoras también. Te recomiendo la Lavadora JLC Automática 16kg. ¿Quieres que te la busque?',
+					cliente: 'me gusta',
+					asistente: '¡Genial! Para continuar con tu compra, ¿cómo prefieres pagar? 😊\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)\n3️⃣ Pagar en un punto físico (solo necesito tu nombre y cédula para reservarlo)',
 				},
 				{
-					cliente: 'y no hay más?',
-					asistente: 'Déjame verificar si tenemos otras opciones disponibles en este momento.',
+					cliente: '¿Qué métodos de pago aceptan?',
+					asistente: 'En la web puedes pagar con PSE, tarjeta o Nequi al finalizar la compra. ¿Te ayudo con el enlace?',
+				},
+				{
+					cliente: 'Ya compré la nevera y pagué el envío. ¿Cuándo llega y me envían la guía?',
+					asistente: '¡Qué buena noticia! 🎉 Tu pedido ya quedó registrado; el equipo te confirma el despacho y la guía muy pronto por aquí.',
 				},
 			],
 			historial: formatHistory(context?.history),
@@ -1531,7 +2336,9 @@ REGLAS DE CATÁLOGO:
 		const catalogPrompt = `\n\nCATÁLOGO DE PRODUCTOS:\n${productListStr}\n\n---\nResponde al cliente según las reglas anteriores.`;
 
 		const raw = await generateResponse(user + catalogPrompt, system);
-		const response = cleanResponse(raw);
+		let response = cleanResponse(raw);
+		response = sanitizarNumerosVentas(response);
+		response = sanitizarURLs(response, products);
 
 		return {
 			response,
@@ -1543,10 +2350,11 @@ REGLAS DE CATÁLOGO:
 				ciudad: context?.ciudad,
 				modalidad: context?.modalidad,
 				tieneCobertura: context?.tieneCobertura,
+				...(resetFlujo ? { flujo: null } : {}),
 				...(productoBuscado.length < 30 && productoBuscado.split(/\s+/).length <= 5 && !/[?¿]/.test(productoBuscado) ? { productoSolicitado: productoBuscado } : {}),
-				ultimaBusqueda: products.length > 0
-					? { results: products.slice(0, 6), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
-					: undefined,
+			ultimaBusqueda: products.length > 0
+				? { results: products.slice(productoIndex, productoIndex + 10), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
+				: context?.ultimaBusqueda,
 				...datosPersonales,
 			},
 		};
@@ -1583,7 +2391,7 @@ REGLAS DE CATÁLOGO:
 		});
 
 		const raw = await generateResponse(user, system);
-		const response = cleanResponse(raw);
+		const response = sanitizarNumerosVentas(cleanResponse(raw));
 
 		return {
 			response,

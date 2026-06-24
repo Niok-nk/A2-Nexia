@@ -10,10 +10,10 @@ const FALLBACKS_PRIMERA_VEZ = [
 ];
 
 const FALLBACKS_RECURRENTE = [
-	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}qué bueno verte de nuevo por aquí. 😊 ¿En qué te puedo ayudar hoy?`,
-	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}me alegra verte de nuevo. Cuéntame, ¿qué necesitas el día de hoy? ✨`,
-	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}gracias por seguir confiando en JLC, la marca de los colombianos. ¿En qué te ayudo? 💙`,
-	(s: string, n?: string) => `¡${s}!${n ? ` ${n}! ` : ' '}qué gusto tenerte de vuelta. Dime, ¿cómo puedo ayudarte hoy? 😊`,
+	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}soy ${AGENT_NAME}, qué bueno verte de nuevo por aquí. 😊 ¿En qué te puedo ayudar hoy?`,
+	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}soy ${AGENT_NAME}, me alegra verte de nuevo. Cuéntame, ¿qué necesitas el día de hoy? ✨`,
+	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}soy ${AGENT_NAME}, gracias por seguir confiando en JLC, la marca de los colombianos. ¿En qué te ayudo? 💙`,
+	(s: string, n?: string) => `¡${s}!${n ? ` ${n}! ` : ' '}soy ${AGENT_NAME}, qué gusto tenerte de vuelta. Dime, ¿cómo puedo ayudarte hoy? 😊`,
 ];
 
 function pick<T>(arr: T[]): T {
@@ -29,20 +29,25 @@ async function generarBienvenidaIA(recurrente: boolean, nombreCliente?: string):
 	try {
 		const raw = await generateResponse(
 			`Clima: ${saludo}. Contexto: ${esRecurrente}.${nombreCtx}`,
-			`Eres ${AGENT_NAME}, asesora virtual de JLC Electronics, la marca de los colombianos.
+			`Eres ${AGENT_NAME}, asesora de JLC Electronics, la marca de los colombianos.
 Genera un mensaje de bienvenida PERSONALIZADO y natural (máximo 3 oraciones) para este cliente, con tono ${tono}.
 Debe incluir:
 - El clima (${saludo}) al inicio
 - Tu nombre (${AGENT_NAME})
 - "Gracias por escoger a JLC Electronics, la marca de los colombianos" o similar (varía la frase)
-- Terminar preguntando "¿En qué te puedo ayudar?" de forma natural (varía la pregunta)
+- Terminar preguntando "¿En qué te puedo ayudar?" de forma natural (varía la pregunta)${recurrente ? '' : '\n\nIMPORTANTE: el cliente NUNCA ha interactuado antes. NO uses frases como "de nuevo", "volver a saludar", "otra vez", "de vuelta", "otra ocasión". Es su PRIMERA VEZ.'}
 
 NO uses listas numeradas, NO uses "1️⃣", NO muestres opciones.
 Tono cálido, femenino, español colombiano.
 Incluye 1 o 2 emojis de forma natural para dar calidez 😊✨💙.`
 		);
 		const limpio = raw.replace(/["""*]/g, '').trim();
-		if (limpio.length > 20) return limpio;
+		if (limpio.length > 20) {
+			if (/(?:^|\s)(?:de\s+nuevo|volver\s+(?:a\s+)?(?:saludar|verte)|volverte\s+(?:a\s+)?saludar|otra\s+vez|de\s+vuelta|otra\s+ocasi[oó]n)/i.test(limpio)) {
+				return null; // IA dice "de nuevo" aunque el contexto diga primera vez → descartar
+			}
+			return limpio;
+		}
 	} catch {}
 	return null;
 }

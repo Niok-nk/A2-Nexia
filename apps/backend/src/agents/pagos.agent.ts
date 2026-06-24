@@ -1,5 +1,5 @@
 import { IAgent, AgentResponse } from './types.js';
-import { buildUserDataContext, buildGemmaPrompt, cleanResponse, formatHistory } from './helpers.js';
+import { buildUserDataContext, buildGemmaPrompt, cleanResponse, formatHistory, sanitizarURLs } from './helpers.js';
 import { generateResponse } from '../utils/gemini.js';
 
 export class PagosAgent implements IAgent {
@@ -44,10 +44,10 @@ export class PagosAgent implements IAgent {
 		// ── Sin producto → flujo genérico de medios de pago ───────────────
 		const lower = message.toLowerCase();
 
-		// Pregunta sobre soportes de pago
+		// Pregunta sobre soportes de pago → escalar internamente
 		if (/soporte|comprobante|donde\s*env[ií]o|a\s*d[oó]nde\s*mando/i.test(lower)) {
 			return {
-				response: `Envía tu soporte de pago al WhatsApp de cartera: +57 314 422 9949 o +57 315 721 2367, o al correo callcenter5@electromillonaria.co. 😊📄✅`,
+				response: `Envía tu soporte de pago a nuestro WhatsApp +57 318 740 8190 para que nuestro equipo lo verifique y proceda con el despacho de tu pedido. 😊📄✅`,
 				metadata: { agentType: 'pagos' },
 			};
 		}
@@ -67,14 +67,14 @@ export class PagosAgent implements IAgent {
 Entrega la información concreta de cómo pagar. No digas "un asesor te contactará".
 ${userDataCtx}
 Medios de pago:
-1) En línea en https://jlc-electronics.com/ con PSE, tarjeta de crédito o débito.
+1) En línea en https://jlc-electronics.com/ con PSE, tarjeta de crédito o débito, si es de contado se entrega link de producto.
 2) En punto físico (según disponibilidad en la ciudad del cliente).
 3) Crédito/cuotas: se gestiona desde el chat (iniciar solicitud de crédito).
 4) Imagen de medios autorizados: https://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg
 REGLAS:
 - Si el cliente pregunta cómo pagar, muestra la imagen de medios de pago.
 - Mensajes cortos tipo WhatsApp, sin asteriscos.
-- No menciones números de cartera a menos que pregunten por soportes de pago.`,
+- No menciones números de cartera. Si el cliente necesita escalar (envío, despacho, soporte), entrega el número +573187408190.`,
 			ejemplos: [
 				{
 					cliente: '¿Cómo puedo pagar?',
@@ -92,7 +92,7 @@ REGLAS:
 		});
 
 		const raw = await generateResponse(user, system);
-		const response = cleanResponse(raw);
+		const response = sanitizarURLs(cleanResponse(raw), ultimosProductos);
 
 		return {
 			response,

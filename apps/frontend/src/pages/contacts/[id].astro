@@ -182,10 +182,26 @@ const { id } = Astro.params;
                 const stage = extra.stage || '';
                 const cambioStage = stage && stage !== prevStage && prevStage !== '';
                 prevStage = stage;
+
+                let mediaHtml = '';
+                if (m.mediaFileName) {
+                  const mediaUrl = API + '/media/' + m.mediaFileName;
+                  if (m.mediaType === 'image') {
+                    mediaHtml = `<div style="margin-top:0.4rem;"><img src="${mediaUrl}" alt="Imagen" style="max-width:240px;border-radius:var(--radius-md);cursor:pointer;" onclick="window.open('${mediaUrl}','_blank')" /></div>`;
+                  } else if (m.mediaType === 'audio') {
+                    mediaHtml = `<div style="margin-top:0.4rem;"><audio controls style="max-width:220px;height:36px;" src="${mediaUrl}">Tu navegador no soporta audio</audio></div>`;
+                  } else if (m.mediaType === 'video') {
+                    mediaHtml = `<div style="margin-top:0.4rem;"><video controls style="max-width:240px;border-radius:var(--radius-md);" src="${mediaUrl}">Tu navegador no soporta video</video></div>`;
+                  } else if (m.mediaType === 'document') {
+                    mediaHtml = `<div style="margin-top:0.4rem;"><a href="${mediaUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.3rem 0.6rem;background:var(--color-bg-hover);border-radius:var(--radius-md);font-size:0.8rem;">📄 Ver documento</a></div>`;
+                  }
+                }
+
                 return `
               <div class="msg-item ${m.direction === 'INBOUND' ? 'msg-inbound' : 'msg-outbound'}">
                 <div class="msg-bubble ${m.direction === 'INBOUND' ? 'inbound' : 'outbound'}">
                   ${m.body}
+                  ${mediaHtml}
                   <div class="msg-meta">
                     ${cambioStage ? `🔄 ${stageLabel(stage)} · ` : ''}${m.agentType ? `${m.agentType} · ` : ''}${fmtTime(m.sentAt)}
                   </div>

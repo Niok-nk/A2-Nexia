@@ -3,7 +3,25 @@ import prisma from '../db/index.js';
 import { orchestrator } from '../agents/orchestrator.js';
 import { extractAndSaveData } from '../agents/data-extractor.js';
 import { sendMessage, resolvePhoneFromJid } from './whatsapp.js';
+import { verificarCobertura } from '../agents/helpers.js';
+import { downloadMedia } from './media.service.js';
 import logger from '../utils/logger.js';
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+// ─── Debounce buffer for batching rapid messages per contact ────────
+// Cuando un cliente manda varios mensajes seguidos, esperamos
+// DEBOUNCE_MS para agruparlos y responder con el contexto completo.
+// Funciona tanto para WhatsApp (Baileys) como para el chat web.
+const DEBOUNCE_MS = 5000; // 5 segundos
+
+const debounceBatch = new Map<string, {
+	timer: NodeJS.Timeout;
+	entries: Array<{ body: string; mediaInfo: { mediaType: string; mediaMimeType: string; mediaFileName: string } | null }>;
+	realPhone: string | null;
+	firstBody: string;
+	resolveFirst: (value: { response: string; agentType: string }) => void;
+}>();
 
 function safeParseJson(str: string | null | undefined): any {
 	if (!str) return {};
@@ -114,12 +132,32 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 		''
 	).trim();
 
-	// Si no hay texto pero es imagen/video, interpretar como comprobante si hay flujo de pago
+	// Descargar media si el mensaje contiene imagen, audio, video o documento
+	let mediaInfo: { mediaType: string; mediaMimeType: string; mediaFileName: string } | null = null;
+	const hasMedia = !!msg.message?.imageMessage || !!msg.message?.audioMessage ||
+		!!msg.message?.videoMessage || !!msg.message?.documentMessage ||
+		!!msg.message?.stickerMessage || !!msg.message?.ptvMessage;
+
+	if (hasMedia) {
+		mediaInfo = await downloadMedia(msg);
+	}
+
+	// Si no hay texto, determinar el tipo de medio y asignar un body por defecto
 	if (!body) {
-		const esMedia = !!msg.message?.imageMessage || !!msg.message?.videoMessage;
-		if (esMedia) {
-			logger.info({ phone }, 'Media message without caption, treating as comprobante');
-			body = 'ya pague';
+		const esAudio = !!msg.message?.audioMessage || !!msg.message?.ptvMessage;
+		const esDoc = !!msg.message?.documentMessage;
+		const esSticker = !!msg.message?.stickerMessage;
+		const esImagenOVideo = !!msg.message?.imageMessage || !!msg.message?.videoMessage;
+
+		if (esAudio) {
+			body = '[🎵 Mensaje de audio]';
+			logger.info({ phone }, 'Audio message received, body set to placeholder');
+		} else if (esDoc || esSticker) {
+			body = '[📄 Documento]';
+			logger.info({ phone }, 'Document/sticker message received, body set to placeholder');
+		} else if (esImagenOVideo) {
+			logger.info({ phone }, 'Media message without caption');
+			body = '[Imagen]';
 		} else {
 			logger.warn({ phone }, 'Empty message body, ignoring');
 			return;
@@ -129,53 +167,143 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 	logger.info({ phone, realPhone, body: body.slice(0, 80) }, 'Incoming WA message');
 
 	try {
-		const { response, agentType } = await processIncomingMessage(phone, body, realPhone);
-		if (!response) return;
+		// Save the inbound message to DB immediately (for history), then
+		// buffer the orchestration to batch rapid messages from the same contact.
+		const contact = await (prisma.contact as any).upsert({
+			where: { phone },
+			update: {
+				...(realPhone !== phone ? { realPhone } : {})
+			},
+			create: {
+				phone,
+				realPhone: realPhone !== phone ? realPhone : (phone.startsWith('158') && phone.length >= 14 ? null : phone)
+			},
+		});
 
-		// 10. Enviar respuesta por WhatsApp (intentar aunque el status no sea 'connected')
-		//     Baileys puede recibir mensajes incluso cuando isReady = false
-		const sendTo = realPhone || phone;
-		try {
-			await sendMessage(sendTo, response);
-			logger.info({ phone, realPhone, sendTo, agentType }, 'Response sent');
-		} catch (err) {
-			logger.warn({ phone, sendTo, agentType, error: err }, 'Failed to send WhatsApp response');
-		}
+		await prisma.message.create({
+			data: {
+				contactId: contact.id,
+				direction: 'INBOUND',
+				body,
+				...(mediaInfo ?? {}),
+			},
+		});
+
+		// Fire-and-forget: el mensaje se bufferiza y el flush enviará
+		// la respuesta por WhatsApp cuando el timer se cumpla.
+		bufferForDebounce(phone, body, realPhone, mediaInfo ?? null)
+			.then(async (result) => {
+				if (result.agentType === 'BUFFERED' || !result.response) return;
+				await sleep(5000);
+				const sendTo = realPhone || phone;
+				sendMessage(sendTo, result.response)
+					.then(() => logger.info({ phone, sendTo, agentType: result.agentType, batched: true }, 'Debounced WhatsApp response sent'))
+					.catch((err) => logger.warn({ phone, sendTo, error: err }, 'Failed to send debounced WhatsApp response'));
+			})
+			.catch((err) => logger.error({ error: err, phone }, 'bufferForDebounce failed'));
 	} catch (error) {
 		logger.error({ error, phone }, 'Error handling incoming message');
+	}
+}
+
+// ─── Debounce: buffer per-contact messages, process as batch after inactivity ───
+// Retorna un Promise que:
+//   - Para el PRIMER mensaje del batch: resuelve cuando el timer se dispare (3s),
+//     con el resultado combinado de processIncomingMessage.
+//   - Para mensajes SUBSIGUIENTES: resuelve inmediatamente con agentType='BUFFERED'.
+export function bufferForDebounce(
+	phone: string,
+	body: string,
+	realPhone: string | null,
+	mediaInfo: { mediaType: string; mediaMimeType: string; mediaFileName: string } | null
+): Promise<{ response: string; agentType: string }> {
+	const existing = debounceBatch.get(phone);
+	if (existing) {
+		clearTimeout(existing.timer);
+		existing.entries.push({ body, mediaInfo });
+		existing.timer = setTimeout(() => flushDebounceBatch(phone), DEBOUNCE_MS);
+		logger.info({ phone, batchSize: existing.entries.length }, '→ bufferForDebounce: extending existing batch');
+		return Promise.resolve({ response: '', agentType: 'BUFFERED' });
+	}
+
+	logger.info({ phone, body: body.slice(0, 40) }, '→ bufferForDebounce: new batch');
+	return new Promise((resolve) => {
+		const batch = {
+			timer: null as any,
+			entries: [{ body, mediaInfo }],
+			realPhone,
+			firstBody: body,
+			resolveFirst: resolve,
+		};
+		debounceBatch.set(phone, batch);
+		batch.timer = setTimeout(() => flushDebounceBatch(phone), DEBOUNCE_MS);
+	});
+}
+
+async function flushDebounceBatch(phone: string): Promise<void> {
+	const batch = debounceBatch.get(phone);
+	if (!batch) return;
+	debounceBatch.delete(phone);
+
+	logger.info({ phone, batchSize: batch.entries.length }, '→ flushDebounceBatch: processing batch');
+
+	const combinedBody = batch.entries.map(e => e.body).join('\n').trim() || '[Imagen]';
+	const lastWithMedia = [...batch.entries].reverse().find(e => e.mediaInfo);
+	const lastMedia = lastWithMedia?.mediaInfo ?? batch.entries[batch.entries.length - 1].mediaInfo ?? undefined;
+
+	try {
+		const result = await processIncomingMessage(
+			phone, combinedBody, batch.realPhone, lastMedia,
+			{ skipInboundSave: true, firstBodyForSessionCheck: batch.firstBody }
+		);
+		batch.resolveFirst(result);
+		logger.info({ phone, agentType: result.agentType, batchedCount: batch.entries.length }, 'Debounced batch completed');
+	} catch (error) {
+		logger.error({ error, phone }, 'Error flushing debounce batch');
+		batch.resolveFirst({ response: '', agentType: 'SYSTEM' });
 	}
 }
 
 export async function processIncomingMessage(
 	phone: string,
 	body: string,
-	realPhone: string | null = null
+	realPhone: string | null = null,
+	mediaInfo?: { mediaType: string; mediaMimeType: string; mediaFileName: string },
+	options?: { skipInboundSave?: boolean; firstBodyForSessionCheck?: string }
 ): Promise<{ response: string; agentType: string; contactId?: string; leadId?: string }> {
 	try {
-	// 1. Upsert del contacto
-	const contact = await (prisma.contact as any).upsert({
-		where: { phone },
-		update: {
-			...(realPhone !== phone ? { realPhone } : {})
-		},
-		create: { 
-			phone,
-			realPhone: realPhone !== phone ? realPhone : (phone.startsWith('158') && phone.length >= 14 ? null : phone)
-		},
-	});
+	// 1. Upsert del contacto (skip si skipInboundSave, el contacto ya existe)
+	const contact = options?.skipInboundSave
+		? await prisma.contact.findUnique({ where: { phone } })
+		: await (prisma.contact as any).upsert({
+			where: { phone },
+			update: {
+				...(realPhone !== phone ? { realPhone } : {})
+			},
+			create: { 
+				phone,
+				realPhone: realPhone !== phone ? realPhone : (phone.startsWith('158') && phone.length >= 14 ? null : phone)
+			},
+		});
 
-	// 2. Obtener historial reciente (últimos 10 mensajes) ANTES de guardar el INBOUND
-	//    para que el orquestador pueda detectar si es el primer mensaje (hasHistory = false)
+	if (!contact) {
+		logger.error({ phone }, 'Contact not found (skipInboundSave but no contact exists)');
+		return { response: '', agentType: 'SYSTEM' };
+	}
+
+	// 2. Obtener historial reciente
 	const history = await prisma.message.findMany({
 		where: { contactId: contact.id },
 		orderBy: { sentAt: 'desc' },
 		take: 30,
 	});
 
-	// 4. Detectar nueva sesión: cliente que ya tenía conversaciones previas y vuelve a saludar
-	//    Esto crea un nuevo Lead (instancia independiente) para preservar los datos anteriores.
+	// 4. Detectar nueva sesión.
+	//    Cuando los mensajes llegan debounced (skipInboundSave), usamos el primer
+	//    cuerpo original para detectar saludos, no el combinado.
+	const bodyForSessionCheck = options?.firstBodyForSessionCheck || body;
 	const tieneHistorial = history.length > 0;
-	const esNuevaSesion = tieneHistorial && orchestrator.esSaludo(body);
+	const esNuevaSesion = tieneHistorial && orchestrator.esSaludo(bodyForSessionCheck);
 
 	if (esNuevaSesion) {
 		logger.info({ phone, contactId: contact.id }, 'Nueva sesión detectada — se creará un nuevo Lead');
@@ -189,15 +317,19 @@ export async function processIncomingMessage(
 			orderBy: { createdAt: 'desc' },
 		});
 
-	const stageInbound = !esNuevaSesion && lead?.stage ? lead.stage : 'INITIAL';
-	await prisma.message.create({
-		data: {
-			contactId: contact.id,
-			direction: 'INBOUND',
-			body,
-			extra: JSON.stringify({ stage: stageInbound }),
-		},
-	});
+	// Inbound message: skip if already saved individually by handleIncomingMessage
+	if (!options?.skipInboundSave) {
+		const stageInbound = !esNuevaSesion && lead?.stage ? lead.stage : 'INITIAL';
+		await prisma.message.create({
+			data: {
+				contactId: contact.id,
+				direction: 'INBOUND',
+				body,
+				extra: JSON.stringify({ stage: stageInbound }),
+				...mediaInfo,
+			},
+		});
+	}
 
 	// 6. Cargar UserData persistido (datos recolectados por la IA progresivamente)
 	let userDataRecord = lead
@@ -289,6 +421,7 @@ export async function processIncomingMessage(
 		})),
 		userData,
 		nuevaSesion: esNuevaSesion,
+		...(mediaInfo?.mediaFileName ? { mediaFileName: mediaInfo.mediaFileName, mediaType: mediaInfo.mediaType, mediaMimeType: mediaInfo.mediaMimeType } : {}),
 	};
 
 	// Si ya tenemos ciudad guardada, pre-poblamos el contexto
@@ -306,7 +439,7 @@ export async function processIncomingMessage(
 	if (extra?.ultimaBusqueda) context.ultimaBusqueda = extra.ultimaBusqueda;
 	if (extra?.perfilState) context.perfilState = extra.perfilState;
 	if (extra?.productosPreCargados) context.productosPreCargados = extra.productosPreCargados;
-	if (typeof extra?.tieneCobertura === 'boolean') context.tieneCobertura = extra.tieneCobertura;
+	if (extra?.categoriaSugerida) context.categoriaSugerida = extra.categoriaSugerida;
 	if (extra?.modalidad) context.modalidad = extra.modalidad;
 	if (extra?.flujoAnterior) context.flujoAnterior = extra.flujoAnterior;
 	if (extra?.creditoOptions) context.creditoOptions = extra.creditoOptions;
@@ -314,14 +447,39 @@ export async function processIncomingMessage(
 	if (extra?.repuestoData) context.repuestoData = extra.repuestoData;
 	if (extra?.distribuidorData) context.distribuidorData = extra.distribuidorData;
 	if (typeof extra?.creditoStep === 'number') context.creditoStep = extra.creditoStep;
+	if (typeof extra?.ciudadValidada === 'boolean') context.ciudadValidada = extra.ciudadValidada;
+	if (typeof extra?.tieneCobertura === 'boolean') context.tieneCobertura = extra.tieneCobertura;
 	if (extra?.productoURL) context.productoURL = extra.productoURL;
 	if (extra?.productoCompra) context.productoCompra = extra.productoCompra;
 	if (extra?.terminoBusqueda) context.terminoBusqueda = extra.terminoBusqueda;
 	if (extra?.productoPendiente) context.productoPendiente = extra.productoPendiente;
 	if (typeof extra?.pasoWeb === 'number') context.pasoWeb = extra.pasoWeb;
 
+	// Re-verificar cobertura contra la ciudad actual (no usar valor guardado en extra)
+	// para cubrir cambios de ciudad como "corrigo es para Bucaramanga"
+	if (context.ciudad) {
+		const cov = await verificarCobertura(context.ciudad);
+		context.tieneCobertura = cov === 'cobertura';
+	}
+
 	// 7. Enrutar al orquestador
 	const { agentType, response, metadata } = await orchestrator.route(body, context);
+
+	// Si el orquestador describió la imagen, actualizar el mensaje entrante
+	// para que el historial refleje la descripción y el data-extractor pueda usarla
+	if (metadata?.imagenDescripcion && body.includes('[Imagen]')) {
+		const enrichedBody = body.replace('[Imagen]', `[Imagen: ${metadata.imagenDescripcion}]`);
+		const ultimoInbound = await prisma.message.findFirst({
+			where: { contactId: contact.id, direction: 'INBOUND' },
+			orderBy: { sentAt: 'desc' },
+		});
+		if (ultimoInbound) {
+			await prisma.message.update({
+				where: { id: ultimoInbound.id },
+				data: { body: enrichedBody },
+			}).catch(e => logger.warn({ error: e.message }, 'No se pudo enriquecer el body del mensaje INBOUND'));
+		}
+	}
 
 	// 8. Persistir respuesta OUTBOUND
 	const stageActual = !esNuevaSesion && lead?.stage ? lead.stage : 'INITIAL';
@@ -429,6 +587,35 @@ export async function processIncomingMessage(
 			}
 		}
 
+		if (metadata?.notificarPostCompra) {
+			const WA_POSTCOMPRA = process.env.WA_ESCALAMIENTO || '573187408190';
+			const ciudadInfo = metadata?.ciudad || userData.ciudad || 'ciudad no especificada';
+			const productoInfo = metadata?.productoCompra || userData.productoSolicitado || 'producto pendiente';
+			const nombreInfo = userData.nombre || 'nombre pendiente';
+			const notifMsg = `📦 POST-COMPRA\nCliente: ${nombreInfo}\nCiudad: ${ciudadInfo}\nProducto: ${productoInfo}\nTeléfono: ${realPhone}\nSolicita seguimiento de despacho/guía. Requiere asistencia.`;
+			try {
+				const { sendMessage: sendWADirect } = await import('./whatsapp.js');
+				await sendWADirect(WA_POSTCOMPRA, notifMsg);
+				logger.info({ phone, tipo: 'post_compra' }, 'Notificación post-compra enviada');
+			} catch (e) {
+				logger.error({ error: e }, 'Error enviando notificación post-compra');
+			}
+		}
+
+		// ── Notificación de crédito completado ─────────────────────────────
+		if (metadata?.notificarCredito) {
+			const WA_CREDITO = process.env.WA_CREDITO || process.env.WA_ESCALAMIENTO || '573187408190';
+			const cd = metadata?.creditoData || {};
+			const notifMsg = `📋 SOLICITUD DE CRÉDITO\n\nNombre: ${cd.nombres || '?'}\nCédula: ${cd.cedula || '?'}\nCelular: ${cd.celular || '?'}\nDirección: ${cd.direccion || '?'}\nVivienda: ${cd.tipoVivienda || '?'}\nDepartamento: ${cd.departamento || '?'}\nCiudad: ${cd.ciudad || '?'}\nPersonas a cargo: ${cd.personasACargo || '?'}\nActividad: ${cd.empresa || '?'}\nTiempo: ${cd.experienciaLaboral || '?'}\nEstado civil: ${cd.estadoCivil || '?'}\nIngresos: ${cd.ingresosMensuales || '?'}\nGastos: ${cd.gastosMensuales || '?'}\nOtros ingresos: ${cd.otrosIngresos || '?'}\nProducto: ${cd.producto || '?'}\nTeléfono WhatsApp: ${realPhone}\nFecha: ${new Date().toLocaleDateString('es-CO')}`;
+			try {
+				const { sendMessage: sendWADirect } = await import('./whatsapp.js');
+				await sendWADirect(WA_CREDITO, notifMsg);
+				logger.info({ phone, tipo: 'credito' }, 'Notificación de crédito enviada');
+			} catch (e) {
+				logger.error({ error: e }, 'Error enviando notificación de crédito');
+			}
+		}
+
 		if (metadata?.notificarPuntoFisico || metadata?.escalado) {
 			const WA_ESCALAMIENTO = process.env.WA_ESCALAMIENTO || '573187408190';
 			const ciudadInfo = metadata?.ciudad || userData.ciudad || 'ciudad no especificada';
@@ -486,6 +673,11 @@ export async function processIncomingMessage(
 		if (metadata?.presupuesto) ud.presupuesto = metadata.presupuesto;
 
 		const extra = { ...safeParseJson(userDataRecord?.extra) };
+		// Si el orquestador marcó notificarComprobante, forzar VENTA_CERRADA en el pipeline
+		if (metadata?.notificarComprobante) {
+			ud.notificarComprobante = true;
+		}
+
 		const mergedExtra = { ...extra, ...metadata };
 		const udHasData = Object.keys(ud).length > 0;
 
@@ -503,7 +695,16 @@ export async function processIncomingMessage(
 			});
 		}
 
-		// 11. IA extractora de datos (post-procesamiento)
+		// 11a. Si se recibió comprobante via flag (imagen), forzar avance pipeline
+		if (metadata?.notificarComprobante && lead?.stage !== 'VENTA_CERRADA') {
+			await prisma.lead.update({
+				where: { id: lead.id },
+				data: { stage: 'VENTA_CERRADA' },
+			});
+			logger.info({ leadId: lead.id }, 'Pipeline forzado a VENTA_CERRADA por notificarComprobante');
+		}
+
+		// 11b. IA extractora de datos (post-procesamiento)
 		// Analiza el historial completo y extrae datos del cliente que el
 		// agente conversacional pudo haber omitido. También mueve el pipeline.
 		extractAndSaveData(

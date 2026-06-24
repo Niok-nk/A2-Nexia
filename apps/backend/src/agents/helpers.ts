@@ -165,9 +165,9 @@ export function resolverRespuestaPerfil(msg: string, field: string): string {
 	const lower = msg.toLowerCase().trim();
 
 	if (field === 'presupuesto') {
-		if (/menos|bajo|barato|econ[oó]mico/i.test(lower)) return 'bajo';
-		if (/medio|moderado|normal/i.test(lower)) return 'medio';
-		if (/nevecon|alto|sin l[ií]mite|lo que sea|no importa|ilimitado/i.test(lower)) return 'alto';
+		if (/\bmenos\b|\bbajo\b|\bbarato\b|\becon[oó]mico\b/i.test(lower)) return 'bajo';
+		if (/\bmedio\b|\bmoderado\b|\bnormal\b/i.test(lower)) return 'medio';
+		if (/\bnevecon\b|\balto\b|sin l[ií]mite|lo que sea|no importa|\bilimitado\b/i.test(lower)) return 'alto';
 		const valor = extraerNumero(lower);
 		if (valor !== null) {
 			if (valor < 1000000) return 'bajo';
@@ -179,20 +179,66 @@ export function resolverRespuestaPerfil(msg: string, field: string): string {
 	return msg;
 }
 
+/** Distancia de Levenshtein para fuzzy matching de categorías */
+function levenshtein(a: string, b: string): number {
+	const m = a.length, n = b.length;
+	const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+	for (let i = 0; i <= m; i++) dp[i][0] = i;
+	for (let j = 0; j <= n; j++) dp[0][j] = j;
+	for (let i = 1; i <= m; i++) {
+		for (let j = 1; j <= n; j++) {
+			dp[i][j] = a[i - 1] === b[j - 1]
+				? dp[i - 1][j - 1]
+				: 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+		}
+	}
+	return dp[m][n];
+}
+
+const CATEGORIA_KEYWORDS: Record<string, string[]> = {
+	lavadora: ['lavadora', 'lavadoras', 'lavar', 'secadora', 'lavasecadora'],
+	televisor: ['televisor', 'televisores', 'tv', 'pantalla', 'smart'],
+	nevera: ['nevera', 'neveras', 'nevecon', 'nevecones', 'refrigerador'],
+	ventilador: ['ventilador', 'ventiladores', 'acondicionado', 'clima'],
+	congelador: ['congelador', 'congeladores'],
+	vitrina: ['vitrina', 'vitrinas'],
+	exhibidor: ['exhibidor', 'exhibidores'],
+	minibar: ['minibar'],
+	audio: ['parlante', 'parlantes', 'bocina', 'sonido', 'audio', 'bafle', 'torre', 'cabina', 'cabinas'],
+	cocina: ['cafetera', 'freidora', 'hervidor', 'horno', 'licuadora', 'olla', 'arrocera', 'exprimidor'],
+};
+
+function detectarCategoriaFuzzy(lower: string): string | null {
+	const words = lower.split(/\s+/).filter(w => w.length > 3);
+	let bestMatch: { cat: string; dist: number } | null = null;
+	for (const word of words) {
+		for (const [cat, keywords] of Object.entries(CATEGORIA_KEYWORDS)) {
+			for (const kw of keywords) {
+				if (word === kw) continue;
+				const dist = levenshtein(word, kw);
+				if (dist <= 2 && (!bestMatch || dist < bestMatch.dist)) {
+					bestMatch = { cat, dist };
+				}
+			}
+		}
+	}
+	return bestMatch?.cat || null;
+}
+
 export function detectarCategoria(msg: string): string | null {
 	const lower = msg.toLowerCase();
-	if (/lavadora|lavadoras|secadora|lavar/i.test(lower)) return 'lavadora';
-	if (/televisor|televisores|tv|pantalla|smart/i.test(lower)) return 'televisor';
-	if (/nevera|neveras|nevecon|nevecones|refrigerador/i.test(lower)) return 'nevera';
-	if (/ventilador|ventiladores|aire|acondicionado|climatizacion|climatizaci[oó]n|aire acondicionado port[aá]til|clima/i.test(lower)) return 'ventilador';
-	if (/congelador|congeladores/i.test(lower)) return 'congelador';
-	if (/vitrina|vitrinas/i.test(lower)) return 'vitrina';
-	if (/exhibidor|exhibidores/i.test(lower)) return 'exhibidor';
-	if (/minibar|mini\s*bar/i.test(lower)) return 'minibar';
-	if (/cabina|cabinas|parlante|parlantes|torre de sonido|torres de sonido|sonido|audio|bafle|bocina/i.test(lower)) return 'audio';
-	if (/cafetera|cafeteras|freidora|freidoras|hervidor|hervidores|horno|hornos|licuadora|licuadoras|olla|ollas|arrocera|exprimidor/i.test(lower)) return 'cocina';
+	if (/\blavadora\b|\blavadoras\b|\bsecadora\b|\blavar\b/i.test(lower)) return 'lavadora';
+	if (/\btelevisor\b|\btelevisores\b|\btv\b|\bpantalla\b|\bsmart\b/i.test(lower)) return 'televisor';
+	if (/\bnevera\b|\bneveras\b|\bnevecon\b|\bnevecones\b|\brefrigerador\b/i.test(lower)) return 'nevera';
+	if (/\bventilador\b|\bventiladores\b|\bacondicionado\b|\bclimatizaci[oó]n\b|\baire\s+acondicionado\b|\bclima\b/i.test(lower)) return 'ventilador';
+	if (/\bcongelador\b|\bcongeladores\b/i.test(lower)) return 'congelador';
+	if (/\bvitrina\b|\bvitrinas\b/i.test(lower)) return 'vitrina';
+	if (/\bexhibidor\b|\bexhibidores\b/i.test(lower)) return 'exhibidor';
+	if (/\bminibar\b|\bmini\s*bar\b/i.test(lower)) return 'minibar';
+	if (/\bcabina\b|\bcabinas\b|\bparlante\b|\bparlantes\b|\btorre\s+de\s+sonido\b|\btorres\s+de\s+sonido\b|\bsonido\b|\baudio\b|\bbafle\b|\bbocina\b/i.test(lower)) return 'audio';
+	if (/\bcafetera\b|\bcafeteras\b|\bfreidora\b|\bfreidoras\b|\bhervidor\b|\bhervidores\b|\bhorno\b|\bhornos\b|\blicuadora\b|\blicuadoras\b|\bolla\b|\bollas\b|\barrocera\b|\bexprimidor\b/i.test(lower)) return 'cocina';
 	if (CATEGORIAS_RE.test(msg)) return 'otra';
-	return null;
+	return detectarCategoriaFuzzy(lower);
 }
 
 export async function extraerProductoConIA(mensaje: string): Promise<string | null> {
@@ -203,7 +249,7 @@ Producto:`;
 	try {
 		const respuesta = await generateResponse(prompt);
 		const limpio = respuesta.replace(/[.,!?¡¿"'()\-:;]/g, '').trim().toLowerCase();
-		if (limpio && limpio.length >= 2 && !/(?:no se|no pude|ninguno|nada|error|producto)/i.test(limpio)) {
+		if (limpio && limpio.length >= 2 && !/\b(?:no se|no pude|ninguno|nada|error|producto)\b/i.test(limpio)) {
 			return limpio;
 		}
 	} catch { /* fallback silencioso */ }
@@ -219,9 +265,115 @@ export function detectarShortcuts(message: string, categoria: string): Record<st
 			answers.presupuesto = 'alto';
 		}
 	}
-	if (/barato|econ[oó]mico|menos/i.test(lower)) answers.presupuesto = 'bajo';
-	if (/lo que sea|sin l[ií]mite|no importa|indistinto|el mejor|necesario/i.test(lower)) answers.presupuesto = 'alto';
+	if (/\bbarato\b|\becon[oó]mico\b|\bmenos\b/i.test(lower)) answers.presupuesto = 'bajo';
+	if (/lo que sea|sin l[ií]mite|no importa|\bindistinto\b|\bel mejor\b|\bnecesario\b/i.test(lower)) answers.presupuesto = 'alto';
+	if (/\blisto\b|\bver\b/i.test(lower)) answers.presupuesto = 'ver';
+
+	// Detectar presupuesto numérico (ej: "2000000", "2.000.000", "2 millones")
+	if (!answers.presupuesto) {
+		const millones = lower.match(/(\d+)\s*millones?/i);
+		if (millones) {
+			const val = parseInt(millones[1], 10) * 1000000;
+			if (val >= 100000) answers.presupuesto = String(val);
+		}
+	}
+	if (!answers.presupuesto) {
+		const numFormat = lower.match(/(\d{1,3}\.\d{3}(?:\.\d{3})?)/);
+		if (numFormat) {
+			const val = parseInt(numFormat[1].replace(/\./g, ''), 10);
+			if (val >= 100000 && val <= 50000000) answers.presupuesto = numFormat[1];
+		}
+	}
+	if (!answers.presupuesto) {
+		const nums = lower.match(/\b(\d{4,8})\b/);
+		if (nums) {
+			const val = parseInt(nums[1], 10);
+			if (val >= 100000 && val <= 50000000) answers.presupuesto = nums[1];
+		}
+	}
+
 	return answers;
+}
+
+/** Detección centralizada de "ya pagué" / pago confirmado */
+export function detectarPagoConfirmado(texto: string): boolean {
+	return /\b(?:ya pagu[ée]|pago realizado|ya hice el pago|ya transfer[ií]|comprobante enviado|ya consign[ué]|estoy pagando|ya pagando|acabo de pagar|ya hice la transferencia|ya hice el pago|listo el pago|pago listo|pago confirmado)\b/i.test(texto);
+}
+
+/** Resultado de la clasificación con IA antes del procesamiento regex */
+export interface ClasificacionIA {
+	intent: 'consulta_producto' | 'compra' | 'pregunta_especificacion' | 'consulta_general' | 'problema_web' | 'consulta_credito' | 'consulta_pago' | 'pregunta_stock' | 'queja' | 'saludo' | 'irrelevante';
+	categoriaSugerida: string | null;
+	tieneIntencionCompra: boolean;
+	esPreguntaTecnica: boolean;
+	quiereContinuar: boolean;
+	quiereCancelar: boolean;
+	confianza: number;
+}
+
+/** Usa IA para clasificar la intención del mensaje ANTES del procesamiento regex. */
+export async function clasificarIntencionConIA(message: string, history: string): Promise<ClasificacionIA | null> {
+	try {
+		const prompt = `Analiza el mensaje del cliente y responde SOLO con JSON sin explicación:
+
+Mensaje: "${message.replace(/"/g, "'")}"
+${history ? `Historial:\n${history}` : ''}
+
+Responde este JSON exacto:
+{
+  "intent": "consulta_producto" | "compra" | "pregunta_especificacion" | "consulta_general" | "problema_web" | "consulta_credito" | "consulta_pago" | "pregunta_stock" | "queja" | "saludo" | "irrelevante",
+  "categoriaSugerida": "lavadora" | "nevera" | "televisor" | "parlante" | "congelador" | "ventilador" | "cocina" | "audio" | null,
+  "tieneIntencionCompra": true/false,
+  "esPreguntaTecnica": true/false,
+  "quiereContinuar": true/false,
+  "quiereCancelar": true/false,
+  "confianza": 0.0-1.0
+}
+
+REGLAS:
+- "compra" = dice "lo quiero", "compro", "pagar", "me gusta" + producto definido
+- "pregunta_especificacion" = pregunta medidas, capacidad, color, características
+- "consulta_producto" = busca productos, pregunta disponibilidad
+- Si es una respuesta positiva a una pregunta anterior ("sí", "dale", "ok", "bueno") → quiereContinuar: true
+- Si es negación ("no", "no quiero", "cancelar") → quiereCancelar: true
+- confianza < 0.5 = no estás seguro, el regex resolverá mejor`;
+
+		const raw = await generateResponse(prompt);
+		const jsonMatch = raw.match(/\{[\s\S]*\}/);
+		if (!jsonMatch) return null;
+		return JSON.parse(jsonMatch[0]) as ClasificacionIA;
+	} catch {
+		return null;
+	}
+}
+
+/** Usa IA para refinar una respuesta genérica del regex y hacerla más natural. */
+export async function refinarRespuestaConIA(
+	message: string,
+	currentResponse: string,
+	context: { categoria?: string; producto?: string; tieneProductos?: boolean; ciudad?: string; history?: string }
+): Promise<string | null> {
+	try {
+		const prompt = `Eres Sara, asesora de JLC Electronics. Refina esta respuesta para que suene natural, cálida y personalizada.
+
+Mensaje del cliente: "${message.replace(/"/g, "'")}"
+Respuesta actual: "${currentResponse.replace(/"/g, "'")}"
+Contexto: ${Object.entries(context).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ')}
+
+REGLAS:
+- Responde SOLO el texto refinado, sin explicaciones ni JSON.
+- Máximo 2 frases. Máximo 1 emoji.
+- Español colombiano natural.
+- Si la respuesta actual está bien, responde exactamente "OK".
+- Personaliza si sabes la categoría/producto.`;
+
+		const refined = await generateResponse(prompt);
+		const clean = refined?.trim();
+		if (!clean || clean === 'OK') return null;
+		return clean;
+	} catch {
+		return null;
+	}
 }
 
 export function obtenerTerminoBusquedaDesdePerfil(categoria: string, answers: Record<string, string>): string {
@@ -573,7 +725,7 @@ FORMATO DE RESPUESTA OBLIGATORIO:
 - Si no estás seguro de algo, di "déjame verificar" en vez de inventar.
 - Tu respuesta empieza directamente con el mensaje al cliente.
 	- Usa un tono cálido como si fueras una amiga que trabaja en la tienda.
-	- Incluye emojis de forma natural y variada para hacer la conversación más cálida e interactiva (😊💪🎉✨💙🔥👌📋📦🚚✅❄️📺🔧🛒💳).`;
+	- Incluye emojis de forma natural y variada para hacer la conversación más cálida e interactiva (😊🎉✨💙🔥👌📋📦🚚✅❄️📺🔧🛒💳).`;
 
 	const ejemplosTexto = opts.ejemplos
 		.map((e) => `Cliente: ${e.cliente}\nAsistente: ${e.asistente}`)
@@ -597,28 +749,39 @@ export const DEPARTAMENTOS_COBERTURA = [
 ];
 
 export const CIUDADES_COBERTURA: string[] = [
-	'pasto', 'tumaco', 'ipiales', 'la union', 'la unión', 'samaniego',
-	'túquerres', 'tuquerres', 'barbacoas', 'el charco', 'sandoná', 'sandona',
-	'popayán', 'popayan', 'santander de quilichao', 'miranda', 'patía', 'patia',
-	'puerto tejada', 'piendamó', 'piendamo', 'el tambo', 'cajibío', 'cajibio',
-	'mocoa', 'puerto asís', 'puerto asis', 'orito', 'sibundoy', 'valle del guamuez',
-	'san miguel', 'villagarzón', 'villagarzon',
-	'neiva', 'pitalito', 'garzón', 'garzon', 'la plata', 'campoalegre',
-	'rivera', 'palermo', 'gigante', 'isnos', 'san agustín', 'san agustin',
-	'cali', 'buenaventura', 'palmira', 'tuluá', 'tulua', 'buga',
-	'cartago', 'jamundí', 'jamundi', 'yumbo', 'florida', 'pradera',
-	'zarzal', 'la victoria', 'roldanillo', 'el cerrito',
+	// Valle del Cauca
+	'cali', 'yumbo', 'jamundí', 'jamundi', 'palmira', 'buga', 'tuluá', 'tulua',
+	'santa helena',
+	// Cauca
+	'popayán', 'popayan', 'silvia', 'cajibío', 'cajibio', 'piendamó', 'piendamo',
+	'timbío', 'timbio', 'morales', 'el tambo', 'bolívar', 'bolivar',
+	'patía', 'patia', 'el bordo', 'suárez', 'suarez', 'caloto',
+	'mondomo', 'la sierra', 'villa gloria',
+	// Nariño
+	'pasto', 'ipiales', 'tumaco', 'túquerres', 'tuquerres',
+	'samaniego', 'sandoná', 'sandona', 'la union', 'la unión',
+	'san bernardo', 'bahía solano', 'bahia solano', 'consacá', 'consaca',
+	'ancuya', 'linares', 'ricaurte', 'iles', 'san vicente',
+	'cumbal', 'guachucal', 'pupiales', 'policarpa', 'sotomayor',
+	'chachagüi', 'chachagui', 'buesaco', 'sibundoy', 'santiago',
+	// Putumayo
+	'puerto asís', 'puerto asis', 'mocoa', 'orito',
+	'la hormiga', 'valle del guamuez', 'villagarzón', 'villagarzon',
+	'puerto caicedo', 'puerto guzmán', 'puerto guzman', 'el dorado',
+	// Huila
+	'pitalito', 'san agustín', 'san agustin', 'acevedo', 'garzón', 'garzon',
+	// Bogotá D.C.
+	'bogotá', 'bogota',
 ];
 
 export async function verificarCobertura(lugar: string): Promise<'cobertura' | 'sin_cobertura' | 'desconocido'> {
 	if (!lugar) return 'desconocido';
 	const l = lugar.toLowerCase().trim();
 
-	if (DEPARTAMENTOS_COBERTURA.some((d) => l.includes(d))) return 'cobertura';
 	if (CIUDADES_COBERTURA.some((c) => l.includes(c))) return 'cobertura';
 
 	const fueraCobertura = [
-		'bogota', 'bogotá', 'medellin', 'medellín', 'barranquilla', 'cartagena',
+		'medellin', 'medellín', 'barranquilla', 'cartagena',
 		'cucuta', 'cúcuta', 'bucaramanga', 'pereira', 'manizales', 'ibague', 'ibagué',
 		'santa marta', 'villavicencio', 'monteria', 'montería', 'sincelejo',
 		'valledupar', 'tunja', 'armenia', 'quibdo', 'quibdó', 'riohacha',
@@ -634,24 +797,16 @@ export async function verificarCobertura(lugar: string): Promise<'cobertura' | '
 }
 
 export const COBERTURA_DESCRIPCION = `
-JLC Electronics tiene cobertura de envío gratis en los siguientes departamentos y municipios de Colombia:
+JLC Electronics tiene cobertura de envío gratis únicamente en los siguientes municipios de Colombia:
 
-DEPARTAMENTOS CON COBERTURA TOTAL:
-- Nariño (completo)
-- Cauca (completo)
-- Putumayo (completo)
-- Huila (completo)
-- Valle del Cauca (completo)
+Valle del Cauca: Cali, Yumbo, Jamundí, Palmira, Buga, Tuluá, Santa Helena
+Cauca: Popayán, Silvia, Cajibío, Piendamó, Timbío, Morales, El Tambo, Bolívar, Patía (El Bordo), Suárez, Caloto, Mondomo, La Sierra, Villa Gloria
+Nariño: Pasto, Ipiales, Tumaco, Túquerres, Samaniego, Sandoná, La Unión, San Bernardo, Bahía Solano, Consacá, Ancuya, Linares, Ricaurte, Iles, San Vicente, Cumbal, Guachucal, Pupiales, Policarpa, Sotomayor, Chachagüí, Buesaco, Sibundoy, Santiago
+Putumayo: Puerto Asís, Mocoa, Orito, La Hormiga (Valle del Guamuez), Villagarzón, Puerto Caicedo, Puerto Guzmán, El Dorado
+Huila: Pitalito, San Agustín, Acevedo, Garzón
+Bogotá D.C.
 
-MUNICIPIOS PRINCIPALES CUBIERTOS:
-Nariño: Pasto, Tumaco, Ipiales, La Unión, Samaniego, Túquerres, Barbacoas, El Charco, Sandoná
-Cauca: Popayán, Santander de Quilichao, Miranda, Patía, Puerto Tejada, Piendamó, El Tambo, Cajibío
-Putumayo: Mocoa, Puerto Asís, Orito, Sibundoy, Valle del Guamuez, San Miguel, Villagarzón
-Huila: Neiva, Pitalito, Garzón, La Plata, Campoalegre, Rivera, Palermo, Gigante, Isnos, San Agustín
-Valle del Cauca: Cali, Buenaventura, Palmira, Tuluá, Buga, Cartago, Jamundí, Yumbo, Florida, Pradera, Zarzal, La Victoria, Roldanillo, El Cerrito
-
-CUBRIMOS TODO EL DEPARTAMENTO, no solo los municipios listados.
-NO tenemos cobertura en otros departamentos como Antioquia, Bogotá/Cundinamarca, Santander, Boyacá, etc.
+NO tenemos cobertura en otros municipios. Si un municipio no está en esta lista, no tiene cobertura.
 `.trim();
 
 const IA_CACHE = new Map<string, { result: any; expires: number }>();
@@ -762,7 +917,7 @@ export async function extraerCiudadDelMensaje(mensaje: string): Promise<string |
 	const lower = mensaje.toLowerCase();
 
 	const patronesPrefijo = [
-		/(?:soy de|estoy en|vivo en|escribo desde|desde|ciudad[:\s]+|ubicado en|me encuentro en)\s+([a-záéíóúñ\s]{3,30})/i,
+		/(?:soy de|estoy en|vivo en|escribo desde|desde|ciudad[:\s]+|ubicado en|me encuentro en)\s+([a-záéíóúñü\s]{3,30})/i,
 	];
 
 	for (const patron of patronesPrefijo) {
@@ -779,7 +934,7 @@ export async function extraerCiudadDelMensaje(mensaje: string): Promise<string |
 		if (exactMatch) return trimmed;
 
 		const words = trimmed.split(/\s+/);
-		if (words.length <= 3 && words.every((w) => /^[a-záéíóúñ]+$/i.test(w))) {
+		if (words.length <= 3 && words.every((w) => /^[a-záéíóúñü]+$/i.test(w))) {
 			const algunaCoincide = words.some((w) =>
 				w.length > 2 && allCities.some((c) => c.includes(w) || w.includes(c))
 			);
@@ -788,4 +943,21 @@ export async function extraerCiudadDelMensaje(mensaje: string): Promise<string |
 	}
 
 	return null;
+}
+
+export function sanitizarURLs(texto: string, productos: any[]): string {
+	const approvedUrls = new Set<string>();
+	for (const p of productos) {
+		if (p?.permalink) {
+			approvedUrls.add(p.permalink.replace(/\/+$/, ''));
+		}
+	}
+	approvedUrls.add('https://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg');
+	approvedUrls.add('https://jlc-electronics.com/');
+
+	return texto.replace(/https?:\/\/[^\s<>"']+/g, (url) => {
+		const clean = url.replace(/[.,;:!?)]*$/, '').replace(/\/+$/, '');
+		if (approvedUrls.has(clean)) return url;
+		return '';
+	}).replace(/ {2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }

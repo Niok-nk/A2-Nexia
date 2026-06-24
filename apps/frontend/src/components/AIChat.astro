@@ -18,7 +18,21 @@ const API = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
     </div>
     <div id="chat-messages" class="chat-messages"></div>
     <div class="chat-input-area">
-      <input type="text" id="chat-input" placeholder="Escribe un mensaje..." autocomplete="off" />
+      <button id="chat-image-btn" class="chat-image-btn" title="Adjuntar imagen" aria-label="Adjuntar imagen">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <circle cx="8.5" cy="8.5" r="1.5"></circle>
+          <polyline points="21 15 16 10 5 21"></polyline>
+        </svg>
+      </button>
+      <input type="file" id="chat-file-input" accept="image/*" style="display:none" />
+      <div class="chat-input-wrapper">
+        <input type="text" id="chat-input" placeholder="Escribe un mensaje..." autocomplete="off" />
+        <div id="chat-image-preview" class="chat-image-preview hidden">
+          <img id="chat-image-preview-img" alt="Preview" />
+          <button id="chat-image-preview-remove" class="chat-image-preview-remove">&times;</button>
+        </div>
+      </div>
       <button id="chat-send" class="chat-send">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -37,6 +51,13 @@ const API = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
   const messagesEl = document.getElementById('chat-messages');
   const inputEl = document.getElementById('chat-input');
   const sendBtn = document.getElementById('chat-send');
+  const imageBtn = document.getElementById('chat-image-btn');
+  const fileInput = document.getElementById('chat-file-input');
+  const previewEl = document.getElementById('chat-image-preview');
+  const previewImg = document.getElementById('chat-image-preview-img');
+  const previewRemove = document.getElementById('chat-image-preview-remove');
+
+  let pendingImage = null; // { base64, mimeType }
 
   toggle?.addEventListener('click', () => {
     windowEl.classList.toggle('hidden');
@@ -49,31 +70,81 @@ const API = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
     windowEl.classList.add('hidden');
   });
 
-  function addMessage(text, isUser = false) {
+  imageBtn?.addEventListener('click', () => fileInput?.click());
+  fileInput?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result;
+      if (typeof result === 'string') {
+        const base64 = result.split(',')[1];
+        pendingImage = { base64, mimeType: file.type };
+        previewImg.src = result;
+        previewEl.classList.remove('hidden');
+        inputEl?.focus();
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  });
+
+  previewRemove?.addEventListener('click', () => {
+    pendingImage = null;
+    previewEl.classList.add('hidden');
+    previewImg.src = '';
+  });
+
+  function addMessage(text, isUser = false, imageDataUrl = null) {
     const div = document.createElement('div');
     div.className = `chat-message ${isUser ? 'user' : 'ai'}`;
-    div.textContent = text;
+
+    if (imageDataUrl) {
+      const img = document.createElement('img');
+      img.src = imageDataUrl;
+      img.style.maxWidth = '100%';
+      img.style.maxHeight = '200px';
+      img.style.borderRadius = '8px';
+      img.style.display = 'block';
+      img.style.marginBottom = '6px';
+      div.appendChild(img);
+    }
+
+    if (text) {
+      const p = document.createElement('span');
+      p.textContent = text;
+      div.appendChild(p);
+    }
+
     messagesEl?.appendChild(div);
     messagesEl?.scrollTo({ top: messagesEl.scrollHeight, behavior: 'smooth' });
   }
 
   async function sendMessage() {
     const text = inputEl?.value?.trim();
-    if (!text) return;
+    if (!text && !pendingImage) return;
 
-    addMessage(text, true);
+    addMessage(text, true, pendingImage ? `data:${pendingImage.mimeType};base64,${pendingImage.base64}` : null);
     inputEl.value = '';
+
+    const body = {
+      phone: '573007215438',
+      message: text || '[Imagen]',
+    };
+    if (pendingImage) {
+      body.image = pendingImage.base64;
+      body.imageMimeType = pendingImage.mimeType;
+    }
+
+    pendingImage = null;
+    previewEl.classList.add('hidden');
+    previewImg.src = '';
 
     try {
       const res = await fetch(`${API}/whatsapp/chat`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          phone: '573007215438',
-          message: text
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();
@@ -91,6 +162,30 @@ const API = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
   sendBtn?.addEventListener('click', sendMessage);
   inputEl?.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage();
+  });
+
+  inputEl?.addEventListener('paste', (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const result = ev.target?.result;
+          if (typeof result === 'string') {
+            const base64 = result.split(',')[1];
+            pendingImage = { base64, mimeType: file.type };
+            previewImg.src = result;
+            previewEl.classList.remove('hidden');
+          }
+        };
+        reader.readAsDataURL(file);
+        break;
+      }
+    }
   });
 </script>
 
@@ -246,6 +341,73 @@ const API = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
   .chat-send:hover {
     background: var(--color-primary-dark);
+  }
+
+  .chat-image-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .chat-image-btn:hover {
+    background: var(--color-bg-hover);
+    color: var(--color-primary);
+  }
+
+  .chat-input-wrapper {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chat-input-wrapper input {
+    width: 100%;
+  }
+
+  .chat-image-preview {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    margin-bottom: 4px;
+    background: var(--color-bg-hover);
+    border-radius: 8px;
+    max-width: 160px;
+  }
+
+  .chat-image-preview img {
+    max-height: 48px;
+    max-width: 80px;
+    border-radius: 4px;
+    object-fit: cover;
+  }
+
+  .chat-image-preview-remove {
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 2px;
+  }
+
+  .chat-image-preview-remove:hover {
+    color: #e74c3c;
+  }
+
+  .chat-image-preview.hidden {
+    display: none;
   }
 
   @media (max-width: 480px) {

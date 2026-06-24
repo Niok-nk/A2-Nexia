@@ -9,7 +9,27 @@ import {
 	DistribuidoresAgent,
 	PagosAgent,
 } from './agents.js';
-import { generateResponse } from '../utils/gemini.js';
+import { generateResponse, generateMultimodalResponse } from '../utils/gemini.js';
+import { cleanResponse } from './helpers.js';
+import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
+import fs from 'fs/promises';
+import path from 'path';
+
+function safeMediaPath(fileName: string): string | null {
+	const base = path.basename(fileName);
+	if (base !== fileName || base.includes('..')) return null;
+	return path.join(process.cwd(), 'media', base);
+}
+
+function sanitizarNumeros(texto: string): string {
+	const AUTORIZADO = '3187408190';
+	const patron = /(\+?57[\s-]*)?\b3\d{2}[\s-]*\d{3}[\s-]*\d{4}\b/g;
+	return texto.replace(patron, (match) => {
+		const soloDigitos = match.replace(/\D/g, '').replace(/^57/, '');
+		if (soloDigitos === AUTORIZADO) return match;
+		return '+57 318 740 8190';
+	});
+}
 
 type IntentKey =
 	| 'bienvenida'
@@ -135,7 +155,7 @@ export class Orchestrator {
 		if (/\b(vacante|empleo|trabajo|hoja de vida|cv|curriculum|currículum|aplicar a|aplicar al)\b/.test(m)) {
 			return 'vacantes';
 		}
-		if (/\b(servicio t[eé]cnico|reparaci[oó]n|reparar|mantenimiento|no enciende|no funciona|no enfr[ií]a|no centrifuga|da[ñn]ado|da[ñn]ada|falla|aver[ií]a|garant[ií]a)\b/.test(m)) {
+		if (/\b(servicio t[eé]cnico|reparaci[oó]n|reparar|mantenimiento|no enciende|no funciona|no enfr[ií]a|no centrifuga|da[ñn]ado|da[ñn]ada|falla|aver[ií]a)\b/.test(m)) {
 			return 'servicio_tecnico';
 		}
 		if (/\b(repuesto|repuestos|pieza|piezas|accesorio|accesorios|filtro|empaque|resistencia|motor de)\b/.test(m)) {
@@ -147,7 +167,7 @@ export class Orchestrator {
 		if (/\b(c[oó]mo pago|d[oó]nde pago|medio de pago|medios de pago|formas de pago|forma de pago|pse|pagar con tarjeta|transferencia|consignar|consignaci[oó]n|soporte de pago|comprobante de pago)\b/.test(m)) {
 			return 'pagos';
 		}
-		if (/\b(comprar|cotizar|cotizaci[oó]n|precio|cu[aá]nto cuesta|cu[aá]nto vale|televisor|televisores|tv|nevera|neveras|nevecones?|lavadora|lavadoras|congeladores?|exhibidores?|minibar|freidora|freidoras|horno|hornos|licuadora|licuadoras|cafeteras?|hervidor|ventiladores?|cocina|parlante|parlantes|sonido|audio|video|refrigeraci[oó]n|electrodom[eé]stico|electrodom[eé]sticos|contado|cr[eé]dito|financiar|cuotas)\b/.test(m)) {
+		if (/\b(comprar|cotizar|cotizaci[oó]n|precio|cu[aá]nto cuesta|cu[aá]nto vale|televisor|televisores|tv|nevera|neveras|nevecones?|lavadora|lavadoras|congeladores?|exhibidores?|minibar|freidora|freidoras|horno|hornos|licuadora|licuadoras|cafeteras?|hervidor|ventiladores?|cocina|parlante|parlantes|sonido|audio|video|refrigeraci[oó]n|electrodom[eé]stico|electrodom[eé]sticos|contado|cr[eé]dito|financiar|cuotas|profesional|profesionales|tuber[ií]a|tuber[ií]as|calidad|garant[ií]a|negocio)\b/.test(m)) {
 			return 'ventas';
 		}
 
@@ -167,7 +187,7 @@ REGLAS:
 - "servicio_tecnico" cubre: reparación, mantenimiento, garantía, equipo dañado o que no funciona.
 - "repuestos" cubre: piezas, partes, accesorios, filtros, empaques.
 - "vacantes" cubre: trabajo, empleo, hoja de vida.
-- "distribuidores" cubre: ser distribuidor, venta al mayor, mayorista.
+- "distribuidores" cubre: ser distribuidor, venta al mayor, mayorista. NO clasificar como distribuidores si el cliente dice "para negocio" o "uso comercial" refiriéndose al uso del producto (eso es ventas).
 - "pagos" cubre: medios de pago, PSE, tarjeta, cómo pagar una cuota, envío de soportes.
 
 Ejemplos:
@@ -243,6 +263,172 @@ Categoría:`;
 	): Promise<{ agentType: string; response: string; metadata?: Record<string, any> }> {
 		const hasHistory = Array.isArray(context?.history) && context.history.length > 0 && context?.nuevaSesion !== true;
 
+		// ─── IMAGEN DEL CLIENTE ────────────────────────────────────────────
+		// 1) Analiza la imagen → descripción + tipo (producto/comprobante/daño/hoja de vida/otro)
+		// 2) Guarda la info para la BD
+		// 3) Enruta al agente correcto con el mensaje enriquecido
+		if (context?.mediaFileName) {
+			const mediaPath = safeMediaPath(context.mediaFileName);
+			if (!mediaPath) {
+				return {
+					agentType: 'ventas',
+					response: 'Disculpa, no pude procesar la imagen. ¿Puedes intentar de nuevo? 😊',
+					metadata: { flujo: context?.flujo || null, agentType: 'ventas' },
+				};
+			}
+			try {
+				const imgBuffer = await fs.readFile(mediaPath);
+				const base64 = imgBuffer.toString('base64');
+				const mime = context.mediaMimeType || 'image/jpeg';
+				const enFlujoPago = ['esperando_comprobante', 'pago_medios', 'pago_web', 'pago_completado', 'seleccion_pago'].includes(context?.flujo);
+
+				// ── PASO 1: Analizar la imagen → JSON estructurado ────────────
+				// Una sola llamada de visión que clasifica y describe.
+				const systemAnalisis = `Analiza la imagen de un cliente de una tienda de electrodomésticos (JLC Electronics).
+Responde SOLO con JSON válido, sin markdown ni texto extra:
+{"tipo":"...","descripcion":"...","producto":"...","textoVisible":"..."}
+
+Donde:
+- tipo: uno de "comprobante_pago" | "producto" | "producto_dañado" | "hoja_de_vida" | "documento" | "otro"
+  * "comprobante_pago": transferencia, recibo, pantallazo de pago, Nequi, PSE, consignación.
+  * "producto": foto de un electrodoméstico que el cliente quiere comprar o consultar (nevera, lavadora, TV, vitrina, parlante, etc.).
+  * "producto_dañado": electrodoméstico con falla visible, roto, con error en pantalla, o el cliente reporta daño.
+  * "hoja_de_vida": CV, currículum.
+  * "documento": cédula, factura u otro documento.
+  * "otro": cualquier otra cosa.
+- descripcion: 1 frase corta de qué muestra la imagen.
+- producto: si tipo es "producto" o "producto_dañado", el tipo de electrodoméstico identificado (ej "vitrina refrigerante", "lavadora", "nevera no frost"). Si no aplica, "".
+- textoVisible: número de transacción/referencia si es comprobante, o texto relevante visible. Si no hay, "".`;
+
+				let analisis: any = {};
+				try {
+					const rawAnalisis = await generateMultimodalResponse(
+						message === '[Imagen]' ? 'Analiza esta imagen' : message,
+						base64, mime, systemAnalisis
+					);
+					const jsonMatch = rawAnalisis.match(/\{[\s\S]*\}/);
+					if (jsonMatch) analisis = JSON.parse(jsonMatch[0]);
+				} catch { /* análisis falló, seguir con heurística */ }
+
+				const tipoImg = analisis?.tipo || (enFlujoPago ? 'comprobante_pago' : 'otro');
+
+				// ── PASO 2: COMPROBANTE DE PAGO → cerrar venta ────────────────
+				if (tipoImg === 'comprobante_pago' || enFlujoPago) {
+					const systemPago = `Eres Sara, asesora de JLC Electronics. El cliente envió un comprobante de pago. Agradécele cálidamente y dile que el pago quedó registrado y que el equipo lo verifica para despachar. Máximo 2 frases, 1 emoji.`;
+					const raw = await generateMultimodalResponse('Confirma recepción del comprobante', base64, mime, systemPago);
+					const response = sanitizarNumeros(cleanResponse(raw));
+					return {
+						agentType: 'ventas',
+						response,
+						metadata: {
+							flujo: null,
+							agentType: 'ventas',
+							notificarComprobante: true,
+							pipelineStage: 'VENTA_CERRADA',
+							comprobanteRef: analisis?.textoVisible || undefined,
+						},
+					};
+				}
+
+				// ── PASO 3: PRODUCTO DAÑADO → servicio técnico ────────────────
+				if (tipoImg === 'producto_dañado') {
+					const enriched = `${message === '[Imagen]' ? '' : message + ' '}[El cliente envió una foto de un producto con falla: ${analisis?.descripcion || 'electrodoméstico dañado'}${analisis?.producto ? ` (${analisis.producto})` : ''}]`;
+					const result = await this.agents.servicio_tecnico.handle(enriched.trim(), context);
+					return {
+						agentType: 'servicio_tecnico',
+						response: result.response,
+						metadata: {
+							...result.metadata,
+							imagenTipo: 'producto_dañado',
+							imagenDescripcion: analisis?.descripcion,
+						},
+					};
+				}
+
+				// ── PASO 4: HOJA DE VIDA → vacantes ───────────────────────────
+				if (tipoImg === 'hoja_de_vida') {
+					const enriched = `${message === '[Imagen]' ? '' : message + ' '}[El cliente envió su hoja de vida]`;
+					const result = await this.agents.vacantes.handle(enriched.trim(), context);
+					return {
+						agentType: 'vacantes',
+						response: result.response,
+						metadata: { ...result.metadata, imagenTipo: 'hoja_de_vida' },
+					};
+				}
+
+				// ── PASO 5: PRODUCTO → ventas con catálogo ────────────────────
+				if (tipoImg === 'producto') {
+					// Buscar en WooCommerce usando el producto identificado por visión
+					let catProducts: any[] = [];
+					const terminoBusqueda = analisis?.producto || (message === '[Imagen]' ? 'producto' : message.slice(0, 60));
+					try {
+						catProducts = await wooCommerceService.searchProducts(terminoBusqueda, 10);
+					} catch { /* sin catalogo */ }
+
+					const catalogoStr = catProducts.length > 0
+						? catProducts.map((p: any) => `- ${p.name} | $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n')
+						: 'No se encontró ese producto en el catálogo.';
+
+					const yaTieneCiudad = !!(context?.ciudad && context?.ciudadValidada);
+
+					const systemDirect = `Eres Sara, asesora de JLC Electronics Colombia, la marca de los colombianos.
+
+ESTILO: mensajes MUY cortos (máximo 2 frases), máximo 1 emoji, tono cálido y femenino. NO te presentes de nuevo ni saludes largo.
+
+El cliente envió una foto de: ${analisis?.descripcion || 'un electrodoméstico'}.
+INSTRUCCIONES:
+- Nombra el producto usando SOLO el catálogo de abajo. NO inventes precios ni disponibilidad.
+- Si no está en el catálogo, dilo con naturalidad y ofrece ayudar a buscar algo similar.
+- NUNCA afirmes "envío gratis a toda Colombia"; la cobertura depende de la ciudad.
+${yaTieneCiudad
+	? `- El cliente está en ${context.ciudad}. Confirma el producto y pregunta si desea continuar con la compra.`
+	: `- AÚN no sabemos la ciudad. Confirma el producto y pregunta UNA sola vez: "¿Desde qué ciudad nos escribes?".`}
+
+CATÁLOGO:
+${catalogoStr}
+
+Responde corto.`;
+					const raw = await generateMultimodalResponse(message, base64, mime, systemDirect);
+					const responseText = sanitizarNumeros(cleanResponse(raw));
+
+					const productoDetectado = catProducts[0];
+					const metaImg: Record<string, any> = {
+						agentType: 'ventas',
+						imagenTipo: 'producto',
+						imagenDescripcion: analisis?.descripcion,
+						...(!productoDetectado ? { productoSolicitado: analisis?.producto || undefined } : {}),
+						...(productoDetectado
+							? {
+								ultimaBusqueda: { results: catProducts.slice(0, 6), categoria: null, productoIndex: 0 },
+							}
+							: {}),
+					};
+
+					if (yaTieneCiudad) {
+						metaImg.flujo = context?.flujo || null;
+						metaImg.ciudad = context.ciudad;
+						metaImg.ciudadValidada = true;
+						metaImg.tieneCobertura = context?.tieneCobertura;
+					} else {
+						metaImg.flujo = 'esperando_ciudad';
+					}
+
+					return { agentType: 'ventas', response: responseText, metadata: metaImg };
+				}
+
+				// ── PASO 6: OTRO/DOCUMENTO → enriquecer y clasificar normal ──
+				// No interceptamos: dejamos que el clasificador decida el agente,
+				// pero inyectamos la descripción de la imagen en el mensaje.
+				if (analisis?.descripcion) {
+					context.imagenDescripcion = analisis.descripcion;
+					context.mensajeEnriquecido = `${message === '[Imagen]' ? '' : message + ' '}[Imagen recibida: ${analisis.descripcion}]`.trim();
+				}
+				// cae al flujo normal de clasificación más abajo
+			} catch {
+				// Si falla la lectura/análisis, continuar con el flujo normal
+			}
+		}
+
 		// ─── SALIDA DE EMERGENCIA (ESCAPE HATCH) ───
 		// Si el usuario quiere cancelar o cambiar de tema, rompemos cualquier flujo activo
 		const esEscape = /\b(?:cancelar|salir|volver|inicio|men[uú]|asesor|humano|otra cosa|ya no|no quiero)\b/i.test(message);
@@ -269,8 +455,8 @@ Categoría:`;
 		const esPausado = flujoActivo === 'credito_pausado' || flujoActivo === 'pago_pausado' || flujoActivo === 'perfilando_pausado' || flujoActivo === 'esperando_ciudad_pausado' || flujoActivo === 'esperando_modalidad_pausado' || flujoActivo === 'repuestos_pausado';
 		if (flujoActivo && esPausado) {
 			const lowerMsg = message.toLowerCase().trim();
-			const quiereContinuar = /s[ií]|dale|ok|bueno|claro|por favor|seguir|continuar|reproducir/i.test(lowerMsg);
-			const quiereCancelar = /no|cancelar|salir|ya no|no quiero/i.test(lowerMsg);
+			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b|\breproducir\b/i.test(lowerMsg);
+			const quiereCancelar = /\bno\b|cancelar|salir|\bya\s+no\b|\bno\s+quiero\b/i.test(lowerMsg);
 			
 			if (!quiereContinuar && !quiereCancelar) {
 				fueInterrumpido = true;
@@ -309,7 +495,7 @@ Categoría:`;
 				intent = await this.classifyIntent(message, hasHistory);
 			}
 		} else {
-			intent = await this.classifyIntent(message, hasHistory);
+			intent = await this.classifyIntent(context?.mensajeEnriquecido || message, hasHistory);
 
 			// ── CORRECCIÓN: Si el intent es 'pagos' pero hay un producto activo
 			// en el contexto de ventas, mantener en ventas para que el flujo de
@@ -319,8 +505,12 @@ Categoría:`;
 			}
 		}
 
+		// Mensaje a usar: si la imagen fue tipo "otro/documento", se enriqueció
+		// con la descripción para que el agente clasificado tenga el contexto.
+		const mensajeFinal = context?.mensajeEnriquecido || message;
+
 		const agent = this.agents[intent] || this.agents.ventas;
-		const result = await agent.handle(message, context);
+		const result = await agent.handle(mensajeFinal, context);
 
 		let response = result.response;
 		let metadata = result.metadata || {};
@@ -347,7 +537,7 @@ Categoría:`;
 					productoURL: context?.productoURL || context?.ultimaBusqueda?.results?.[0]?.permalink,
 				};
 			} else if (flujoOriginal === 'perfilando') {
-				response += `\n\n¿Seguimos buscando el producto ideal para ti? 😊`;
+				response += `\n\n¿En qué más puedo ayudarte? 😊`;
 				metadata = {
 					...metadata,
 					flujo: 'perfilando_pausado',
@@ -411,7 +601,7 @@ function esInterrupcionFlujo(message: string, flujo: string, context?: any): boo
 
 	// Si el flujo espera una ubicación y el usuario menciona una ciudad, no es interrupción
 	if (flujo === 'esperando_ciudad' || flujo === 'esperando_ciudad_pausado') {
-		if (/(?:desde|soy de|vivo en|estoy en|escribo desde|ubicado en|me encuentro en)\s+[a-záéíóúñ]{3,}/i.test(msg)) {
+		if (/(?:desde|soy de|vivo en|estoy en|escribo desde|ubicado en|me encuentro en)\s+[a-záéíóúñü]{3,}/i.test(msg)) {
 			return false;
 		}
 	}
