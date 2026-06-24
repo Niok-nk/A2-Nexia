@@ -79,7 +79,7 @@ export class Orchestrator {
 	 * @param strict true = solo saludos explícitos (para nueva sesión), false = incluye catch-all < 5 chars (para primer mensaje)
 	 */
 	private revisarPatronesSaludo(message: string, strict: boolean): boolean {
-		const m = message.toLowerCase().trim();
+		const m = message.toLowerCase().normalize('NFC').trim();
 
 		// Mensaje vacío o solo emoji/símbolos
 		if (m.length === 0) return true;
@@ -153,7 +153,7 @@ export class Orchestrator {
 	// ─── Filtro 3: Atajo por palabras clave (sin llamar al modelo) ────────────
 
 	private quickIntent(message: string): IntentKey | null {
-		const m = message.toLowerCase();
+		const m = message.toLowerCase().normalize('NFC');
 
 		if (/\b(distribuidor|distribuidores|ser distribuidor|al por mayor|mayorista|mayoreo)\b/.test(m)) {
 			return 'distribuidores';
@@ -598,7 +598,7 @@ Responde corto.`;
  * Detecta si el mensaje actual es una interrupción del flujo guiado (una pregunta o un cambio de tema)
  */
 function esInterrupcionFlujo(message: string, flujo: string, context?: any): boolean {
-	const msg = message.toLowerCase().trim();
+	const msg = message.toLowerCase().normalize('NFC').trim();
 
 	// Exclusiones: respuestas a preguntas específicas del flujo de crédito o pago
 	// Si son números cortos, confirmaciones simples o palabras clave esperadas, NO es interrupción
