@@ -10,10 +10,10 @@ const FALLBACKS_PRIMERA_VEZ = [
 ];
 
 const FALLBACKS_RECURRENTE = [
-	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}qué bueno verte de nuevo por aquí. 😊 ¿En qué te puedo ayudar hoy?`,
-	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}me alegra verte de nuevo. Cuéntame, ¿qué necesitas el día de hoy? ✨`,
-	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}gracias por seguir confiando en JLC, la marca de los colombianos. ¿En qué te ayudo? 💙`,
-	(s: string, n?: string) => `¡${s}!${n ? ` ${n}! ` : ' '}qué gusto tenerte de vuelta. Dime, ¿cómo puedo ayudarte hoy? 😊`,
+	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}soy ${AGENT_NAME}, qué bueno verte de nuevo por aquí. 😊 ¿En qué te puedo ayudar hoy?`,
+	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}soy ${AGENT_NAME}, me alegra verte de nuevo. Cuéntame, ¿qué necesitas el día de hoy? ✨`,
+	(s: string, n?: string) => `¡${s}!${n ? ` ${n}, ` : ' '}soy ${AGENT_NAME}, gracias por seguir confiando en JLC, la marca de los colombianos. ¿En qué te ayudo? 💙`,
+	(s: string, n?: string) => `¡${s}!${n ? ` ${n}! ` : ' '}soy ${AGENT_NAME}, qué gusto tenerte de vuelta. Dime, ¿cómo puedo ayudarte hoy? 😊`,
 ];
 
 function pick<T>(arr: T[]): T {
