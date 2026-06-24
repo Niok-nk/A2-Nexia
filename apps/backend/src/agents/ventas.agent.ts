@@ -2057,8 +2057,8 @@ export class VentasAgent implements IAgent {
 			const sku = extraerSKU(message);
 			const pideLink = /\b(?:link|enlace|url)\b/i.test(message);
 			const prodPrevio = context?.userData?.productoSolicitado || context?.productoSolicitado || context?.terminoBusqueda;
-			const cat = catDetectada || context?.ultimaBusqueda?.categoria || (prodPrevio ? detectarCategoria(prodPrevio) : null);
-			if (sku || cat || (pideLink && prodPrevio)) {
+			const cat = catDetectada || context?.ultimaBusqueda?.categoria || (prodPrevio ? detectarCategoria(prodPrevio) : null) || detectarCategoria(context?.pendingMessage || '');
+			if (sku || cat || (pideLink && prodPrevio) || esPreguntaActiva) {
 				try {
 					const termino = sku || prodPrevio || message;
 					const resultado = await buscarProductoInteligente(termino, cat);
