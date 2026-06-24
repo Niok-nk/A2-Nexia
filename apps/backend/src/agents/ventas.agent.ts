@@ -398,39 +398,9 @@ REGLAS:
 	return null;
 }
 
-async function generarMensajeSinCobertura(ciudad: string, mensajeUsuario: string): Promise<string> {
-	const ctx = mensajeUsuario
-		? `El usuario mencionó su ciudad (${ciudad}) y previamente dijo: "${mensajeUsuario}".`
-		: `El usuario dijo que es de ${ciudad}.`;
-	const yaMencionoProducto = mensajeUsuario?.length > 5;
-	
-	// Buscar el producto real en WooCommerce para obtener el link correcto
-	let productLink = '';
-	if (yaMencionoProducto) {
-		try {
-			const results = await wooCommerceService.searchProducts(mensajeUsuario, 5);
-			if (results?.length > 0 && results[0].permalink) {
-				productLink = results[0].permalink;
-			}
-		} catch { /* continuar sin link */ }
-	}
-
-	try {
-		const msg = await generateResponse(
-			ctx,
-			`Eres una asesora de ventas amable y natural. El usuario es de ${ciudad}, donde NO tenemos cobertura directa. Redacta un mensaje personalizado (máximo 2 oraciones) que:
-- NO diga "qué bien" ni "excelente" (porque no hay cobertura directa)
-- Informe amablemente que no tenemos cobertura directa pero que enviamos por transportadora (el flete NO está incluido en el precio, se calcula al agregar el producto al carrito en la web)
-- NO menciones "pago contra entrega", "contra entrega" ni "pagar al recibir"
-${yaMencionoProducto ? '- El usuario YA mencionó su producto. NO preguntes qué producto busca. Refiérete al producto que ya mencionó.' : '- Pregunte qué producto o referencia busca'}
-- Use un tono natural, no robotizado
-NO incluyas saludos formales, solo el cuerpo del mensaje.`
-		);
-		return productLink ? `${msg}\n\nLink del producto:\n${productLink}` : msg;
-	} catch {
-		const fallback = `En ${ciudad.charAt(0).toUpperCase() + ciudad.slice(1)} no tenemos cobertura directa, pero podemos enviarte por transportadora (el flete se calcula en la web al agregar el producto al carrito). ${yaMencionoProducto ? 'Podemos confirmar la referencia de ese producto para revisar disponibilidad. 😊' : '¿Qué producto o referencia buscas? 😊'}`;
-		return productLink ? `${fallback}\n\nLink del producto:\n${productLink}` : fallback;
-	}
+async function generarMensajeSinCobertura(ciudad: string, _mensajeUsuario: string): Promise<string> {
+	const ciudadCap = ciudad.charAt(0).toUpperCase() + ciudad.slice(1);
+	return `En ${ciudadCap} no tenemos cobertura directa, pero podemos enviarte por transportadora. ¿Qué producto o referencia buscas? 😊`;
 }
 
 export class VentasAgent implements IAgent {
