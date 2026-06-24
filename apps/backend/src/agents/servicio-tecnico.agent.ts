@@ -7,51 +7,53 @@ export class ServicioTecnicoAgent implements IAgent {
 	name = 'Servicio Técnico';
 
 	async handle(message: string, context: any): Promise<AgentResponse> {
-		const esUrgente = /urgente|rapido|rápido|ya|inmediato|ahora|apenas|quemando|quemó|humo|fuego|explosión|fuga|gas|agua|inundación|corto\s*circuito/i.test(message);
+		const esGarantia = /\b(?:garant[ií]a|cambio|reembolso|devoluci[oó]n|reclamaci[oó]n)\b/i.test(message);
 
 		const userDataCtx = buildUserDataContext(context?.userData);
-		const datos = `Canales de servicio técnico JLC:${userDataCtx}
-- Web: https://jlc-electronics.com/servicio-tecnico/
-- Link para solicitar garantía: https://mitoolset.ddns.net:222/postventa/public/tickets/solicitud_garantia
-${esUrgente ? '- WhatsApp técnico: +57 320 7881151\n- WhatsApp Postventa: +57 320 7881110\n- WhatsApp Postventa: +57 314 8028482' : ''}
-Para garantías, el cliente debe tener factura de compra y el producto en buen estado externo.`;
+
+		const datos = esGarantia
+			? `Link de garantía JLC: https://mitoolset.ddns.net:222/postventa/public/tickets/solicitud_garantia
+Para garantías, el cliente debe tener factura de compra y el producto en buen estado externo.`
+			: `Canales de servicio técnico JLC:${userDataCtx}
+- WhatsApp técnico: +57 320 7881151
+- WhatsApp Postventa: +57 320 7881110
+- WhatsApp Postventa: +57 314 8028482
+- Web: https://jlc-electronics.com/servicio-tecnico/`;
 
 		const { system, user } = buildGemmaPrompt({
-			instruccion: `Eres asistente de servicio técnico de Electrodomésticos JLC. Atiendes clientes con electrodomésticos dañados o que necesitan mantenimiento.
+			instruccion: `${esGarantia
+				? `El cliente solicita GARANTÍA. Indícale que debe ingresar al link para asignar un ticket. NO des diagnósticos ni asistas el caso, solo redirige al link.`
+				: `El cliente necesita SERVICIO TÉCNICO. Indícale los canales de contacto para que un técnico lo asista. NO des diagnósticos ni intentes solucionar el problema, solo entrega los datos de contacto.`}
 
-REGLAS:
-- NO muestres números de teléfono de servicio técnico ni postventa a menos que el cliente los solicite URGENTEMENTE (ej: el electrodoméstico tiene humo, fuego, fuga, cortocircuito o el cliente dice "urgente", "rápido", "inmediato").
-- Si el cliente solicita GARANTÍA, indícale que debe ingresar al link de solicitud de garantía para asignar un ticket: https://mitoolset.ddns.net:222/postventa/public/tickets/solicitud_garantia
-- Para casos NO URGENTES (fallas comunes, mantenimiento, consultas), indícales que pueden gestionarlo por la web https://jlc-electronics.com/servicio-tecnico/
-- Cuando el caso es urgente, ENTREGA los números de contacto al final.
-- Sé breve y natural. Datos: ${datos}`,
-			ejemplos: [
-				{
-					cliente: 'Mi lavadora no centrifuga',
-					asistente:
-						'Lamento la falla. Puedes gestionar tu solicitud en nuestra web https://jlc-electronics.com/servicio-tecnico/ y un técnico te contactará. ¿Me indicas marca y modelo para orientarte mejor?',
-				},
-				{
-					cliente: 'Necesito mantenimiento para mi nevera JLC',
-					asistente:
-						'¡Claro! Puedes registrar tu solicitud en https://jlc-electronics.com/servicio-tecnico/ para que un técnico se ponga en contacto contigo. 😊',
-				},
-				{
-					cliente: 'Tengo una nevera en garantía que no enfría',
-					asistente:
-						'Para tramitar la garantía tienes un nuevo método: ingresa al link https://mitoolset.ddns.net:222/postventa/public/tickets/solicitud_garantia y asigna tu ticket. Necesitarás la factura de compra y el equipo en buen estado externo. 😊',
-				},
-				{
-					cliente: 'Mi nevera está soltando humo, urgente',
-					asistente:
-						'¡Esto es urgente! Desconecta el equipo de inmediato. Escríbeles ya a los técnicos: 📞 +57 320 788 1151 o +57 320 788 1110 (lunes a sábado, 8 a.m. a 5 p.m.).',
-				},
-				{
-					cliente: '¿Cuánto cobra el técnico por visita?',
-					asistente:
-						'El costo de la visita lo confirma directamente el técnico según la zona y el tipo de equipo. Puedes solicitar la visita en https://jlc-electronics.com/servicio-tecnico/ para que te cotice. 😊',
-				},
-			],
+Datos disponibles:
+${datos}
+
+Responde MUY corto (máximo 2 frases), solo redirige.`,
+			ejemplos: esGarantia
+				? [
+					{
+						cliente: 'Tengo una nevera en garantía que no enfría',
+						asistente: 'Para tramitar la garantía ingresa al link https://mitoolset.ddns.net:222/postventa/public/tickets/solicitud_garantia y asigna tu ticket. Necesitarás la factura de compra. 😊',
+					},
+					{
+						cliente: 'Quiero hacer válida la garantía de mi lavadora',
+						asistente: 'Ingresa a https://mitoolset.ddns.net:222/postventa/public/tickets/solicitud_garantia para asignar tu ticket de garantía. Ten a mano la factura. 😊',
+					},
+				]
+				: [
+					{
+						cliente: 'Mi lavadora no centrifuga',
+						asistente: 'Comunícate con nuestro técnico al WhatsApp +57 320 788 1151 (lunes a sábado, 8 a.m. a 5 p.m.) para que te ayuden.',
+					},
+					{
+						cliente: 'Necesito mantenimiento para mi nevera JLC',
+						asistente: 'Escríbeles a los técnicos al WhatsApp +57 320 788 1151 o +57 320 788 1110 para agendar el mantenimiento. Atienden lunes a sábado de 8 a.m. a 5 p.m.',
+					},
+					{
+						cliente: '¿Cuánto cobra el técnico por visita?',
+						asistente: 'El costo lo confirma el técnico según la zona. Escríbele al +57 320 788 1151 (lunes a sábado, 8 a.m. a 5 p.m.) para que te cotice.',
+					},
+				],
 			historial: formatHistory(context?.history),
 			mensajeCliente: message,
 		});
