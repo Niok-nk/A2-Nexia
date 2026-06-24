@@ -35,7 +35,7 @@ Debe incluir:
 - El clima (${saludo}) al inicio
 - Tu nombre (${AGENT_NAME})
 - "Gracias por escoger a JLC Electronics, la marca de los colombianos" o similar (varía la frase)
-- Terminar preguntando "¿En qué te puedo ayudar?" de forma natural (varía la pregunta)
+- Terminar preguntando "¿En qué te puedo ayudar?" de forma natural (varía la pregunta)${recurrente ? '' : '\n\nIMPORTANTE: el cliente NUNCA ha interactuado antes. NO uses frases como "de nuevo", "volver a saludar", "otra vez", "de vuelta", "otra ocasión". Es su PRIMERA VEZ.'}
 
 NO uses listas numeradas, NO uses "1️⃣", NO muestres opciones.
 Tono cálido, femenino, español colombiano.
@@ -43,8 +43,8 @@ Incluye 1 o 2 emojis de forma natural para dar calidez 😊✨💙.`
 		);
 		const limpio = raw.replace(/["""*]/g, '').trim();
 		if (limpio.length > 20) {
-			if (!recurrente && /(?:^|\s)(?:de\s+nuevo|volver\s+(?:a\s+)?(?:saludar|verte)|volverte\s+(?:a\s+)?saludar|otra\s+vez|de\s+vuelta|otra\s+ocasi[oó]n)/i.test(limpio)) {
-				return null; // IA dijo "de nuevo" siendo primera vez → descartar
+			if (/(?:^|\s)(?:de\s+nuevo|volver\s+(?:a\s+)?(?:saludar|verte)|volverte\s+(?:a\s+)?saludar|otra\s+vez|de\s+vuelta|otra\s+ocasi[oó]n)/i.test(limpio)) {
+				return null; // IA dice "de nuevo" aunque el contexto diga primera vez → descartar
 			}
 			return limpio;
 		}
