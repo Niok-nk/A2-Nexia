@@ -1025,7 +1025,7 @@ export class VentasAgent implements IAgent {
 						products = await wooCommerceService.searchProducts(terminoIA, 20);
 					} catch { /* continuar sin productos */ }
 					if (products.length > 0) {
-						const cat = context?.categoriaSugerida || detectarCategoria(msgOriginal) || 'otra';
+						const cat = detectarCategoria(msgOriginal) || context?.categoriaSugerida || 'otra';
 						const esEspecifico = /[A-Z]{2,5}[-][A-Z0-9]+/.test(msgOriginal) || /\d+\s*(?:litros?|kg|pulgadas?|lb|w|vatios?|refrigeraci[oó]n)/i.test(msgOriginal);
 						if (esEspecifico) {
 							const nums = (msgOriginal.match(/\d+[kKlLgG]*/g) || []).map((n: string) => n.toLowerCase());
@@ -2298,7 +2298,7 @@ REGLAS DE CATÁLOGO:
 - Si el cliente pregunta detalles/especificaciones de un producto del catálogo, responde usando su información de "Detalles".
 - Si el cliente pide "más información" de un producto que YA fue identificado y mostrado, dale los detalles disponibles y OFRÉCELE ir al pago. No preguntes presupuesto ni entres en perfilado.
 - Si el cliente ya identificó un producto (por nombre, número o SKU), concéntrate en ese producto.
-- Si no hay productos en el catálogo, dilo con honestidad y pregunta qué busca. NUNCA compartas enlaces de productos que no estén en el catálogo.
+- Si el catálogo está vacío o dice "No se encontraron productos", sé honesta: "En este momento no tengo disponibilidad de [producto que busca el cliente]." Pregunta si busca otra cosa. NUNCA inventes productos, marcas, modelos, categorías ("ollas a presión", "licuadoras", etc.) ni menciones lo que SÍ tienes si el catálogo está vacío. Si no hay nada, no digas que tienes otra cosa.
 - Si el cliente pide una opción más económica o más barata, preséntale el producto más económico disponible en el catálogo. No digas que es el "único" modelo disponible ni que no hay más opciones. Si solo hay un producto en el catálogo, preséntalo como la mejor opción disponible.
 - Si el cliente es de Crédito, NUNCA mostrar precios de productos.
 - Si el cliente pide un producto nuevo o diferente, ayúdale con eso.
