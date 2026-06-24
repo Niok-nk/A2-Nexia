@@ -1130,7 +1130,7 @@ export class VentasAgent implements IAgent {
 				const saludo = getSaludo();
 				const intro = esPrimeraVez
 					? `${saludo} 👋 Soy ${AGENT_NAME}, tu asesora en JLC Electronics, la marca de los colombianos.\n\n`
-					: `${saludo} 😊\n\n`;
+					: '';
 				const meta: any = {
 					agentType: 'ventas',
 					flujo: 'esperando_ciudad',
