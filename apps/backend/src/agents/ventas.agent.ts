@@ -1235,7 +1235,7 @@ export class VentasAgent implements IAgent {
 		// aunque mencione "la 3" o "prefiero" — primero hay que responder la duda.
 		// También excluir preguntas de precio ("que precio tiene la de 15")
 		const esPreguntaPrecio = /\b(?:precio|cu[aá]nto\s+(?:cuesta|cuestan|vale|valen|es|son)|qu[eé]\s+precio\s+tiene)\b/i.test(message);
-		const quiereComprar = quiereComprarRaw && !esPreguntaEspecificacion(message) && !esPreguntaPrecio && !esPreguntaInfo(message);
+		const quiereComprar = quiereComprarRaw && !esPreguntaEspecificacion(message) && !esPreguntaPrecio && !esPreguntaInfo(message) && !esPreguntaActiva;
 
 		const puedeComprar = context?.modalidad === 'contado' || 
 			(context?.ultimaBusqueda?.results?.length > 0 && context?.modalidad !== 'credito');
@@ -2351,7 +2351,7 @@ REGLAS DE CATÁLOGO:
 				ciudad: context?.ciudad,
 				modalidad: context?.modalidad,
 				tieneCobertura: context?.tieneCobertura,
-				...(resetFlujo ? { flujo: null } : {}),
+				flujo: null,
 				...(productoBuscado.length < 30 && productoBuscado.split(/\s+/).length <= 5 && !/[?¿]/.test(productoBuscado) ? { productoSolicitado: productoBuscado } : {}),
 			ultimaBusqueda: products.length > 0
 				? { results: products.slice(productoIndex, productoIndex + 10), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
