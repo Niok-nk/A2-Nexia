@@ -469,12 +469,16 @@ export async function processIncomingMessage(
 	// para que el historial refleje la descripción y el data-extractor pueda usarla
 	if (metadata?.imagenDescripcion && body.includes('[Imagen]')) {
 		const enrichedBody = body.replace('[Imagen]', `[Imagen: ${metadata.imagenDescripcion}]`);
-		await prisma.message.updateMany({
+		const ultimoInbound = await prisma.message.findFirst({
 			where: { contactId: contact.id, direction: 'INBOUND' },
 			orderBy: { sentAt: 'desc' },
-			take: 1,
-			data: { body: enrichedBody },
-		}).catch(e => logger.warn({ error: e.message }, 'No se pudo enriquecer el body del mensaje INBOUND'));
+		});
+		if (ultimoInbound) {
+			await prisma.message.update({
+				where: { id: ultimoInbound.id },
+				data: { body: enrichedBody },
+			}).catch(e => logger.warn({ error: e.message }, 'No se pudo enriquecer el body del mensaje INBOUND'));
+		}
 	}
 
 	// 8. Persistir respuesta OUTBOUND
