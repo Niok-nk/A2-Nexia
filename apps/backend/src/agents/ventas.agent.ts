@@ -947,7 +947,9 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 			}
 			if (!ciudadDetectada) {
 				const limpio = msgParaCiudad.trim().replace(/[.,!?¡¿]+$/g, '').trim();
-				if (limpio.length >= 3 && limpio.length <= 30 && !/^[^\wáéíóúñ]+$/.test(limpio)) {
+				if (limpio.length >= 3 && limpio.length <= 30 && !/^[^\wáéíóúñ]+$/i.test(limpio)
+					&& !/^(?:qu[eé]|cu[aá]l|cu[aá]nt[oa]|c[oó]mo|d[oó]nde|cu[aá]ndo|por\s*qu[eé])\b/i.test(limpio)
+					&& !/\b(?:precios?|tiene|hay|venden|busco|quiero|comprar|pagar|necesito|recomiendas|val[eí])\b/i.test(limpio)) {
 					ciudadDetectada = limpio.toLowerCase();
 				}
 			}
