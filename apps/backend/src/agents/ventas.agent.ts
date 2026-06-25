@@ -690,6 +690,22 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicando 
 				};
 			}
 
+			// ── PQR (Petición, Queja, Reclamo) ──────────────────────────────────
+			const esPQR = /\b(?:pqr|pqrs|petici[oó]n|queja|reclamo|radicar\s+(?:una\s+)?pqr|crear\s+(?:una\s+)?pqr|poner\s+(?:una\s+)?queja|hacer\s+(?:una\s+)?reclamo)\b/i.test(msgNFC);
+			if (esPQR) {
+				const promptPQR = `Eres ${AGENT_NAME}, asesora de JLC Electronics. El cliente quiere radicar una PQR (Petición, Queja o Reclamo).
+
+Mensaje del cliente: "${message}"
+
+Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándole que puede radicar su PQR directamente en el formulario: https://jlc-electronics.com/pqrs/. No des otros números ni canales.`;
+				const raw = await generateResponse(promptPQR);
+				const responsePQR = sanitizarNumerosVentas(cleanResponse(raw));
+				return {
+					response: responsePQR,
+					metadata: { agentType: 'ventas', flujo: null },
+				};
+			}
+
 			const esServicioTecnico = /\b(?:servicio\s+t[eé]cnico|reparaci[oó]n|reparar|mantenimiento|no\s+enciende|no\s+funciona|no\s+enfr[ií]a|no\s+centrifuga|da[ñn]ado|da[ñn]ada|falla|aver[ií]a|garant[ií]a|cambio|reembolso|devoluci[oó]n|reclamaci[oó]n|t[eé]cnico\s+a\s+casa|mandar\s+t[eé]cnico|visita\s+t[eé]cnica)\b/i.test(msgNFC);
 			if (esServicioTecnico) {
 				const { ServicioTecnicoAgent } = await import('./servicio-tecnico.agent.js');
