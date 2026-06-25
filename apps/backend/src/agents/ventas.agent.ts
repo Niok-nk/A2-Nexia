@@ -677,8 +677,15 @@ export class VentasAgent implements IAgent {
 			const consultaPostCompra = (/\b(?:seguimiento|rastrear|gu[ií]a|tracking)\b/i.test(msgNFC) && /\b(?:compra|pedido|producto|env[ií]o)\b/i.test(msgNFC))
 				|| /\b(?:ya\s+(?:compr[éeó]|pagu[éeó]|cancel[éeó]|complet[éeó])|compr[ée]\s+por\s+(?:internet|web|p[aá]gina|online|l[íi]nea)|(?:la|mi|una)\s+compra\s+(?:la|lo|las|los)\s+(?:realic[ée]|hice|compr[ée]|pag[ué])|hice\s+(?:una|mi|la)\s+(?:compra|pedido|pago|transferencia)|realic[ée]\s+(?:una|mi|la)\s+(?:compra|pedido|pago|transferencia)|adquir[ií]\s+(?:un|una|el|la))\b/i.test(msgNFC);
 			if (consultaPostCompra) {
+				const promptPost = `Eres ${AGENT_NAME}, asesora de JLC Electronics. El cliente te está consultando sobre una compra que ya realizó y quiere seguimiento.
+
+Mensaje del cliente: "${message}"
+
+Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicando que puede contactar al asesor especializado al número +57 318 740 8190 para que le ayuden con el estado de su pedido. No des diagnósticos ni intentes resolver el caso.`;
+				const raw = await generateResponse(promptPost);
+				const responsePost = sanitizarNumerosVentas(cleanResponse(raw));
 				return {
-					response: 'Para seguimiento de tu compra puedes contactar a un asesor especializado al número +57 318 740 8190. Ellos te ayudarán con el estado de tu pedido. 😊',
+					response: responsePost,
 					metadata: { agentType: 'ventas', flujo: null, notificarPostCompra: true },
 				};
 			}
