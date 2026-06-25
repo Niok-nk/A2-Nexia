@@ -13,7 +13,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 // Cuando un cliente manda varios mensajes seguidos, esperamos
 // DEBOUNCE_MS para agruparlos y responder con el contexto completo.
 // Funciona tanto para WhatsApp (Baileys) como para el chat web.
-const DEBOUNCE_MS = 5000; // 5 segundos
+const DEBOUNCE_MS = 10000; // 10 segundos
 
 const debounceBatch = new Map<string, {
 	timer: NodeJS.Timeout;
