@@ -716,8 +716,12 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		// ── ¿El usuario está haciendo una pregunta activa? ───────────────────
 		// Si es una pregunta del usuario (no respuesta a pregunta del bot),
 		// saltamos todos los flujos automáticos y dejamos que la IA responda.
+		// Soporta mensajes combinados de varias líneas (debounce batch).
+		const lineas = message.split('\n');
+		const algunaLineaEsPregunta = lineas.some(l => /[?¿]/.test(l) || /^(?:cu[aá]l|cu[aá]nto|cu[aá]nta|qu[eé]|c[oó]mo|d[oó]nde|tiene|tienen|son\s+de|es\s+de|me\s+(?:das|pasas|dices|confirmas|puedes)|podr[ií]as|sabes)/i.test(l.trim()));
 		const esPreguntaActiva = /[?¿]/.test(message)
 			|| /^(?:cu[aá]l|cu[aá]nto|cu[aá]nta|qu[eé]|c[oó]mo|d[oó]nde|tiene|tienen|son\s+de|es\s+de|me\s+(?:das|pasas|dices|confirmas|puedes)|podr[ií]as|sabes)/i.test(message)
+			|| algunaLineaEsPregunta
 			|| aiClasificacion?.esPreguntaTecnica === true
 			|| aiClasificacion?.intent === 'pregunta_especificacion';
 
@@ -942,8 +946,8 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				ciudadDetectada = await detectarCiudadConIA(msgParaCiudad);
 			}
 			if (!ciudadDetectada) {
-				const limpio = msgParaCiudad.trim().replace(/[.,!?¡¿]+$/g, '');
-				if (limpio.length >= 3 && limpio.length <= 30) {
+				const limpio = msgParaCiudad.trim().replace(/[.,!?¡¿]+$/g, '').trim();
+				if (limpio.length >= 3 && limpio.length <= 30 && !/^[^\wáéíóúñ]+$/.test(limpio)) {
 					ciudadDetectada = limpio.toLowerCase();
 				}
 			}
@@ -1485,9 +1489,117 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		}
 
 		// ── Detectar SKU en flujos de pago → salir y buscar producto ─────────
-		const flujoPago = ['seleccion_pago', 'pago_web', 'pago_web_paso', 'pago_completado'].includes(context?.flujo);
+		const flujoPago = ['seleccion_pago', 'pago_web_datos', 'pago_web', 'pago_web_paso', 'pago_completado'].includes(context?.flujo);
 		if (flujoPago && extraerSKU(message)) {
 			context = { ...context, flujo: null, ultimaBusqueda: undefined, terminoBusqueda: undefined, productoSolicitado: undefined, perfilState: undefined };
+		}
+
+		// ── Flujo de recolección de datos para pago web ─────────────────────
+		if (context?.flujo === 'pago_web_datos') {
+			const paso = context?.pasoDatos;
+			const nombreGuardado = context?.nombreCliente || context?.userData?.nombre;
+			const direccionGuardada = context?.direccion || context?.userData?.direccion;
+			const ciudadGuardada = context?.ciudad;
+
+			if (paso === 'nombre') {
+				const nombreIngresado = message.trim().replace(/[^a-zA-ZáéíóúñÁÉÍÓÚÑ\s]/g, '').trim();
+				if (!nombreIngresado || nombreIngresado.length < 3) {
+					return {
+						response: 'Disculpa, no entendí tu nombre. ¿Puedes escribir tu nombre completo? 😊',
+						metadata: { agentType: 'ventas', flujo: 'pago_web_datos', pasoDatos: 'nombre', productoURL: context?.productoURL, ciudad: ciudadGuardada, ciudadValidada: true, productoCompra: context?.productoCompra },
+					};
+				}
+				return {
+					response: `¡Gracias *${nombreIngresado}*! 🙌 ¿Cuál es tu dirección para el envío? (barrio, calle, carrera, número)`,
+					nextStage: 'PROPOSAL',
+					metadata: {
+						agentType: 'ventas',
+						flujo: 'pago_web_datos',
+						pasoDatos: 'direccion',
+						productoURL: context?.productoURL,
+						ciudad: ciudadGuardada,
+						ciudadValidada: true,
+						productoCompra: context?.productoCompra,
+						nombreCliente: nombreIngresado,
+					},
+				};
+			}
+
+			if (paso === 'direccion') {
+				const direccionIngresada = message.trim();
+				if (!direccionIngresada || direccionIngresada.length < 5) {
+					return {
+						response: 'Disculpa, ¿puedes darme más detalles de tu dirección? (barrio, calle, carrera, número) 😊',
+						metadata: { agentType: 'ventas', flujo: 'pago_web_datos', pasoDatos: 'direccion', productoURL: context?.productoURL, ciudad: ciudadGuardada, ciudadValidada: true, productoCompra: context?.productoCompra, nombreCliente: nombreGuardado },
+					};
+				}
+				if (!ciudadGuardada) {
+					return {
+						response: `Gracias *${nombreGuardado}* 🙌 ¿Desde qué ciudad nos escribes?`,
+						nextStage: 'PROPOSAL',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'pago_web_datos',
+							pasoDatos: 'ciudad',
+							productoURL: context?.productoURL,
+							productoCompra: context?.productoCompra,
+							nombreCliente: nombreGuardado,
+							direccion: direccionIngresada,
+						},
+					};
+				}
+				// Ciudad ya conocida → crear pedido directo
+				const producto = context?.ultimaBusqueda?.results?.[0];
+				const pago = producto?.id
+					? await wooCommerceService.crearPedidoConLinkPago({
+						productId: producto.id,
+						cantidad: 1,
+						cliente: { nombre: nombreGuardado, telefono: context?.phone, ciudad: ciudadGuardada, direccion: direccionIngresada },
+					})
+					: null;
+				if (pago) {
+					return {
+						response: `¡Listo *${nombreGuardado}*! Aquí tienes tu link de pago seguro para *${producto?.name || 'tu producto'}*:\n\n${pago.paymentUrl}\n\nTotal: $${parseInt(pago.total).toLocaleString('es-CO')}. Apenas pagues, tu pedido queda registrado y coordinamos el despacho. 😊`,
+						nextStage: 'PROPOSAL',
+						metadata: { agentType: 'ventas', flujo: 'esperando_comprobante', ciudad: ciudadGuardada, ciudadValidada: true, productoURL: producto?.permalink, ordenWoo: pago.orderId, pipelineStage: 'CONTACTO_COMPLETO' },
+					};
+				}
+				return {
+					response: `Puedes pagar directamente en nuestra página web.\n\nLink del producto:\n${context?.productoURL || ''}\n\n¿Quieres que te acompañe paso a paso con el proceso?`,
+					nextStage: 'PROPOSAL',
+					metadata: { agentType: 'ventas', flujo: 'pago_web', ciudad: ciudadGuardada, ciudadValidada: true, productoURL: context?.productoURL },
+				};
+			}
+
+			if (paso === 'ciudad') {
+				const ciudadIngresada = message.trim().replace(/[.,!?¡¿]+$/g, '').trim().toLowerCase();
+				if (!ciudadIngresada || ciudadIngresada.length < 3) {
+					return {
+						response: 'Disculpa, no entendí la ciudad. ¿Puedes decirme desde dónde nos escribes? 📍',
+						metadata: { agentType: 'ventas', flujo: 'pago_web_datos', pasoDatos: 'ciudad', productoURL: context?.productoURL, productoCompra: context?.productoCompra, nombreCliente: nombreGuardado, direccion: direccionGuardada },
+					};
+				}
+				const producto = context?.ultimaBusqueda?.results?.[0];
+				const pago = producto?.id
+					? await wooCommerceService.crearPedidoConLinkPago({
+						productId: producto.id,
+						cantidad: 1,
+						cliente: { nombre: nombreGuardado, telefono: context?.phone, ciudad: ciudadIngresada, direccion: direccionGuardada },
+					})
+					: null;
+				if (pago) {
+					return {
+						response: `¡Listo *${nombreGuardado}*! Aquí tienes tu link de pago seguro para *${producto?.name || 'tu producto'}*:\n\n${pago.paymentUrl}\n\nTotal: $${parseInt(pago.total).toLocaleString('es-CO')}. Apenas pagues, tu pedido queda registrado y coordinamos el despacho. 😊`,
+						nextStage: 'PROPOSAL',
+						metadata: { agentType: 'ventas', flujo: 'esperando_comprobante', ciudad: ciudadIngresada, ciudadValidada: true, productoURL: producto?.permalink, ordenWoo: pago.orderId, pipelineStage: 'CONTACTO_COMPLETO' },
+					};
+				}
+				return {
+					response: `Puedes pagar directamente en nuestra página web.\n\nLink del producto:\n${context?.productoURL || ''}\n\n¿Quieres que te acompañe paso a paso con el proceso?`,
+					nextStage: 'PROPOSAL',
+					metadata: { agentType: 'ventas', flujo: 'pago_web', ciudad: ciudadIngresada, ciudadValidada: true, productoURL: context?.productoURL },
+				};
+			}
 		}
 
 		if (context?.flujo === 'pago_web') {
@@ -1586,6 +1698,87 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 					};
 				}
 				if (esOpcion2) {
+					const ultimosProductos = context?.ultimaBusqueda?.results ?? [];
+					const producto = ultimosProductos[0];
+
+					// Recolectar datos del cliente antes de crear el pedido
+					const nombre = context?.userData?.nombre?.trim();
+					const direccion = context?.userData?.direccion?.trim();
+					const ciudad = context?.ciudad?.trim();
+					const telefono = context?.phone?.trim();
+
+					if (!nombre) {
+						return {
+							response: `¡Perfecto! Para generar tu link de pago, necesito tu nombre completo. ¿Cómo te llamas? 😊`,
+							nextStage: 'PROPOSAL',
+							metadata: {
+								agentType: 'ventas',
+								flujo: 'pago_web_datos',
+								pasoDatos: 'nombre',
+								productoURL,
+								ciudad,
+								ciudadValidada: true,
+								productoCompra: producto?.name || context?.productoCompra,
+							},
+						};
+					}
+					if (!direccion) {
+						return {
+							response: `Gracias *${nombre}* 🙌 ¿Cuál es tu dirección para el envío? (barrio, calle, carrera, número)`,
+							nextStage: 'PROPOSAL',
+							metadata: {
+								agentType: 'ventas',
+								flujo: 'pago_web_datos',
+								pasoDatos: 'direccion',
+								productoURL,
+								ciudad,
+								ciudadValidada: true,
+								productoCompra: producto?.name || context?.productoCompra,
+								nombreCliente: nombre,
+							},
+						};
+					}
+					if (!ciudad) {
+						return {
+							response: `Gracias *${nombre}* 🙌 ¿Desde qué ciudad nos escribes?`,
+							nextStage: 'PROPOSAL',
+							metadata: {
+								agentType: 'ventas',
+								flujo: 'pago_web_datos',
+								pasoDatos: 'ciudad',
+								productoURL,
+								productoCompra: producto?.name || context?.productoCompra,
+								nombreCliente: nombre,
+								direccion,
+							},
+						};
+					}
+
+					// Todos los datos disponibles → crear pedido WooCommerce
+					const pago = producto?.id
+						? await wooCommerceService.crearPedidoConLinkPago({
+							productId: producto.id,
+							cantidad: 1,
+							cliente: { nombre, telefono, ciudad, direccion },
+						})
+						: null;
+
+					if (pago) {
+						return {
+							response: `¡Listo *${nombre}*! Aquí tienes tu link de pago seguro para *${producto?.name || 'tu producto'}*:\n\n${pago.paymentUrl}\n\nTotal: $${parseInt(pago.total).toLocaleString('es-CO')}. Apenas pagues, tu pedido queda registrado y coordinamos el despacho. 😊`,
+							nextStage: 'PROPOSAL',
+							metadata: {
+								agentType: 'ventas',
+								flujo: 'esperando_comprobante',
+								ciudad,
+								ciudadValidada: true,
+								productoURL: producto?.permalink,
+								ordenWoo: pago.orderId,
+								pipelineStage: 'CONTACTO_COMPLETO',
+							},
+						};
+					}
+					// Fallback: si falla la creación del pedido
 					const productLink = productoURL
 						? `\n\nLink del producto:\n${productoURL}`
 						: '';
@@ -1595,7 +1788,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 						metadata: {
 							agentType: 'ventas',
 							flujo: 'pago_web',
-							ciudad: context?.ciudad,
+							ciudad,
 							ciudadValidada: true,
 							productoURL,
 						},

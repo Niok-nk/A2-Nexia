@@ -288,7 +288,7 @@ Categoría:`;
 				const imgBuffer = await fs.readFile(mediaPath);
 				const base64 = imgBuffer.toString('base64');
 				const mime = context.mediaMimeType || 'image/jpeg';
-				const enFlujoPago = ['esperando_comprobante', 'pago_medios', 'pago_web', 'pago_completado', 'seleccion_pago'].includes(context?.flujo);
+				const enFlujoPago = ['esperando_comprobante', 'pago_medios', 'pago_web', 'pago_web_datos', 'pago_completado', 'seleccion_pago'].includes(context?.flujo);
 
 				// ── PASO 1: Analizar la imagen → JSON estructurado ────────────
 				// Una sola llamada de visión que clasifica y describe.
@@ -492,7 +492,7 @@ Responde corto.`;
 
 		if (flujoActivo) {
 			// Mapear flujo activo al agente correspondiente
-			if (/^credito/.test(flujoActivo) || flujoActivo === 'sin_cobertura' || flujoActivo === 'contado_sin_cobertura' || flujoActivo === 'esperando_ciudad' || flujoActivo === 'credito_perfilando' || flujoActivo === 'esperando_modalidad' || flujoActivo === 'perfilando_producto' || flujoActivo === 'perfilando_presupuesto' || flujoActivo === 'perfilando' || flujoActivo === 'seleccion_pago' || flujoActivo === 'seleccion_pago_ambiguo' || flujoActivo === 'pago_web' || flujoActivo === 'pago_web_paso' || flujoActivo === 'pago_medios' || flujoActivo === 'pago_fisico' || flujoActivo === 'pago_completado' || flujoActivo === 'esperando_comprobante' || flujoActivo === 'credito_pausado' || flujoActivo === 'pago_pausado' || flujoActivo === 'perfilando_pausado' || flujoActivo === 'esperando_ciudad_pausado' || flujoActivo === 'esperando_modalidad_pausado') {
+			if (/^credito/.test(flujoActivo) || flujoActivo === 'sin_cobertura' || flujoActivo === 'contado_sin_cobertura' || flujoActivo === 'esperando_ciudad' || flujoActivo === 'credito_perfilando' || flujoActivo === 'esperando_modalidad' || flujoActivo === 'perfilando_producto' || flujoActivo === 'perfilando_presupuesto' || flujoActivo === 'perfilando' || flujoActivo === 'seleccion_pago' || flujoActivo === 'seleccion_pago_ambiguo' || flujoActivo === 'pago_web' || flujoActivo === 'pago_web_datos' || flujoActivo === 'pago_web_paso' || flujoActivo === 'pago_medios' || flujoActivo === 'pago_fisico' || flujoActivo === 'pago_completado' || flujoActivo === 'esperando_comprobante' || flujoActivo === 'credito_pausado' || flujoActivo === 'pago_pausado' || flujoActivo === 'perfilando_pausado' || flujoActivo === 'esperando_ciudad_pausado' || flujoActivo === 'esperando_modalidad_pausado') {
 				intent = 'ventas';
 			} else if (/^repuesto/.test(flujoActivo) || flujoActivo === 'repuestos_pausado') {
 				intent = 'repuestos';
@@ -536,7 +536,7 @@ Responde corto.`;
 					creditoData: context?.creditoData || {},
 					creditoStep: context?.creditoStep || 1,
 				};
-			} else if (flujoOriginal === 'pago_web_paso' || flujoOriginal === 'pago_web' || flujoOriginal === 'seleccion_pago') {
+			} else if (flujoOriginal === 'pago_web_paso' || flujoOriginal === 'pago_web' || flujoOriginal === 'pago_web_datos' || flujoOriginal === 'seleccion_pago') {
 				response += `\n\n¿Continuamos con los pasos de tu pago? 😊`;
 				metadata = {
 					...metadata,
@@ -663,7 +663,7 @@ function esInterrupcionFlujo(message: string, flujo: string, context?: any): boo
 	}
 
 	// Si estamos en flujo de pago web y preguntan por medios autorizados o transferencias
-	if (flujo === 'pago_web_paso' || flujo === 'pago_web' || flujo === 'seleccion_pago') {
+	if (flujo === 'pago_web_paso' || flujo === 'pago_web' || flujo === 'pago_web_datos' || flujo === 'seleccion_pago') {
 		if (/\b(?:transferencia|medios autorizados|bancolombia|nequi|daviplata|efectivo|punto fisico|tienda|cuenta)\b/.test(msg)) return true;
 	}
 

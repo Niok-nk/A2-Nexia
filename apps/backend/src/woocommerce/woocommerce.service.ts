@@ -144,4 +144,67 @@ export const wooCommerceService = {
 			})
 			.join('\n\n');
 	},
+
+	async crearPedidoConLinkPago(datos: {
+		productId: number;
+		cantidad?: number;
+		cliente?: {
+			nombre?: string;
+			telefono?: string;
+			email?: string;
+			ciudad?: string;
+			direccion?: string;
+		};
+	}): Promise<{
+		orderId: number;
+		paymentUrl: string;
+		total: string;
+	} | null> {
+		if (!wcApi) {
+			logger.warn('WooCommerce not configured, cannot create order');
+			return null;
+		}
+
+		try {
+			const { data: order }: { data: any } = await wcApi.post('wp-json/wc/v3/orders', {
+				payment_method: 'wompi',
+				payment_method_title: 'Wompi',
+				set_paid: false,
+				status: 'pending',
+				billing: {
+					first_name: datos.cliente?.nombre?.split(' ')[0] || '',
+					last_name: datos.cliente?.nombre?.split(' ').slice(1).join(' ') || '',
+					phone: datos.cliente?.telefono || '',
+					email: datos.cliente?.email || 'sincorreo@jlc-electronics.com',
+					city: datos.cliente?.ciudad || '',
+					address_1: datos.cliente?.direccion || '',
+					country: 'CO',
+				},
+				shipping: {
+					first_name: datos.cliente?.nombre?.split(' ')[0] || '',
+					last_name: datos.cliente?.nombre?.split(' ').slice(1).join(' ') || '',
+					city: datos.cliente?.ciudad || '',
+					address_1: datos.cliente?.direccion || '',
+					country: 'CO',
+				},
+				line_items: [
+					{ product_id: datos.productId, quantity: datos.cantidad || 1 },
+				],
+			});
+
+			const base = process.env.WC_BASE_URL || 'https://jlc-electronics.com';
+			const paymentUrl: string =
+				order.payment_url ||
+				`${base}/checkout/order-pay/${order.id}/?pay_for_order=true&key=${order.order_key}`;
+
+			return {
+				orderId: order.id,
+				paymentUrl,
+				total: order.total,
+			};
+		} catch (err: any) {
+			logger.error({ error: err.message, status: err.response?.status, data: err.response?.data }, 'WooCommerce order creation failed');
+			return null;
+		}
+	},
 };

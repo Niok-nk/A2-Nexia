@@ -5,7 +5,7 @@ import { getStatus, getCurrentQR, sendMessage, reconnectWhatsApp } from './whats
 import { requireAuth } from '../middleware/auth.middleware.js';
 import prisma from '../db/index.js';
 import logger from '../utils/logger.js';
-import { processIncomingMessage, bufferForDebounce } from './message.handler.js';
+import { bufferForDebounce } from './message.handler.js';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
@@ -200,7 +200,21 @@ router.post('/test', requireAuth, async (req: Request, res: Response) => {
 	logger.info({ phone, message }, 'Test message received');
 
 	try {
-		const { response, agentType, contactId, leadId } = await processIncomingMessage(phone, message);
+		// Usar el mismo buffer con debounce que el flujo normal,
+		// para que los mensajes rápidos del mismo contacto se agrupen
+		// antes de enviarlos al orquestador.
+		const debounced = await bufferForDebounce(phone, message, null, null);
+		if (debounced.agentType === 'BUFFERED') {
+			res.json({ success: true, buffered: true, message: '' });
+			return;
+		}
+
+		if (!debounced.response) {
+			res.status(500).json({ error: 'No se pudo procesar el mensaje' });
+			return;
+		}
+
+		const { response, agentType, contactId, leadId } = debounced as any;
 		if (!response) {
 			res.status(500).json({ error: 'No se pudo procesar el mensaje' });
 			return;
