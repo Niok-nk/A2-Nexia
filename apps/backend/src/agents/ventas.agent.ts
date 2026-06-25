@@ -2272,7 +2272,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 			productoBuscado = terminoBusqueda;
 		}
 
-		const preguntaSeguimiento = /\b(?:especificaciones?|caracter[ií]sticas?|detalles?|d[ée]tal|cu[aá]nto cuesta|cu[aá]nto vale|cu[aá]l es|en qu[eé] se diferencia|diferencia|c[oó]mo es|descr[ií]belo|dimensiones|medidas|capacidad|color|modelo|referencia|precio|m[aá]s info|m[aá]s informaci[oó]n|primero|segunda?|tercero|este|ese|aquel|me gusta|prefiero|quiero|detalles|garantia|la primera opci[oó]n|el primero|la primera)\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
+		const preguntaSeguimiento = /\b(?:especificaciones?|caracter[ií]sticas?|detalles?|d[ée]tal|cu[aá]nto cuesta|cu[aá]nto vale|cu[aá]l es|en qu[eé] se diferencia|diferencia|c[oó]mo es|descr[ií]belo|dimensiones|medidas|capacidad|color|modelo|referencia|precio|m[aá]s info|m[aá]s informaci[oó]n|primero|segunda?|tercero|este|ese|aquel|detalles|garantia|la primera opci[oó]n|el primero|la primera)\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
 
 		if (preguntaSeguimiento) {
 			try {
