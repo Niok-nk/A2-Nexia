@@ -670,6 +670,16 @@ export class VentasAgent implements IAgent {
 		// ── Redirigir a servicio técnico si el regex lo detecta ──────────────
 		if (!context?.flujo) {
 			const msgNFC = message.toLowerCase().normalize('NFC');
+
+			// ── Seguimiento post-compra (consultar compra ya realizada) ─────────
+			const consultaPostCompra = /(?:seguimiento\s+(?:de\s+)?(?:una|mi|la)\s*compra|consultar\s+(?:de\s+)?(?:una|mi|la)\s+compra|compr[aá]\s+que\s+(?:realic|hice|compr)|ya\s+(?:compr[éeó]|pagu[éeó])|hice\s+una\s+compra|realic[ée]\s+una\s+compra|estado\s+de\s+mi\s+(?:compra|pedido)|quiero\s+(?:hacer\s+)?seguimiento|para\s+seguimiento)/i.test(msgNFC);
+			if (consultaPostCompra) {
+				return {
+					response: 'Para seguimiento de tu compra puedes contactar a un asesor especializado al número +57 318 740 8190. Ellos te ayudarán con el estado de tu pedido. 😊',
+					metadata: { agentType: 'ventas', flujo: null, notificarPostCompra: true },
+				};
+			}
+
 			const esServicioTecnico = /\b(?:servicio\s+t[eé]cnico|reparaci[oó]n|reparar|mantenimiento|no\s+enciende|no\s+funciona|no\s+enfr[ií]a|no\s+centrifuga|da[ñn]ado|da[ñn]ada|falla|aver[ií]a|garant[ií]a|cambio|reembolso|devoluci[oó]n|reclamaci[oó]n|t[eé]cnico\s+a\s+casa|mandar\s+t[eé]cnico|visita\s+t[eé]cnica)\b/i.test(msgNFC);
 			if (esServicioTecnico) {
 				const { ServicioTecnicoAgent } = await import('./servicio-tecnico.agent.js');
