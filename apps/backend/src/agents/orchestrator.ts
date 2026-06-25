@@ -173,7 +173,9 @@ export class Orchestrator {
 		if (/\b(c[oó]mo pago|d[oó]nde pago|medio de pago|medios de pago|formas de pago|forma de pago|pse|pagar con tarjeta|transferencia|consignar|consignaci[oó]n|soporte de pago|comprobante de pago)\b/.test(m)) {
 			return 'pagos';
 		}
-		if (/\b(comprar|cotizar|cotizaci[oó]n|precio|cu[aá]nto cuesta|cu[aá]nto vale|televisor|televisores|tv|nevera|neveras|nevecones?|lavadora|lavadoras|congeladores?|exhibidores?|minibar|freidora|freidoras|horno|hornos|licuadora|licuadoras|cafeteras?|hervidor|ventiladores?|cocina|parlante|parlantes|sonido|audio|video|refrigeraci[oó]n|electrodom[eé]stico|electrodom[eé]sticos|contado|cr[eé]dito|financiar|cuotas|profesional|profesionales|tuber[ií]a|tuber[ií]as|calidad|garant[ií]a|negocio|seguimiento\s*(?:de\s*)?(?:una|mi|la)?\s*compra|consultar\s*(?:de\s*)?(?:una|mi|la)?\s*compra|compra\s+(?:que|la|lo|las|los)\s+(?:realic|hice|compr)|hice\s+una\s+compra|realic[ée]\s+una\s+compra|la\s+compra\s+la\s+(?:realic|hice|compr)|compr[ée]\s+por\s+(?:internet|web|p[aá]gina|online|l[íi]nea)|estado\s+de\s+(?:mi\s+)?(?:compra|pedido)|rastrear\s+(?:compra|pedido))\b/.test(m)) {
+		if (/\b(comprar|cotizar|cotizaci[oó]n|precio|cu[aá]nto cuesta|cu[aá]nto vale|televisor|televisores|tv|nevera|neveras|nevecones?|lavadora|lavadoras|congeladores?|exhibidores?|minibar|freidora|freidoras|horno|hornos|licuadora|licuadoras|cafeteras?|hervidor|ventiladores?|cocina|parlante|parlantes|sonido|audio|video|refrigeraci[oó]n|electrodom[eé]stico|electrodom[eé]sticos|contado|cr[eé]dito|financiar|cuotas|profesional|profesionales|tuber[ií]a|tuber[ií]as|calidad|garant[ií]a|negocio)\b/.test(m) 
+			|| (/\b(?:seguimiento|rastrear|gu[ií]a|tracking)\b/i.test(m) && /\b(?:compra|pedido|producto|env[ií]o)\b/i.test(m))
+			|| /\b(?:ya\s+(?:compr[éeó]|pagu[éeó]|cancel[éeó]|complet[éeó])|compr[ée]\s+por\s+(?:internet|web|p[aá]gina|online|l[íi]nea)|(?:la|mi|una)\s+compra\s+(?:la|lo|las|los)\s+(?:realic[ée]|hice|compr[ée]|pag[ué])|hice\s+(?:una|mi|la)\s+(?:compra|pedido|pago|transferencia)|realic[ée]\s+(?:una|mi|la)\s+(?:compra|pedido|pago|transferencia)|adquir[ií]\s+(?:un|una|el|la))\b/i.test(m)) {
 			return 'ventas';
 		}
 

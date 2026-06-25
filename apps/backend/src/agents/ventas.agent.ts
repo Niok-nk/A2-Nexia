@@ -672,7 +672,10 @@ export class VentasAgent implements IAgent {
 			const msgNFC = message.toLowerCase().normalize('NFC');
 
 			// ── Seguimiento post-compra (consultar compra ya realizada) ─────────
-			const consultaPostCompra = /(?:seguimiento\s+(?:de\s+)?(?:una|mi|la)\s*compra|consultar\s+(?:de\s+)?(?:una|mi|la)\s+compra|compr[aá]\s+(?:que\s+|la\s+|lo\s+|las\s+|los\s+)?(?:realic|hice|compr)|ya\s+(?:compr[éeó]|pagu[éeó])|hice\s+una\s+compra|realic[ée]\s+una\s+compra|la\s+compra\s+la\s+(?:realic|hice|compr)|compr[ée]\s+por\s+(?:internet|web|p[aá]gina|online|l[íi]nea)|estado\s+de\s+mi\s+(?:compra|pedido)|quiero\s+(?:hacer\s+)?seguimiento|para\s+seguimiento)/i.test(msgNFC);
+			// Detecta cualquier mensaje donde el cliente ya compró y busca seguimiento,
+			// sin importar la redacción exacta.
+			const consultaPostCompra = (/\b(?:seguimiento|rastrear|gu[ií]a|tracking)\b/i.test(msgNFC) && /\b(?:compra|pedido|producto|env[ií]o)\b/i.test(msgNFC))
+				|| /\b(?:ya\s+(?:compr[éeó]|pagu[éeó]|cancel[éeó]|complet[éeó])|compr[ée]\s+por\s+(?:internet|web|p[aá]gina|online|l[íi]nea)|(?:la|mi|una)\s+compra\s+(?:la|lo|las|los)\s+(?:realic[ée]|hice|compr[ée]|pag[ué])|hice\s+(?:una|mi|la)\s+(?:compra|pedido|pago|transferencia)|realic[ée]\s+(?:una|mi|la)\s+(?:compra|pedido|pago|transferencia)|adquir[ií]\s+(?:un|una|el|la))\b/i.test(msgNFC);
 			if (consultaPostCompra) {
 				return {
 					response: 'Para seguimiento de tu compra puedes contactar a un asesor especializado al número +57 318 740 8190. Ellos te ayudarán con el estado de tu pedido. 😊',
