@@ -1,26 +1,42 @@
 import { IAgent, AgentResponse } from './types.js';
-import { buildUserDataContext, buildGemmaPrompt, cleanResponse, formatHistory } from './helpers.js';
+import { buildUserDataContext, buildGemmaPrompt, cleanResponse, formatHistory, AGENT_NAME } from './helpers.js';
 import { generateResponse } from '../utils/gemini.js';
+
+const CORREO_VACANTES = 'psicologo2@electromillonaria.co';
 
 export class VacantesAgent implements IAgent {
 	name = 'Vacantes';
 
 	async handle(message: string, context: any): Promise<AgentResponse> {
 		const userDataCtx = buildUserDataContext(context?.userData);
-		const datos = `No hay listado de vacantes cargado actualmente. El interesado deja sus datos para quedar en base de datos: nombre completo, cargo de interés, ciudad. Puede enviar hoja de vida.${userDataCtx}`;
 
 		const { system, user } = buildGemmaPrompt({
-			instruccion: `Eres asistente de recursos humanos de Electrodomésticos JLC. Atiendes a personas interesadas en trabajar en la empresa. Datos: ${datos}`,
+			instruccion: `Eres ${AGENT_NAME}, asesora de talento humano de JLC Electronics Colombia.
+
+El cliente está interesado en vacantes o en trabajar con nosotros.
+
+REGLAS:
+- Responde de forma personalizada y cálida según lo que haya escrito el cliente.
+- Indica que para aplicar debe enviar su hoja de vida al correo: ${CORREO_VACANTES}
+- Si el cliente ya envió hoja de vida por imagen, indica que también puede enviarla al correo para que quede registrada.
+- No preguntes datos personales ni los registres. Solo redirige al correo.
+- Máximo 2 frases, 1 emoji.
+- No inventes vacantes ni listados de cargos disponibles.
+
+Correo de postulación: ${CORREO_VACANTES}
+${userDataCtx ? `Datos del cliente: ${userDataCtx}` : ''}`,
 			ejemplos: [
 				{
 					cliente: '¿Tienen vacantes?',
-					asistente:
-						'¡Gracias por tu interés en trabajar con nosotros! En este momento no tengo el listado de vacantes disponible, pero puedo registrar tu perfil. ¿Me compartes tu nombre completo, el cargo de interés y tu ciudad?',
+					asistente: '¡Gracias por tu interés en formar parte de nuestro equipo! 🌟 Envía tu hoja de vida al correo psicologo2@electromillonaria.co y el equipo de RRHH te contactará. 😊',
 				},
 				{
-					cliente: 'Soy Carlos Pérez, busco asesor comercial en Cali',
-					asistente:
-						'¡Excelente, Carlos! Quedas registrado en nuestra base de datos. Si quieres, envía tu hoja de vida para adjuntarla a tu perfil y que RRHH te contacte cuando haya una vacante de asesor comercial en Cali.',
+					cliente: 'Quiero aplicar para asesor comercial en Cali',
+					asistente: 'Qué emocionante que quieras trabajar con nosotros 🎉 Por favor envía tu hoja de vida al correo psicologo2@electromillonaria.co indicando el cargo y ciudad de interés, y te contactarán. 😊',
+				},
+				{
+					cliente: 'Envío mi hoja de vida',
+					asistente: '¡Gracias! 📄 Recibimos tu hoja de vida. También puedes enviarla al correo psicologo2@electromillonaria.co para que quede registrada en nuestra base de datos. El equipo de RRHH se pondrá en contacto contigo. 😊',
 				},
 			],
 			historial: formatHistory(context?.history),
@@ -32,7 +48,7 @@ export class VacantesAgent implements IAgent {
 
 		return {
 			response,
-			metadata: { agentType: 'vacantes' },
+			metadata: { agentType: 'vacantes', correoVacantes: CORREO_VACANTES },
 		};
 	}
 }
