@@ -2272,7 +2272,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 			productoBuscado = terminoBusqueda;
 		}
 
-		const preguntaSeguimiento = /\b(?:especificaciones?|caracter[ií]sticas?|detalles?|d[ée]tal|cu[aá]nto cuesta|cu[aá]nto vale|cu[aá]l es|en qu[eé] se diferencia|diferencia|c[oó]mo es|descr[ií]belo|dimensiones|medidas|capacidad|color|modelo|referencia|precio|m[aá]s info|m[aá]s informaci[oó]n|primero|segunda?|tercero|este|ese|aquel|detalles|garantia|la primera opci[oó]n|el primero|la primera)\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
+		const preguntaSeguimiento = /\b(?:especificaciones?|caracter[ií]sticas?|detalles?|d[ée]tal|cu[aá]nto cuesta|cu[aá]nto vale|cu[aá]l es|en qu[eé] se diferencia|diferencia|c[oó]mo es|descr[ií]belo|dimensiones|medidas|capacidad|color|modelo|referencia|precio|m[aá]s info|m[aá]s informaci[oó]n|primero|segunda?|tercero|este|ese|aquel|detalles|garantia|la primera opci[oó]n|el primero|la primera)\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0 && !compraIntencion && !context?.flujo?.startsWith('pago_') && context?.flujo !== 'seleccion_pago';
 
 		if (preguntaSeguimiento) {
 			try {
@@ -2293,7 +2293,9 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		// Cada vez que el cliente menciona un producto (SKU, categoría, link,
 		// pregunta activa sobre producto), buscar en WooCommerce para tener
 		// datos frescos en el prompt de la IA y evitar que invente información.
-		if (products.length === 0 && esPreguntaActiva) {
+		// NO buscar si el cliente ya expresó intención de compra (compraIntencion)
+		// o ya está en flujo de pago, para no sobrescribir el producto seleccionado.
+		if (products.length === 0 && esPreguntaActiva && !compraIntencion && !context?.flujo?.startsWith('pago_') && context?.flujo !== 'seleccion_pago') {
 			const sku = extraerSKU(message);
 			const pideLink = /\b(?:link|enlace|url)\b/i.test(message);
 			const prodPrevio = context?.userData?.productoSolicitado || context?.productoSolicitado || context?.terminoBusqueda;
