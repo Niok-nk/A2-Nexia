@@ -366,8 +366,32 @@ async function matchProductoDesdeMsg(msg: string, productos: any[], lastAssistan
 		return productos[shortNum - 1];
 	}
 
-	// 2. IA para interpretar natural language robustamente
-	const listaStr = productos.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
+	// 2. Coincidencia por precio mencionado en el mensaje del asistente
+	const precioMatch = lastAssistantMsg.match(/\$\s*([\d.]+)/);
+	if (precioMatch) {
+		const precioStr = precioMatch[1].replace(/\./g, '');
+		const precioNumerico = parseInt(precioStr, 10);
+		if (!isNaN(precioNumerico)) {
+			const porPrecio = productos.find((p: any) => {
+				const pp = parseFloat(p.price || '0');
+				return pp > 0 && Math.abs(pp - precioNumerico) / precioNumerico < 0.05;
+			});
+			if (porPrecio) return porPrecio;
+		}
+	}
+
+	// 3. Coincidencia por nombre en el mensaje del asistente
+	const nombreMatch = lastAssistantMsg.match(/Congelador\s+JLC\s+[\w\d\s-]+/i);
+	if (nombreMatch) {
+		const nombreAsistente = nombreMatch[0].toLowerCase();
+		const porNombre = productos.find((p: any) =>
+			p.name?.toLowerCase().includes(nombreAsistente) || nombreAsistente.includes(p.name?.toLowerCase())
+		);
+		if (porNombre) return porNombre;
+	}
+
+	// 4. IA para interpretar natural language robustamente
+	const listaStr = productos.map((p, i) => `${i + 1}. ${p.name}${p.price ? ` - $${Number(p.price).toLocaleString('es-CO')}` : ''}`).join('\n');
 	const system = `Eres un sistema experto de análisis de intenciones comerciales.
 Lista MÁXIMA de productos en la base de datos (con sus índices correctos):
 ${listaStr}
@@ -395,6 +419,23 @@ REGLAS:
 		console.error("[Ventas] Error en matchProductoDesdeMsg con IA:", e);
 	}
 
+	return null;
+}
+
+/** Busca en los productos el que coincide con el precio mencionado por el asistente */
+function matchProductoPorAsistente(lastAssistantMsg: string, productos: any[]): any | null {
+	if (!lastAssistantMsg || !productos?.length) return null;
+	const precioMatch = lastAssistantMsg.match(/\$\s*([\d.]+)/);
+	if (precioMatch) {
+		const precioNumerico = parseInt(precioMatch[1].replace(/\./g, ''), 10);
+		if (!isNaN(precioNumerico)) {
+			const porPrecio = productos.find((p: any) => {
+				const pp = parseFloat(p.price || '0');
+				return pp > 0 && Math.abs(pp - precioNumerico) / precioNumerico < 0.05;
+			});
+			if (porPrecio) return porPrecio;
+		}
+	}
 	return null;
 }
 
@@ -1320,14 +1361,20 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				
 				if (!matchResult) {
 					// Mensaje vago positivo ("me gusta", "lo quiero") sin referencia a producto específico
-					// → asumir el primer producto para no romper la conversación
+					// → asumir el producto mencionado por el asistente o el primero
 					// Pero si pide descripción/info, no es compra, dejar fluir
 					const mensajeTrim = message.trim();
-					const esVagoPositivo = !esPreguntaInfo(mensajeTrim) && /^(?:(?:si|sí)\s+)?(?:me gusta|lo quiero|me interesa|d[aá]le|proceder|concretar|continuemos|sigamos|seguimos|me quedo con|compro eso|la compro|lo compro|eso quiero|eso me sirve|me llevo)$|^(?:si|sí)\s+(?:continuemos|sigamos(?: adelante)?|seguimos)$/i.test(mensajeTrim);
+					const esVagoPositivo = !esPreguntaInfo(mensajeTrim) && (
+					/^(?:(?:si|sí)\s+)?(?:me gusta|lo quiero|me interesa|d[aá]le|proceder|concretar|continuemos|sigamos|seguimos|me quedo con|compro eso|la compro|lo compro|eso quiero|eso me sirve|me llevo)$|^(?:si|sí)\s+(?:continuemos|sigamos(?: adelante)?|seguimos)$/i.test(mensajeTrim)
+					|| /^(?:perfecto\s+|bien\s+|ok\s+|bueno\s+|excelente\s+|listo\s+|sale\s+|d[áa]le\s+)?(?:si\s+|sí\s+)?(?:quiero\s*comprar(?:lo|la)?|c[oó]mprolo|c[oó]mprala|lo\s*quiero|la\s*quiero|comprarlo|comprarla|procedamos?|hag[aa]moslo|concretemos)\s*$/i.test(mensajeTrim)
+				);
 					if (esVagoPositivo) {
-						productoSolicitado = ultimosProductos[0].name;
-						productoURL = ultimosProductos[0].permalink;
-						pPrice = ultimosProductos[0].price;
+						// Intentar identificar el producto del último mensaje del asistente
+						const prodPorAsistente = matchProductoPorAsistente(lastAssistantMsg, ultimosProductos);
+						const prod = prodPorAsistente || ultimosProductos[0];
+						productoSolicitado = prod.name;
+						productoURL = prod.permalink;
+						pPrice = prod.price;
 					} else {
 						// No se pudo identificar → mostrar el primero y preguntar
 						const p = ultimosProductos[0];
