@@ -6,8 +6,8 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 const MODELS = [
 	//'gemini-3.1-flash-lite',
-	'gemini-2.5-flash-lite',
-	//'gemma-4-31b-it',
+	//'gemini-2.5-flash-lite',
+	'gemma-4-31b-it',
 ];
 
 const PATRONES_BLOQUEO = [
@@ -62,15 +62,12 @@ export const generateMultimodalResponse = async (
 	mimeType: string,
 	systemInstruction?: string
 ): Promise<string> => {
-	let lastError: any;
 	const parts: any[] = [
 		{ text },
 		{ inlineData: { mimeType, data: imageBase64 } },
 	];
 
 	while (true) {
-		let todosRecuperables = true;
-
 		for (const modelName of MODELS) {
 			let currentParts = parts;
 
@@ -90,33 +87,18 @@ export const generateMultimodalResponse = async (
 							{ text: `${content}\n\n[SISTEMA - ERROR DE SEGURIDAD]: Tu respuesta anterior contenía razonamiento interno o texto en inglés. RESPONDE ÚNICAMENTE EN ESPAÑOL COLOMBIANO.` },
 							{ inlineData: { mimeType, data: imageBase64 } },
 						];
-					} else {
-						console.warn(`[Gemini API] Model (${modelName}) leaked reasoning 5 times. Moving on...`);
 					}
 				} catch (error: any) {
 					const errorStr = String(error);
-					const esRecuperable = errorStr.includes('429') || errorStr.includes('Too Many Requests') || errorStr.includes('503') || errorStr.includes('Service Unavailable');
-					if (esRecuperable) {
-						const delayMs = Math.min(1000 * Math.pow(2, attempt), 30_000);
-						console.warn(`[Gemini API] Model (${modelName}) rate-limited/unavailable on attempt ${attempt}. Retrying in ${delayMs}ms...`);
-						await new Promise(r => setTimeout(r, delayMs));
-						continue;
-					}
-					todosRecuperables = false;
-					lastError = errorStr;
-					console.warn(`[Gemini API] Model (${modelName}) failed on attempt ${attempt}. Error: ${errorStr}`);
-					break;
+					const delayMs = Math.min(1000 * Math.pow(2, attempt), 30_000);
+					console.warn(`[Gemini API] Model (${modelName}) failed attempt ${attempt}. ${errorStr}. Retrying in ${delayMs}ms...`);
+					await new Promise(r => setTimeout(r, delayMs));
 				}
-			}
-
-			if (!todosRecuperables) {
-				throw new Error(`Gemini API multimodal error. Last error: ${lastError}`);
 			}
 		}
 
-		const RETRY_DELAY = 30_000;
-		console.warn(`[Gemini API] All multimodal models unavailable (503/429). Retrying in ${RETRY_DELAY / 1000}s...`);
-		await new Promise(r => setTimeout(r, RETRY_DELAY));
+		console.warn(`[Gemini API] All multimodal models failed. Retrying in 30s...`);
+		await new Promise(r => setTimeout(r, 30_000));
 	}
 };
 
@@ -163,11 +145,7 @@ export const generateResponse = async (
 	prompt: string,
 	systemInstruction?: string
 ): Promise<string> => {
-	let lastError: any;
-
 	while (true) {
-		let todosRecuperables = true;
-
 		for (const modelName of MODELS) {
 			let currentPrompt = prompt;
 
@@ -187,33 +165,17 @@ export const generateResponse = async (
 					if (attempt < 5) {
 						console.warn(`[Gemini API] Model (${modelName}) leaked reasoning or English on attempt ${attempt}. Retrying...`);
 						currentPrompt = `${prompt}\n\n[SISTEMA - ERROR DE SEGURIDAD]: Tu respuesta anterior contenía razonamiento interno o texto en inglés. RESPONDE ÚNICAMENTE EN ESPAÑOL COLOMBIANO. PROHIBIDO escribir en inglés, prohibido mostrar tu razonamiento, análisis o notas de constraints. Escribe solo el mensaje final para el cliente.`;
-					} else {
-						console.warn(`[Gemini API] Model (${modelName}) leaked reasoning 5 times. Moving on...`);
 					}
 				} catch (error: any) {
 					const errorStr = String(error);
-					const esRecuperable = errorStr.includes('429') || errorStr.includes('Too Many Requests') || errorStr.includes('503') || errorStr.includes('Service Unavailable');
-					if (esRecuperable) {
-						const delayMs = Math.min(1000 * Math.pow(2, attempt), 30_000);
-						console.warn(`[Gemini API] Model (${modelName}) rate-limited/unavailable on attempt ${attempt}. Retrying in ${delayMs}ms...`);
-						await new Promise(r => setTimeout(r, delayMs));
-						continue;
-					}
-					todosRecuperables = false;
-					lastError = errorStr;
-					console.warn(`[Gemini API] Model (${modelName}) failed on attempt ${attempt}. Error: ${errorStr}`);
-					break;
+					const delayMs = Math.min(1000 * Math.pow(2, attempt), 30_000);
+					console.warn(`[Gemini API] Model (${modelName}) failed attempt ${attempt}. ${errorStr}. Retrying in ${delayMs}ms...`);
+					await new Promise(r => setTimeout(r, delayMs));
 				}
-			}
-
-			if (!todosRecuperables) {
-				throw new Error(`Gemini API error. Last error: ${lastError}`);
 			}
 		}
 
-		// Todos los modelos fallaron solo con errores recuperables (503/429)
-		const RETRY_DELAY = 30_000;
-		console.warn(`[Gemini API] All models unavailable (503/429). Retrying in ${RETRY_DELAY / 1000}s...`);
-		await new Promise(r => setTimeout(r, RETRY_DELAY));
+		console.warn(`[Gemini API] All models failed. Retrying in 30s...`);
+		await new Promise(r => setTimeout(r, 30_000));
 	}
 };
