@@ -56,7 +56,7 @@ export class BienvenidaAgent implements IAgent {
 	name = 'Bienvenida';
 
 	private esClienteRecurrente(context: any): boolean {
-		return context?.nuevaSesion || (context?.history?.length ?? 0) > 0;
+		return (context?.history?.length ?? 0) > 1;
 	}
 
 	async handle(_message: string, context: any): Promise<AgentResponse> {

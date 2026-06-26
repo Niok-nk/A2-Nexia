@@ -38,11 +38,11 @@ const CIUDADES_CONOCIDAS = [
 	'mocoa', 'puerto asís', 'puerto asis', 'orito', 'sibundoy', 'villagarzón', 'villagarzon',
 	'neiva', 'pitalito', 'garzón', 'garzon', 'campoalegre',
 	'cali', 'buenaventura', 'palmira', 'tuluá', 'tulua', 'buga', 'cartago', 'jamundí', 'jamundi', 'yumbo',
-	'el peñol', 'peñol', 'bogotá', 'bogota',
+	'el peñol', 'peñol', 
 ];
 
 const DEPARTAMENTOS_CONOCIDOS = [
-	'nariño', 'narino', 'cauca', 'putumayo', 'huila', 'valle', 'valle del cauca', 'cundinamarca',
+	'nariño', 'narino', 'cauca', 'putumayo', 'huila', 'valle', 'valle del cauca',
 ];
 
 function extraerUbicacion(mensaje: string): { ciudad: string | null; departamento: string | null } {
