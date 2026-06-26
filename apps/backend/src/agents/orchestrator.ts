@@ -369,10 +369,18 @@ Donde:
 					// Buscar en WooCommerce usando el producto identificado por visión
 					let catProducts: any[] = [];
 					const textoExtraido = analisis?.textoVisible || '';
-					const terminoBusqueda = textoExtraido || analisis?.producto || (message === '[Imagen]' ? 'producto' : message.slice(0, 60));
-					try {
-						catProducts = await wooCommerceService.searchProducts(terminoBusqueda, 10);
-					} catch { /* sin catalogo */ }
+					const terminosBusqueda = [
+						textoExtraido,
+						analisis?.producto,
+						message === '[Imagen]' ? '' : message.slice(0, 60),
+					].filter(Boolean);
+					for (const termino of terminosBusqueda) {
+						if (!termino) continue;
+						try {
+							catProducts = await wooCommerceService.searchProducts(termino, 10);
+							if (catProducts.length > 0) break; // primer termino que da resultados
+						} catch { /* continuar al siguiente termino */ }
+					}
 
 					const catalogoStr = catProducts.length > 0
 						? catProducts.map((p: any) => `- ${p.name} | $${parseInt(p.price).toLocaleString('es-CO')}`).join('\n')
