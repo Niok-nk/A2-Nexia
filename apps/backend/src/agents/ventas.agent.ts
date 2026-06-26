@@ -1328,7 +1328,8 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		// aunque mencione "la 3" o "prefiero" — primero hay que responder la duda.
 		// También excluir preguntas de precio ("que precio tiene la de 15")
 		const esPreguntaPrecio = /\b(?:precio|cu[aá]nto\s+(?:cuesta|cuestan|vale|valen|es|son)|qu[eé]\s+precio\s+tiene)\b/i.test(message);
-		const quiereComprar = quiereComprarRaw && !esPreguntaEspecificacion(message) && !esPreguntaPrecio && !esPreguntaInfo(message) && !esPreguntaActiva;
+		const esPreguntaPago = /\b(?:c[oó]mo\s+(?:pagar|pago|compro|puedo\s*pagar|hago\s*para\s*pagar|le\s*hago|puedo\s*pagar)|d[oó]nde\s+pago|quiero\s+pagar|medios?\s*de\s*pago|formas?\s*de\s*pago|opciones?\s*de\s*pago)\b/i.test(message);
+		const quiereComprar = quiereComprarRaw && !esPreguntaEspecificacion(message) && !esPreguntaPrecio && !esPreguntaInfo(message) && (!esPreguntaActiva || esPreguntaPago);
 
 		const puedeComprar = context?.modalidad === 'contado' || 
 			(context?.ultimaBusqueda?.results?.length > 0 && context?.modalidad !== 'credito');
@@ -1718,6 +1719,33 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		}
 
 		// ── PASO 5: Flujo de selección de pago ──────────────────────────────
+
+		// ── Auxilio con pago: si el cliente no puede pagar, escalar ────────
+		const noPudoPagar = context?.ultimaBusqueda?.results?.length > 0
+			&& !esPreguntaActiva
+			&& /\b(?:no\s+(?:puedo|pude|logr[ée]|sirvi[oó])|no\s+me\s+(?:dej[oó]|permiti[oó])|error\s+(?:en\s+)?(?:el\s+)?pago|fall[oó]\s+(?:el\s+)?pago|problema\s+(?:con\s+)?(?:el\s+)?pago|ayuda\s+(?:con\s+)?(?:el\s+)?pago|asesor[aí]a\s+(?:con\s+)?(?:el\s+)?pago)\b/i.test(message);
+		if (noPudoPagar && !context?.flujo?.startsWith('pago_')) {
+			const WA_ESCALAMIENTO = process.env.WA_ESCALAMIENTO || '573187408190';
+			const ciudadInfo = context?.ciudad || context?.userData?.ciudad || 'ciudad no especificada';
+			const productoInfo = context?.productoCompra || context?.ultimaBusqueda?.results?.[0]?.name || 'producto pendiente';
+			const notificacion = `🚨 URGENTE: Cliente desde ${ciudadInfo} NO PUEDE PAGAR.\nProducto: ${productoInfo}\nRequiere asistencia inmediata.`;
+			try {
+				const { sendMessage: sendWADirect } = await import('../whatsapp/whatsapp.js');
+				await sendWADirect(WA_ESCALAMIENTO, notificacion);
+			} catch { /* no bloquear */ }
+			return {
+				response: `No te preocupes, ya le notifiqué a nuestro equipo comercial para que te ayude directamente. Un asesor te va a escribir por aquí en un momentico. 😊`,
+				metadata: {
+					agentType: 'ventas',
+					flujo: null,
+					ciudad: context?.ciudad,
+					ciudadValidada: true,
+					tieneCobertura: context?.tieneCobertura,
+					escalado: true,
+				},
+			};
+		}
+
 		if (context?.flujo === 'seleccion_pago') {
 			const opcion = message.trim();
 			const ultimosProductos = context?.ultimaBusqueda?.results ?? [];
@@ -2272,7 +2300,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 			}) || null;
 		}
 
-		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago' && !resetFlujo && !esPreguntaActiva) {
+		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago' && !resetFlujo && (!esPreguntaActiva || esPreguntaPago)) {
 			const prod = productoPorPrecio || context?.ultimaBusqueda?.results?.[0];
 			const productoURL = prod?.permalink || context?.productoURL;
 			const nombreProducto = prod?.name || context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';

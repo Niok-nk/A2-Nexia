@@ -511,6 +511,15 @@ Responde corto.`;
 			if (intent === 'pagos' && context?.ultimaBusqueda?.results?.length > 0 && context?.modalidad === 'contado') {
 				intent = 'ventas';
 			}
+
+			// ── CORRECCIÓN: Problemas de pago no deben ir a cartera
+			// si hay un producto activo en ventas. "no puedo pagar" NO es cartera.
+			if (intent === 'cartera' && context?.ultimaBusqueda?.results?.length > 0) {
+				const esProblemaPago = /\b(?:no\s+(?:puedo|pude|logr[ée]|sirvi[oó])|no\s+me\s+(?:dej[oó]|permiti[oó])|error\s+(?:en\s+)?(?:el\s+)?pago|fall[oó]\s+(?:el\s+)?pago|problema\s+(?:con\s+)?(?:el\s+)?pago|ayuda\s+(?:con\s+)?(?:el\s+)?pago|asesor[aí]a\s+(?:con\s+)?(?:el\s+)?pago)\b/i.test(message);
+				if (esProblemaPago) {
+					intent = 'ventas';
+				}
+			}
 		}
 
 		// Mensaje a usar: si la imagen fue tipo "otro/documento", se enriqueció
