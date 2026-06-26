@@ -306,7 +306,7 @@ Donde:
   * "otro": cualquier otra cosa.
 - descripcion: 1 frase corta de qué muestra la imagen.
 - producto: si tipo es "producto" o "producto_dañado", el tipo de electrodoméstico identificado (ej "vitrina refrigerante", "lavadora", "nevera no frost"). Si no aplica, "".
-- textoVisible: número de transacción/referencia si es comprobante, o texto relevante visible. Si no hay, "".`;
+- textoVisible: EXTRAE TODO el texto legible en la imagen (referencias, códigos de producto como JLC-L299, modelos, precios, nombres de producto, números). Si no hay texto visible, "".`;
 
 				let analisis: any = {};
 				try {
@@ -368,7 +368,8 @@ Donde:
 				if (tipoImg === 'producto') {
 					// Buscar en WooCommerce usando el producto identificado por visión
 					let catProducts: any[] = [];
-					const terminoBusqueda = analisis?.producto || (message === '[Imagen]' ? 'producto' : message.slice(0, 60));
+					const textoExtraido = analisis?.textoVisible || '';
+					const terminoBusqueda = textoExtraido || analisis?.producto || (message === '[Imagen]' ? 'producto' : message.slice(0, 60));
 					try {
 						catProducts = await wooCommerceService.searchProducts(terminoBusqueda, 10);
 					} catch { /* sin catalogo */ }
@@ -384,9 +385,11 @@ Donde:
 ESTILO: mensajes MUY cortos (máximo 2 frases), máximo 1 emoji, tono cálido y femenino. NO te presentes de nuevo ni saludes largo.
 
 El cliente envió una foto de: ${analisis?.descripcion || 'un electrodoméstico'}.
+${textoExtraido ? `Texto visible en la imagen: "${textoExtraido}".` : ''}
 INSTRUCCIONES:
 - Nombra el producto usando SOLO el catálogo de abajo. NO inventes precios ni disponibilidad.
 - Si no está en el catálogo, dilo con naturalidad y ofrece ayudar a buscar algo similar.
+- Si el texto visible incluye una referencia de producto (ej: JLC-L299), menciónala para que el cliente sepa que la viste.
 - NUNCA afirmes "envío gratis a toda Colombia"; la cobertura depende de la ciudad.
 ${yaTieneCiudad
 	? `- El cliente está en ${context.ciudad}. Confirma el producto y pregunta si desea continuar con la compra.`
