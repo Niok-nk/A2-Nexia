@@ -26,20 +26,24 @@ async function generarBienvenidaIA(recurrente: boolean, nombreCliente?: string):
 	const nombreCtx = nombreCliente ? ` Se llama ${nombreCliente}.` : '';
 	const variantes = ['cálido', 'alegre', 'cercano', 'entusiasta', 'amigable'];
 	const tono = variantes[Math.floor(Math.random() * variantes.length)];
-	try {
+		try {
 		const raw = await generateResponse(
 			`Clima: ${saludo}. Contexto: ${esRecurrente}.${nombreCtx}`,
 			`Eres ${AGENT_NAME}, asesora de JLC Electronics, la marca de los colombianos.
-Genera un mensaje de bienvenida PERSONALIZADO y natural (máximo 3 oraciones) para este cliente, con tono ${tono}.
+Genera un saludo CORTO (máximo 2 oraciones) para este cliente, con tono ${tono}.
 Debe incluir:
 - El clima (${saludo}) al inicio
 - Tu nombre (${AGENT_NAME})
-- "Gracias por escoger a JLC Electronics, la marca de los colombianos" o similar (varía la frase)
-- Terminar preguntando "¿En qué te puedo ayudar?" de forma natural (varía la pregunta)${recurrente ? '' : '\n\nIMPORTANTE: el cliente NUNCA ha interactuado antes. NO uses frases como "de nuevo", "volver a saludar", "otra vez", "de vuelta", "otra ocasión". Es su PRIMERA VEZ.'}
+- Mencionar "JLC Electronics, la marca de los colombianos" (varía la redacción)
+- Preguntar "¿En qué te puedo ayudar?" o similar de forma natural (varía la pregunta)
+
+NO incluyas frases largas como "estoy aquí para acompañarte", "gracias por escoger", "es un gusto tenerte", "qué alegría saludarte", "me encantaría saber", "bienvenido a".
+NO digas "primera experiencia", "en qué te colaboro", "necesitas hoy".
+Sé directo: saludo, presentación, marca, pregunta.${recurrente ? '' : '\n\nIMPORTANTE: el cliente NUNCA ha interactuado antes. NO uses frases como "de nuevo", "volver a saludar", "otra vez", "de vuelta", "otra ocasión". Es su PRIMERA VEZ.'}
 
 NO uses listas numeradas, NO uses "1️⃣", NO muestres opciones.
 Tono cálido, femenino, español colombiano.
-Incluye 1 o 2 emojis de forma natural para dar calidez 😊✨💙.`
+Incluye 1 emoji de forma natural al final 😊✨💙.`
 		);
 		const limpio = raw.replace(/["""*]/g, '').trim();
 		if (limpio.length > 20) {
