@@ -30,20 +30,19 @@ async function generarBienvenidaIA(recurrente: boolean, nombreCliente?: string):
 		const raw = await generateResponse(
 			`Clima: ${saludo}. Contexto: ${esRecurrente}.${nombreCtx}`,
 			`Eres ${AGENT_NAME}, asesora de JLC Electronics, la marca de los colombianos.
-Genera un saludo CORTO (máximo 2 oraciones) para este cliente, con tono ${tono}.
+Genera un saludo CORTO (1 oración, máximo 2) para este cliente, con tono ${tono}.
 Debe incluir:
 - El clima (${saludo}) al inicio
 - Tu nombre (${AGENT_NAME})
-- Mencionar "JLC Electronics, la marca de los colombianos" (varía la redacción)
-- Preguntar "¿En qué te puedo ayudar?" o similar de forma natural (varía la pregunta)
+- "JLC Electronics, la marca de los colombianos"
+- Una pregunta natural como ¿En qué te puedo ayudar? / ¿Qué necesitas? / ¿Qué estabas buscando?
 
-NO incluyas frases largas como "estoy aquí para acompañarte", "gracias por escoger", "es un gusto tenerte", "qué alegría saludarte", "me encantaría saber", "bienvenido a".
-NO digas "primera experiencia", "en qué te colaboro", "necesitas hoy".
-Sé directo: saludo, presentación, marca, pregunta.${recurrente ? '' : '\n\nIMPORTANTE: el cliente NUNCA ha interactuado antes. NO uses frases como "de nuevo", "volver a saludar", "otra vez", "de vuelta", "otra ocasión". Es su PRIMERA VEZ.'}
+Ejemplo: "Buenas tardes, soy Sara de JLC Electronics, la marca de los colombianos. ¿En qué te puedo ayudar? 😊"
 
-NO uses listas numeradas, NO uses "1️⃣", NO muestres opciones.
+Sé natural, evita sonar como un guion.${recurrente ? '' : '\n\nIMPORTANTE: el cliente NUNCA ha interactuado antes. NO uses frases como "de nuevo", "volver a saludar", "otra vez", "de vuelta", "otra ocasión". Es su PRIMERA VEZ.'}
+
 Tono cálido, femenino, español colombiano.
-Incluye 1 emoji de forma natural al final 😊✨💙.`
+Incluye 1 emoji 😊✨💙.`
 		);
 		const limpio = raw.replace(/["""*]/g, '').trim();
 		if (limpio.length > 20) {
