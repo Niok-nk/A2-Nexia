@@ -1576,6 +1576,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 						ciudadValidada: true,
 						productoCompra: context?.productoCompra,
 						nombreCliente: nombreIngresado,
+						...(context?.ultimaBusqueda ? { ultimaBusqueda: context.ultimaBusqueda } : {}),
 					},
 				};
 			}
@@ -1585,7 +1586,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				if (!direccionIngresada || direccionIngresada.length < 5) {
 					return {
 						response: 'Disculpa, ¿puedes darme más detalles de tu dirección? (barrio, calle, carrera, número) 😊',
-						metadata: { agentType: 'ventas', flujo: 'pago_web_datos', pasoDatos: 'direccion', productoURL: context?.productoURL, ciudad: ciudadGuardada, ciudadValidada: true, productoCompra: context?.productoCompra, nombreCliente: nombreGuardado },
+						metadata: { agentType: 'ventas', flujo: 'pago_web_datos', pasoDatos: 'direccion', productoURL: context?.productoURL, ciudad: ciudadGuardada, ciudadValidada: true, productoCompra: context?.productoCompra, nombreCliente: nombreGuardado, ...(context?.ultimaBusqueda ? { ultimaBusqueda: context.ultimaBusqueda } : {}) },
 					};
 				}
 				if (!ciudadGuardada) {
@@ -1600,6 +1601,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 							productoCompra: context?.productoCompra,
 							nombreCliente: nombreGuardado,
 							direccion: direccionIngresada,
+							...(context?.ultimaBusqueda ? { ultimaBusqueda: context.ultimaBusqueda } : {}),
 						},
 					};
 				}
@@ -1622,7 +1624,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				return {
 					response: `Puedes pagar directamente en nuestra página web.\n\nLink del producto:\n${context?.productoURL || ''}\n\n¿Quieres que te acompañe paso a paso con el proceso?`,
 					nextStage: 'PROPOSAL',
-					metadata: { agentType: 'ventas', flujo: 'pago_web', ciudad: ciudadGuardada, ciudadValidada: true, productoURL: context?.productoURL },
+					metadata: { agentType: 'ventas', flujo: 'pago_web', ciudad: ciudadGuardada, ciudadValidada: true, productoURL: context?.productoURL, ...(context?.ultimaBusqueda ? { ultimaBusqueda: context.ultimaBusqueda } : {}) },
 				};
 			}
 
@@ -1631,7 +1633,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				if (!ciudadIngresada || ciudadIngresada.length < 3) {
 					return {
 						response: 'Disculpa, no entendí la ciudad. ¿Puedes decirme desde dónde nos escribes? 📍',
-						metadata: { agentType: 'ventas', flujo: 'pago_web_datos', pasoDatos: 'ciudad', productoURL: context?.productoURL, productoCompra: context?.productoCompra, nombreCliente: nombreGuardado, direccion: direccionGuardada },
+						metadata: { agentType: 'ventas', flujo: 'pago_web_datos', pasoDatos: 'ciudad', productoURL: context?.productoURL, productoCompra: context?.productoCompra, nombreCliente: nombreGuardado, direccion: direccionGuardada, ...(context?.ultimaBusqueda ? { ultimaBusqueda: context.ultimaBusqueda } : {}) },
 					};
 				}
 				const producto = context?.ultimaBusqueda?.results?.[0];
@@ -1652,7 +1654,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				return {
 					response: `Puedes pagar directamente en nuestra página web.\n\nLink del producto:\n${context?.productoURL || ''}\n\n¿Quieres que te acompañe paso a paso con el proceso?`,
 					nextStage: 'PROPOSAL',
-					metadata: { agentType: 'ventas', flujo: 'pago_web', ciudad: ciudadIngresada, ciudadValidada: true, productoURL: context?.productoURL },
+					metadata: { agentType: 'ventas', flujo: 'pago_web', ciudad: ciudadIngresada, ciudadValidada: true, productoURL: context?.productoURL, ...(context?.ultimaBusqueda ? { ultimaBusqueda: context.ultimaBusqueda } : {}) },
 				};
 			}
 		}
@@ -1801,6 +1803,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 								ciudad,
 								ciudadValidada: true,
 								productoCompra: producto?.name || context?.productoCompra,
+								...(context?.ultimaBusqueda ? { ultimaBusqueda: context.ultimaBusqueda } : {}),
 							},
 						};
 					}
