@@ -67,15 +67,20 @@ function extraerUbicacion(mensaje: string): { ciudad: string | null; departament
 
 	// Patrones como "soy de X", "vivo en X"
 	if (!ciudad && !departamento) {
-		const patron = /(?:soy de|estoy en|vivo en|escribo desde|desde|ubicado en|me encuentro en)\s+([a-záéíóúñ\s]{3,30})/i;
+		// Excluir "estoy en busca de" (no es ubicación)
+		const patron = /(?:soy de|estoy en(?!\s*busca\s*de)|vivo en|escribo desde|desde|ubicado en|me encuentro en)\s+([a-záéíóúñ\s]{3,30})/i;
 		const match = mensaje.match(patron);
 		if (match) {
 			const texto = match[1].trim().toLowerCase();
+			// Solo asignar como ciudad si el texto es un nombre de lugar plausible
+			const esPlausible = texto.length >= 3 && texto.length <= 30
+				&& /^[a-záéíóúñü\s]+$/i.test(texto) // solo letras y espacios
+				&& !/\b(busca|busco|tv|televisor|nevera|lavadora|parlante|guddi|quiero|necesito|comprar|estoy|hola)\b/i.test(texto); // sin palabras de producto
 			const dep2 = DEPARTAMENTOS_CONOCIDOS.find((d) => texto.includes(d));
 			if (dep2) departamento = dep2;
 			const ciu2 = CIUDADES_CONOCIDAS.find((c) => texto.includes(c));
 			if (ciu2) ciudad = ciu2;
-			if (!ciu2) ciudad = texto;
+			if (!ciu2 && esPlausible) ciudad = texto;
 		}
 	}
 

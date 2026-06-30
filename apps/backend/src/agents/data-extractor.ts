@@ -134,13 +134,40 @@ Si todos los datos actuales son correctos y no hay nada nuevo ni incongruente qu
 		const parsed = JSON.parse(jsonStr);
 		const datos: Record<string, string> = parsed.datos || {};
 
-		// ── 2. Guardar solo campos nuevos en UserData ──────────────────────
+		// ── 2. Validar y guardar solo campos nuevos en UserData ────────────
 		const CAMPOS_VALIDOS = new Set(['ciudad', 'departamento', 'nombre', 'cedula', 'productoSolicitado', 'presupuesto', 'direccion', 'telefono']);
 		const updateData: Record<string, any> = {};
+
+		// Validar que ciudad no sea una frase producto (ej: "busca de tv guddi de")
+		function esCiudadValida(valor: string): boolean {
+			const v = valor.trim().toLowerCase();
+			if (v.length < 3 || v.length > 30) return false;
+			// Solo letras y espacios, sin números ni palabras de producto
+			if (!/^[a-záéíóúñü\s]+$/i.test(v)) return false;
+			// Rechazar si contiene palabras típicas de producto
+			if (/\b(tv|televisor|nevera|lavadora|parlante|sonido|busca|busco|guddi|estoy|hola|buenos|buenas|quiero|necesito|comprar)\b/i.test(v)) return false;
+			return true;
+		}
+
+		// Validar que productoSolicitado no sea una frase larga sin sentido
+		function esProductoValido(valor: string): boolean {
+			const v = valor.trim();
+			if (v.length < 3 || v.length > 80) return false;
+			// No debe ser solo palabras de relleno
+			if (/^(?:busca|busco|quiero|necesito|estoy|hola|buenos|buenas|gracias|por favor|una|un|el|la|los|las)\s*$/i.test(v)) return false;
+			return true;
+		}
+
 		for (const [key, value] of Object.entries(datos)) {
-			if (CAMPOS_VALIDOS.has(key) && value && String(value) !== String(currentUserData[key] ?? '')) {
-				updateData[key] = String(value);
-			}
+			if (!CAMPOS_VALIDOS.has(key)) continue;
+			if (!value) continue;
+			if (String(value) === String(currentUserData[key] ?? '')) continue;
+
+			// Validaciones específicas por campo
+			if (key === 'ciudad' && !esCiudadValida(String(value))) continue;
+			if (key === 'productoSolicitado' && !esProductoValido(String(value))) continue;
+
+			updateData[key] = String(value);
 		}
 
 		if (Object.keys(updateData).length > 0) {
