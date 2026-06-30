@@ -369,16 +369,26 @@ Donde:
 					// Buscar en WooCommerce usando el producto identificado por visión
 					let catProducts: any[] = [];
 					const textoExtraido = analisis?.textoVisible || '';
+					// Extraer SKU/referencia del texto visible (ej: "JLC-L299", "36215PRO", "HEA1732")
+					const skuJLCMatch = textoExtraido.match(/\bJLC[\s-]?([A-Z0-9]{3,15})\b/i);
+					const skuJLC = skuJLCMatch && /\d/.test(skuJLCMatch[1]) ? `JLC-${skuJLCMatch[1].toUpperCase()}` : null;
+					const skuBare = textoExtraido.match(/\b(\d{2,}[A-Z]{2,}\d*|[A-Z]{2,}\d{3,})\b/i);
+					const sku = skuJLC || (skuBare && skuBare[1].length >= 5 ? skuBare[1].toUpperCase() : null);
+					// Limpiar texto de caracteres extraños y acortar para mejor búsqueda
+					const textoLimpio = textoExtraido.replace(/[^\w\sáéíóúñ]/gi, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
 					const terminosBusqueda = [
+						sku,
+						textoLimpio,
 						textoExtraido,
 						analisis?.producto,
 						message === '[Imagen]' ? '' : message.slice(0, 60),
-					].filter(Boolean);
-					for (const termino of terminosBusqueda) {
-						if (!termino) continue;
+					].filter((t): t is string => !!t);
+					// Eliminar duplicados y términos muy cortos
+					const unicos = [...new Set(terminosBusqueda.map(t => t.toLowerCase()))].filter(t => t.length >= 3);
+					for (const termino of unicos) {
 						try {
 							catProducts = await wooCommerceService.searchProducts(termino, 10);
-							if (catProducts.length > 0) break; // primer termino que da resultados
+							if (catProducts.length > 0) break;
 						} catch { /* continuar al siguiente termino */ }
 					}
 

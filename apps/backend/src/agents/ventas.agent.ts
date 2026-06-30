@@ -40,9 +40,9 @@ const CATEGORIAS_PRODUCTO = ['nevera', 'nevecon', 'refrigerador', 'refri', 'lava
 
 /** Extrae un SKU/referencia tipo "JLC-21215", "JLC-55A71SGO" o código alfanumérico pelado como "36215PRO". */
 function extraerSKU(texto: string): string | null {
-	// Patrón 1: JLC seguido de guión opcional y alfanuméricos (mínimo 3 chars)
+	// Patrón 1: JLC seguido de guión opcional y alfanuméricos (mínimo 4 chars, al menos 1 dígito)
 	const match = texto.match(/\bJLC[\s-]?([A-Z0-9]{3,15})\b/i);
-	if (match) {
+	if (match && /\d/.test(match[1])) {
 		return `JLC-${match[1].toUpperCase()}`;
 	}
 	// Patrón 2: Código alfanumérico pelado (ej: "36215PRO", "6615N")
@@ -767,7 +767,8 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 			|| aiClasificacion?.intent === 'pregunta_especificacion';
 
 		// ── Agradecimientos sin flujo activo → respuesta cortés, no iniciar ventas ─
-		if (!context?.flujo && !esPreguntaActiva && /^(?:muchas\s*)?gracias\b|(?:muchas\s*)?gracias\s*$|te\s*agradezco|agradecido|gracias\s*por\s*tu\s*ayuda|de\s*nada|ok\s*gracias|dale\s*gracias/i.test(lower)) {
+		const tieneContextoCompra = context?.ultimaBusqueda?.results?.length > 0;
+		if (!tieneContextoCompra && !context?.flujo && !esPreguntaActiva && /^(?:muchas\s*)?gracias\b|(?:muchas\s*)?gracias\s*$|te\s*agradezco|agradecido|gracias\s*por\s*tu\s*ayuda|de\s*nada|ok\s*gracias|dale\s*gracias/i.test(lower)) {
 			return {
 				response: '¡Con gusto! Estoy atenta por si necesitas algo más 😊',
 				metadata: { agentType: 'ventas', flujo: null },
@@ -1179,7 +1180,9 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 					}
 				}
 				// Sin resultados de WooCommerce → iniciar perfilado con la categoría detectada
-				const cat = detectarCategoria(msgOriginal) || context?.categoriaSugerida || 'otra';
+				// Si ya hay productos de la imagen, usar su categoría en vez de 'otra'
+				const prodExistente = context?.ultimaBusqueda?.results?.[0]?.name;
+				const cat = detectarCategoria(msgOriginal) || context?.categoriaSugerida || (prodExistente ? detectarCategoria(prodExistente) : null) || 'otra';
 				const pasos = PROFILING_STEPS[cat] || PROFILING_STEPS.otra;
 				const primerPaso = pasos[0];
 				if (primerPaso) {
@@ -1194,6 +1197,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 							tieneCobertura: context?.tieneCobertura,
 							modalidad: 'contado',
 							productoSolicitado: msgOriginal,
+							...(context?.ultimaBusqueda ? { ultimaBusqueda: context.ultimaBusqueda } : {}),
 						},
 					};
 				}
@@ -1323,7 +1327,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		}
 
 		// ── PASO 4: Detectar intención de compra ─────────────────────────────
-		const quiereComprarRaw = /\b(?:comprar(?:lo|la)?|lo quiero|la quiero|quiero(?: esa| esta| ese| este| comprar)?|c[oó]mo (?:compro|hago|puedo pagar|le hago|le hago para pagar|pago)|quiero pagar|proceder|concretar|compralo|c[oó]mpralo|reservar|apartar|d[áa]le|confirmo compra|ya lo quiero|me gusta(?: esa| esta| ese| el| la)?|esa me gusta|esta me gusta|si continuemos|si sigamos|sigamos adelante|seguimos|continuemos)\b|\bcompr(?:o|ar)\s+(?:esa|esta|este|ese|eso|esas|esos|estes)\b|\b(?:el de \d+|la de \d+|el primero|el segundo|la primera|la segunda|me quedo con|me interesa(?!\s+(?:saber|conocer|verificar|preguntar|consultar))(?: el| la)?|prefiero(?: el| la)?|lo compro|la compro|eso quiero|eso me sirve|eso me gusta|me llevo(?: el| la)?)\b|\b(?:el (?:de \d+|primero|segundo)|la (?:de \d+|primera|segunda))\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
+		const quiereComprarRaw = /\b(?:comprar(?:lo|la)?|lo quiero|la quiero|quiero(?: esa| esta| ese| este| comprar)?|c[oó]mo (?:compro|hago|puedo pagar|le hago|le hago para pagar|pago)|quiero pagar|proceder|concretar|compralo|c[oó]mpralo|reservar|apartar|d[áa]le|confirmo compra|ya lo quiero|me gusta(?: esa| esta| ese| el| la)?|esa me gusta|esta me gusta|si continuemos|si sigamos|sigamos adelante|seguimos|continuemos|s[ií]\s+gracias)\b|\bcompr(?:o|ar)\s+(?:esa|esta|este|ese|eso|esas|esos|estes)\b|\b(?:el de \d+|la de \d+|el primero|el segundo|la primera|la segunda|me quedo con|me interesa(?!\s+(?:saber|conocer|verificar|preguntar|consultar))(?: el| la)?|prefiero(?: el| la)?|lo compro|la compro|eso quiero|eso me sirve|eso me gusta|me llevo(?: el| la)?)\b|\b(?:el (?:de \d+|primero|segundo)|la (?:de \d+|primera|segunda))\b/i.test(message) && context?.ultimaBusqueda?.results?.length > 0;
 
 		// Si el mensaje es una pregunta sobre medidas/specs, NO es intención de compra
 		// aunque mencione "la 3" o "prefiero" — primero hay que responder la duda.
@@ -1368,7 +1372,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 					const mensajeTrim = message.trim();
 					const esVagoPositivo = !esPreguntaInfo(mensajeTrim) && (
 					/^(?:(?:si|sí)\s+)?(?:me gusta|lo quiero|me interesa|d[aá]le|proceder|concretar|continuemos|sigamos|seguimos|me quedo con|compro eso|la compro|lo compro|eso quiero|eso me sirve|me llevo)$|^(?:si|sí)\s+(?:continuemos|sigamos(?: adelante)?|seguimos)$/i.test(mensajeTrim)
-					|| /^(?:perfecto\s+|bien\s+|ok\s+|bueno\s+|excelente\s+|listo\s+|sale\s+|d[áa]le\s+)?(?:si\s+|sí\s+)?(?:quiero\s*comprar(?:lo|la)?|c[oó]mprolo|c[oó]mprala|lo\s*quiero|la\s*quiero|comprarlo|comprarla|procedamos?|hag[aa]moslo|concretemos)\s*$/i.test(mensajeTrim)
+					|| /^(?:perfecto\s+|bien\s+|ok\s+|bueno\s+|excelente\s+|listo\s+|sale\s+|d[áa]le\s+)?(?:si\s+|sí\s+)?(?:quiero\s*comprar(?:lo|la)?|c[oó]mprolo|c[oó]mprala|lo\s*quiero|la\s*quiero|comprarlo|comprarla|procedamos?|hag[aa]moslo|concretemos|quiero\s*pagar|pagarlo|pagarla)\s*$/i.test(mensajeTrim)
 				);
 					if (esVagoPositivo) {
 						// Intentar identificar el producto del último mensaje del asistente
@@ -1873,8 +1877,9 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 					};
 				}
 				if (context?.tieneCobertura && esOpcion3) {
+					const prodURL = context?.productoURL || context?.ultimaBusqueda?.results?.[0]?.permalink;
 					return {
-						response: `¡Claro! Para reservarte el producto en el punto más cercano, necesito tu nombre completo y número de cédula. 😊`,
+						response: `¡Claro! Para coordinar la entrega en nuestro punto físico, ten en cuenta que el precio online es diferente al de la agencia física, porque en la venta online no se incluyen costos administrativos ni de arrendamiento.${prodURL ? `\n\n*Importante:* Puedes realizar el pago directamente desde este enlace para asegurar el precio online y luego pasar a recogerlo a nuestro punto de venta:\n${prodURL}` : ''}\n\nNecesito tu nombre completo y número de cédula para autorizar en el punto de venta que te respeten el precio pactado. 😊`,
 						nextStage: 'PROPOSAL',
 						metadata: {
 							agentType: 'ventas',
@@ -1916,7 +1921,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 
 				if (tieneNombre || tieneCedula) {
 					return {
-						response: `¡Gracias! Tu solicitud de compra en punto físico quedó registrada. Un asesor se comunicará contigo para coordinar la entrega. Si necesitas algo más, acá estoy para ayudarte 😊💙`,
+						response: `¡Gracias! Tus datos quedaron registrados. Con esta información autorizamos al punto de venta para que te respeten el precio online pactado.\n\n*Recuerda:* El precio online es diferente al de la agencia física porque no incluye costos administrativos ni de arrendamiento, por eso es más favorable.\n\nPuedes hacer el pago desde el enlace del producto para asegurar el precio y luego pasar a recogerlo a nuestro punto de venta, o si prefieres, pagar directamente en el punto cuando vayas a reclamarlo.\n\nUn asesor se comunicará contigo para coordinar la entrega. Si necesitas algo más, acá estoy para ayudarte 😊💙`,
 						nextStage: 'TRANSFER',
 						metadata: {
 							agentType: 'ventas',
@@ -1999,7 +2004,12 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 					}
 				}
 
-				context = { ...context, flujo: null, terminoBusqueda, ultimaBusqueda: products.length > 0 ? { results: products, categoria: perfilState.categoria, productoIndex: 0 } : context?.ultimaBusqueda };
+				// Conservar los productos originales (de imagen o busqueda previa)
+				// si el perfilado no encontró nada específico o ya había productos
+				const yaTieneProductos = (context?.ultimaBusqueda?.results?.length ?? 0) > 0;
+				const perfilSinTermino = !(perfilState as any).terminoOriginal;
+				const usarProductosOriginales = yaTieneProductos && perfilSinTermino;
+				context = { ...context, flujo: null, terminoBusqueda, ultimaBusqueda: usarProductosOriginales ? context?.ultimaBusqueda : products.length > 0 ? { results: products, categoria: perfilState.categoria, productoIndex: 0 } : context?.ultimaBusqueda };
 				if (perfilState.answers.presupuesto) {
 					datosPersonales.presupuesto = perfilState.answers.presupuesto;
 				}
@@ -2603,7 +2613,9 @@ ${context?.tieneCobertura
 - Si preguntan por la calidad de un producto, responde con honestidad destacando sus ventajas. No preguntes presupuesto ni desvíes la pregunta.
 - Si el cliente confirma que quiere un producto ("me gusta", "lo quiero", "dále", etc.), ofrécele las opciones de pago directamente. No preguntes cuál ni vuelvas a listar productos.
 - NUNCA preguntes "¿Seguimos buscando?" ni "¿Seguimos buscando el producto ideal para ti?". Cuando el cliente muestre interés, ofrécele ir al pago. Si el cliente pide otra opción, muestra un producto diferente. Siempre busca cerrar la venta, no alargar la búsqueda.
-- Si preguntan por opciones de pago, no las enumeres; guíalos a pagar en la web.
+- Si preguntan por opciones de pago o formas de pago, responde y TERMINA preguntando si quiere que lo ayudes con el proceso de pago ("¿Te gustaría que te guíe con el paso a paso? Es súper fácil 😊"). No termines la conversación sin ofrecer ayuda.
+- Después de responder cualquier duda sobre pagos (contraentrega, transferencia, etc.), siempre ofrece ayuda con el proceso de pago de forma natural.
+- Si el cliente dice que no necesita ayuda o que ya sabe, responde cordialmente que quedo atenta.
 - Si necesitan ayuda para pagar, ofrécete a escalar al equipo de soporte. Si el cliente insiste en un contacto, entrega el número +573187408190.
 - NUNCA menciones "cartera" ni "WhatsApp de cartera" NI números de cartera (314 422 9949, 315 721 2367). Tampoco redirijas al cliente a cartera desde ventas. Si el cliente pide cartera explícitamente o escalar para envío/despacho, entrega únicamente +573187408190.
 - Para seguimiento post-compra (guía de despacho, "ya compré", "cuándo llega", estado del pedido): dile con calidez que ya quedó registrado y que el equipo le confirma el despacho y la guía pronto. NO menciones cartera. Si insiste en un contacto para coordinar envío, entrega el número +573187408190.
