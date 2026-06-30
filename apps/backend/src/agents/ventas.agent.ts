@@ -2004,6 +2004,15 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		const perfilState = context?.perfilState as { categoria: string; step: number; answers: Record<string, string> } | undefined;
 
 		if (context?.flujo === 'perfilando' && perfilState) {
+			// Detectar compra al por mayor (>15 unidades) → distribuidores
+			const unidadesMatch = message.match(/(\d+)\s*(?:unidades?|und)\b/i);
+			if (unidadesMatch && parseInt(unidadesMatch[1], 10) > 15) {
+				return {
+					response: `Entiendo que deseas comprar ${unidadesMatch[1]} unidades. Para compras por volumen te pongo en contacto con nuestro equipo de distribuidores quienes te darán una cotización especial.`,
+					metadata: { agentType: 'distribuidores', flujo: null },
+				};
+			}
+
 			// Si pregunta algo en vez de responder perfil, salir del flujo
 			if (/[¿?]/.test(message)) {
 				context.flujo = null;
@@ -2074,6 +2083,16 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				};
 			}
 			}
+		}
+
+		// ── Compra al por mayor (>15 unidades) → distribuidores ────────────
+		const unidadesMatch = message.match(/(\d+)\s*(?:unidades?|und)\b/i);
+		const tieneIntencionCompra = /\b(?:comprar|compro|quiero|necesito|requiero|pedir|cotizar|solicitar)\b/i.test(message);
+		if (unidadesMatch && parseInt(unidadesMatch[1], 10) > 15 && tieneIntencionCompra) {
+			return {
+				response: `Entiendo que deseas comprar ${unidadesMatch[1]} unidades. Para compras por volumen te pongo en contacto con nuestro equipo de distribuidores quienes te darán una cotización especial.`,
+				metadata: { agentType: 'distribuidores', flujo: null },
+			};
 		}
 
 		const CATEGORIAS = CATEGORIAS_RE;
@@ -2182,6 +2201,9 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				} else if (productosDisponibles.length > 0 && estrategiaBusqueda !== 'categoria' && estrategiaBusqueda !== 'texto' && estrategiaBusqueda !== 'palabra_clave' && estrategiaBusqueda !== 'sin_resultados') {
 					// La búsqueda encontró un producto específico (SKU, capacidad, potencia)
 					// → no preguntar presupuesto, dejar que Gemini presente el producto
+				} else if (productosDisponibles.length > 0 && /\bde\s+\d{2,4}\b/.test(terminoParaBuscar)) {
+					// El usuario especificó un tamaño/modelo ("tv de 24", "nevera de 254")
+					// → no preguntar presupuesto, presentar productos directamente
 				} else if (campos >= pasos.length) {
 					const terminoBusqueda = terminoParaBuscar;
 					context = { ...context, terminoBusqueda };
