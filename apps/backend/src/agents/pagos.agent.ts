@@ -52,6 +52,16 @@ export class PagosAgent implements IAgent {
 			};
 		}
 
+		// Pregunta sobre pago mixto (tarjeta + efectivo) → punto físico
+		if (/pagar\s+con\b.*(?:tarjeta|credito).*(?:parte|mitad).*(?:efectivo|contado|resto)/i.test(lower)
+			|| /pagar.*(?:parte|mitad|un\s*poco).*(?:tarjeta|credito).*(?:parte|mitad|otro).*(?:efectivo)/i.test(lower)
+			|| /(?:parte|mitad).*(?:tarjeta|credito).*(?:parte|mitad).*(?:efectivo)/i.test(lower)) {
+			return {
+				response: `Es posible en un punto físico pagar con tarjeta una parte y otra parte en efectivo, no hay problema. ¿Te gustaría que te guíe para coordinar la compra? 😊`,
+				metadata: { agentType: 'ventas' },
+			};
+		}
+
 		// Pregunta sobre crédito
 		if (/cr[eé]dito|cuotas|financiar|financiaci[oó]n/i.test(lower)) {
 			return {

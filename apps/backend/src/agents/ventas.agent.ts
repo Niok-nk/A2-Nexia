@@ -775,6 +775,19 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 			};
 		}
 
+		// ── Pago mixto (tarjeta + efectivo) → punto físico ──────────────────
+		// Si pregunta por pagar parte con tarjeta y parte en efectivo, responder
+		// que es posible en punto físico, sin iniciar flujo de crédito.
+		if ((context?.flujo !== 'seleccion_pago' || !context?.flujo)
+			&& (/pagar\s+con\b.*(?:tarjeta|credito).*(?:parte|mitad).*(?:efectivo|contado|resto)/i.test(lower)
+				|| /pagar.*(?:parte|mitad|un\s*poco).*(?:tarjeta|credito).*(?:parte|mitad|otro).*(?:efectivo)/i.test(lower)
+				|| /(?:parte|mitad).*(?:tarjeta|credito).*(?:parte|mitad).*(?:efectivo)/i.test(lower))) {
+			return {
+				response: `Es posible en un punto físico pagar con tarjeta una parte y otra parte en efectivo, no hay problema. ¿Te gustaría que te guíe para coordinar la compra? 😊`,
+				metadata: { agentType: 'ventas', flujo: null },
+			};
+		}
+
 		// ── Flujo de esperando_ciudad o esperando_modalidad pausado ──────────
 		if (context?.flujo === 'esperando_ciudad_pausado') {
 			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
