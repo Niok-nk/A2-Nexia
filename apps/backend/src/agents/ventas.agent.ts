@@ -1110,6 +1110,34 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 
 			if (quiereContado) {
 				const msgOriginal = context?.pendingMessage || '';
+
+				// Si ya hay productos identificados (imagen o busqueda previa),
+				// saltar perfilado y ofrecer opciones de pago directamente
+				const yaHayProductos = context?.ultimaBusqueda?.results?.length > 0;
+				if (yaHayProductos) {
+					const prod = context.ultimaBusqueda.results[0];
+					const precioStr = prod.price ? ` tiene un valor de *$${Number(prod.price).toLocaleString('es-CO')}*` : '';
+					const ciudadStr = context?.ciudad ? ` con envío gratis a ${context.ciudad.charAt(0).toUpperCase() + context.ciudad.slice(1)}` : '';
+					const linkStr = prod.permalink ? `\nAquí tienes el enlace del producto:\n${prod.permalink}` : '';
+					const opcionPuntoFisico = context?.tieneCobertura ? '\n3️⃣ Pagar en un punto físico (solo necesito tu nombre y cédula para reservarlo)' : '';
+
+					return {
+						response: `¡Excelente elección! El *${prod.name}*${precioStr}${ciudadStr}.${linkStr}\n\nPara continuar con tu compra, ¿cómo prefieres realizar el pago? 💳\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${opcionPuntoFisico}\n\nEscríbeme el número de tu opción y te acompaño paso a paso. 😊`,
+						nextStage: 'PROPOSAL',
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'seleccion_pago',
+							modalidad: 'contado',
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							productoCompra: prod.name,
+							productoURL: prod.permalink,
+							ultimaBusqueda: context?.ultimaBusqueda,
+						},
+					};
+				}
+
 				let terminoIA = await extraerProductoConIA(msgOriginal);
 				if (!terminoIA && msgOriginal.length > 3) {
 					terminoIA = msgOriginal;
