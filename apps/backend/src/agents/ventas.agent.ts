@@ -766,6 +766,17 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 			|| aiClasificacion?.esPreguntaTecnica === true
 			|| aiClasificacion?.intent === 'pregunta_especificacion';
 
+		// ── Compra al por mayor (>15 unidades) → distribuidores ────────────
+		// Detecta aquí al inicio para evitar que sea interceptado por otros handlers
+		const bulkUnidadesMatch = message.match(/(\d+)\s*(?:(?:unidades?|und)\b|de\s+(?:ese|esa|esos|esas)(?:\s+tamaño|\s+modelo)?)/i);
+		const bulkTieneIntencion = /\b(?:comprar|compro|quiero|necesito|requiero|pedir|cotizar|solicitar|busco|busca)\b/i.test(message);
+		if (bulkUnidadesMatch && parseInt(bulkUnidadesMatch[1], 10) > 15 && bulkTieneIntencion) {
+			return {
+				response: `Entiendo que deseas comprar ${bulkUnidadesMatch[1]} unidades. Para compras por volumen te pongo en contacto con nuestro equipo de distribuidores quienes te darán una cotización especial.`,
+				metadata: { agentType: 'distribuidores', flujo: null },
+			};
+		}
+
 		// ── Agradecimientos sin flujo activo → respuesta cortés, no iniciar ventas ─
 		const tieneContextoCompra = context?.ultimaBusqueda?.results?.length > 0;
 		if (!tieneContextoCompra && !context?.flujo && !esPreguntaActiva && /^(?:muchas\s*)?gracias\b|(?:muchas\s*)?gracias\s*$|te\s*agradezco|agradecido|gracias\s*por\s*tu\s*ayuda|de\s*nada|ok\s*gracias|dale\s*gracias/i.test(lower)) {
@@ -2083,16 +2094,6 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				};
 			}
 			}
-		}
-
-		// ── Compra al por mayor (>15 unidades) → distribuidores ────────────
-		const unidadesMatch = message.match(/(\d+)\s*(?:(?:unidades?|und)\b|de\s+(?:ese|esa|esos|esas)(?:\s+tamaño|\s+modelo)?)/i);
-		const tieneIntencionCompra = /\b(?:comprar|compro|quiero|necesito|requiero|pedir|cotizar|solicitar|busco|busca)\b/i.test(message);
-		if (unidadesMatch && parseInt(unidadesMatch[1], 10) > 15 && tieneIntencionCompra) {
-			return {
-				response: `Entiendo que deseas comprar ${unidadesMatch[1]} unidades. Para compras por volumen te pongo en contacto con nuestro equipo de distribuidores quienes te darán una cotización especial.`,
-				metadata: { agentType: 'distribuidores', flujo: null },
-			};
 		}
 
 		const CATEGORIAS = CATEGORIAS_RE;

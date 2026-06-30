@@ -155,6 +155,12 @@ export class Orchestrator {
 	private quickIntent(message: string): IntentKey | null {
 		const m = message.toLowerCase().normalize('NFC');
 
+		// Compra al por mayor (>15 uds) → ventas para que el handler redirija a distribuidores
+		const bulkMatch = m.match(/(\d+)\s*(?:(?:unidades?|und)\b|de\s+(?:ese|esa|esos|esas)(?:\s+tamaño|\s+modelo)?)/i);
+		if (bulkMatch && parseInt(bulkMatch[1], 10) > 15 && /\b(?:comprar|compro|quiero|necesito|requiero|pedir|cotizar|solicitar|busco|busca)\b/i.test(m)) {
+			return 'ventas';
+		}
+
 		if (/\b(distribuidor|distribuidores|ser distribuidor|al por mayor|mayorista|mayoreo)\b/.test(m)) {
 			return 'distribuidores';
 		}
