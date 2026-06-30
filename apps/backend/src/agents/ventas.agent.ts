@@ -2238,6 +2238,21 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 			};
 		}
 
+		// ── Post-purchase: usuario ya completó y solo agradece/confirma ──────
+		// Evita que la IA repita el mismo mensaje de "gestionar despacho" en bucle
+		const postCompraActivo = yaCompro
+			|| /\b(?:comprobante|pedido|registrado|despacho|gu[ií]a|seguimiento)\b/i.test(context?.lastAssistantResponse || '');
+		const esCierrePostCompra = postCompraActivo
+			&& /^(?:ok(?:ey)?|gracias|dale|listo|bueno|bien|excelente|perfecto|s[íi]|muchas\s*gracias|vale|entendido|claro|genial|sale)\s*[.!¡¿?]*\s*$/i.test(lower.trim())
+			&& !esPreguntaActiva
+			&& !context?.flujo;
+		if (esCierrePostCompra) {
+			return {
+				response: `¡Con gusto! Estaré atenta por si tienes alguna otra duda. ¡Que tengas un excelente día! 😊💙`,
+				metadata: { agentType: 'ventas', flujo: null },
+			};
+		}
+
 		// ── Preguntas de stock/disponibilidad → escalar a Cris ─────────────
 		const preguntaStock = /(?:hay\s*(?:en\s*)?stock|disponible|disponibilidad|cu[aá]ndo\s*(?:llega|llegar[aá]|est[aá]|hay)|tiempo\s*(?:de\s*)?entrega|demora|cu[aá]nto\s*(?:demora|tarda)|lo\s*tiene\s*(?:en\s*)?stock|est[aá]\s*(?:disponible|en\s*stock)|fecha\s*(?:de\s*)?entrega|llega\s*(?:a\s*)?(?:mi\s*)?ciudad)/i.test(message);
 		if (preguntaStock && !context?.flujo && !esPreguntaActiva) {
