@@ -2204,6 +2204,12 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				} else if (productosDisponibles.length > 0 && /\bde\s+\d{2,4}\b/.test(terminoParaBuscar)) {
 					// El usuario especificó un tamaño/modelo ("tv de 24", "nevera de 254")
 					// → no preguntar presupuesto, presentar productos directamente
+					context = {
+						...context,
+						flujo: null,
+						ultimaBusqueda: { results: productosDisponibles, categoria: cat, productoIndex: 0 },
+						terminoBusqueda: terminoParaBuscar,
+					};
 				} else if (campos >= pasos.length) {
 					const terminoBusqueda = terminoParaBuscar;
 					context = { ...context, terminoBusqueda };
