@@ -122,10 +122,14 @@ export class DistribuidoresAgent implements IAgent {
 			};
 		}
 
-		// No se pudo determinar
+		// No se pudo determinar → respuesta natural con IA
+		const promptNatural = `Eres una asesora del programa de distribuidores de JLC Electronics. El cliente ha mostrado interés en compra al por mayor. Responde de forma natural y cálida (máximo 2 frases, 1 emoji) confirmando que podemos ayudarle con su solicitud de distribuidor y preguntando si prefiere registrarse mediante el formulario web o directamente por WhatsApp paso a paso.
+
+Mensaje del cliente: "${message.replace(/"/g, "'")}"`;
+		const raw = await generateResponse(promptNatural);
+		const respuestaNatural = raw.replace(/^["'\s]+|["'\s]+$/g, '').trim();
 		return {
-			response:
-				'¿Prefieres llenar el formulario en la web o que lo hagamos por aquí? 😊\n\n1️⃣ Web: https://jlc-electronics.com/#distribuidor\n2️⃣ Por WhatsApp paso a paso',
+			response: respuestaNatural || '¿Prefieres llenar el formulario en la web o que lo hagamos por aquí? 😊\n\n1️⃣ Web: https://jlc-electronics.com/#distribuidor\n2️⃣ Por WhatsApp paso a paso',
 			metadata: { agentType: 'distribuidores', flujo: 'distribuidores', distribuidorData: distData },
 		};
 	}
@@ -403,7 +407,7 @@ Instrucción: INDICA AL CLIENTE QUE SU SOLICITUD FUE REGISTRADA. NOVEDAD: nuestr
 		if (reclamo.test(lower)) {
 			return {
 				response:
-					'Qué pena por la demora. Puedes comunicarte directamente con nuestro equipo comercial al +57 321 645 0110 o al +57 320 788 1141 para darle seguimiento a tu solicitud.',
+					'Qué pena por la demora. Puedes comunicarte directamente con nuestro equipo comercial al +573165434530 para darle seguimiento a tu solicitud.',
 				metadata: { agentType: 'distribuidores', flujo: 'distribuidores_completado', distribuidorData: distData },
 			};
 		}

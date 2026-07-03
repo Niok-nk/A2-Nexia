@@ -624,8 +624,12 @@ Responde corto.`;
 			}
 		}
 
+		// Si el handler devolvió un agentType diferente en metadata (ej. ventas → distribuidores),
+		// respetar ese handoff en lugar del intent original.
+		const agentTypeFinal = (metadata?.agentType && metadata.agentType !== intent) ? metadata.agentType : intent;
+
 		return {
-			agentType: intent,
+			agentType: agentTypeFinal,
 			response,
 			metadata,
 		};

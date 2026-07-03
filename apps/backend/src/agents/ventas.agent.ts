@@ -771,10 +771,8 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		const bulkUnidadesMatch = message.match(/(\d+)\s*(?:(?:unidades?|und)\b|de\s+(?:ese|esa|esos|esas)(?:\s+tamaño|\s+modelo)?)/i);
 		const bulkTieneIntencion = /\b(?:comprar|compro|quiero|necesito|requiero|pedir|cotizar|solicitar|busco|busca)\b/i.test(message);
 		if (bulkUnidadesMatch && parseInt(bulkUnidadesMatch[1], 10) > 15 && bulkTieneIntencion) {
-			return {
-				response: `Entiendo que deseas comprar ${bulkUnidadesMatch[1]} unidades. Para compras por volumen te pongo en contacto con nuestro equipo de distribuidores quienes te darán una cotización especial.`,
-				metadata: { agentType: 'distribuidores', flujo: null },
-			};
+			const { DistribuidoresAgent } = await import('./distribuidores.agent.js');
+			return new DistribuidoresAgent().handle(message, context);
 		}
 
 		// ── Agradecimientos sin flujo activo → respuesta cortés, no iniciar ventas ─
@@ -1173,7 +1171,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 					} catch { /* continuar sin productos */ }
 					if (products.length > 0) {
 						const cat = detectarCategoria(msgOriginal) || context?.categoriaSugerida || 'otra';
-						const esEspecifico = /[A-Z]{2,5}[-][A-Z0-9]+/.test(msgOriginal) || /\d+\s*(?:litros?|kg|pulgadas?|lb|w|vatios?|refrigeraci[oó]n)/i.test(msgOriginal);
+						const esEspecifico = /[A-Z]{2,5}[-][A-Z0-9]+/.test(msgOriginal) || /\d+\s*(?:litros?|kg|pulgadas?|lb|w|vatios?|refrigeraci[oó]n)/i.test(msgOriginal) || /\bde\s+\d{2,4}\b/.test(msgOriginal);
 						if (esEspecifico) {
 							const nums = (msgOriginal.match(/\d+[kKlLgG]*/g) || []).map((n: string) => n.toLowerCase());
 							const filtrados = products.filter(p => nums.some((n: string) => p.name.toLowerCase().includes(n)));
@@ -2015,84 +2013,71 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		const perfilState = context?.perfilState as { categoria: string; step: number; answers: Record<string, string> } | undefined;
 
 		if (context?.flujo === 'perfilando' && perfilState) {
-			// Detectar compra al por mayor (>15 unidades) → distribuidores
-			const unidadesMatch = message.match(/(\d+)\s*(?:(?:unidades?|und)\b|de\s+(?:ese|esa|esos|esas)(?:\s+tamaño|\s+modelo)?)/i);
-			if (unidadesMatch && parseInt(unidadesMatch[1], 10) > 15) {
-				return {
-					response: `Entiendo que deseas comprar ${unidadesMatch[1]} unidades. Para compras por volumen te pongo en contacto con nuestro equipo de distribuidores quienes te darán una cotización especial.`,
-					metadata: { agentType: 'distribuidores', flujo: null },
-				};
-			}
-
 			// Si pregunta algo en vez de responder perfil, salir del flujo
 			if (/[¿?]/.test(message)) {
 				context.flujo = null;
 			} else {
-			const pasos = PROFILING_STEPS[perfilState.categoria] || PROFILING_STEPS.otra;
-			const pasoActual = pasos[perfilState.step - 1];
-			if (pasoActual) {
-				perfilState.answers[pasoActual.field] = resolverRespuestaPerfil(message, pasoActual.field);
-				perfilState.step++;
-			}
+				const pasos = PROFILING_STEPS[perfilState.categoria] || PROFILING_STEPS.otra;
+				const pasoActual = pasos[perfilState.step - 1];
+				if (pasoActual) {
+					perfilState.answers[pasoActual.field] = resolverRespuestaPerfil(message, pasoActual.field);
+					perfilState.step++;
+				}
 
-			const camposOk = camposPerfilCompletados(perfilState.answers);
+				const camposOk = camposPerfilCompletados(perfilState.answers);
 
-			if (camposOk >= pasos.length || perfilState.step > pasos.length) {
-				const terminoBusqueda = (perfilState as any).terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
+				if (camposOk >= pasos.length || perfilState.step > pasos.length) {
+					const terminoBusqueda = (perfilState as any).terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
 
-			// Consultar WooCommerce fresco con el término del perfil
-			let products: any[] = [];
-			const terminoOriginal = (perfilState as any).terminoOriginal;
-			const terminoBusquedaPerfil = terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
-			if (terminoBusquedaPerfil) {
-				try {
-					const resultado = await buscarProductoInteligente(terminoBusquedaPerfil, perfilState.categoria);
-					if (resultado.products.length > 0) products = resultado.products;
-				} catch { /* fall through */ }
-			}
+					let products: any[] = [];
+					const terminoOriginal = (perfilState as any).terminoOriginal;
+					const terminoBusquedaPerfil = terminoOriginal || obtenerTerminoBusquedaDesdePerfil(perfilState.categoria, perfilState.answers);
+					if (terminoBusquedaPerfil) {
+						try {
+							const resultado = await buscarProductoInteligente(terminoBusquedaPerfil, perfilState.categoria);
+							if (resultado.products.length > 0) products = resultado.products;
+						} catch { /* fall through */ }
+					}
 
-				// Aplicar filtro de presupuesto si el cliente lo dio
-				const presupuestoRaw = perfilState.answers.presupuesto;
-				if (presupuestoRaw && products.length > 0) {
-					const techo = parsearPresupuesto(presupuestoRaw);
-					if (techo > 0) {
-						const dentroPresupuesto = products.filter((p: any) => {
-							const precio = parseFloat(p.price || '0');
-							return precio > 0 && precio <= techo * 1.15; // 15% de margen
-						});
-						if (dentroPresupuesto.length > 0) {
-							products = dentroPresupuesto.sort((a: any, b: any) =>
-								parseFloat(a.price || '0') - parseFloat(b.price || '0')
-							);
+					const presupuestoRaw = perfilState.answers.presupuesto;
+					if (presupuestoRaw && products.length > 0) {
+						const techo = parsearPresupuesto(presupuestoRaw);
+						if (techo > 0) {
+							const dentroPresupuesto = products.filter((p: any) => {
+								const precio = parseFloat(p.price || '0');
+								return precio > 0 && precio <= techo * 1.15;
+							});
+							if (dentroPresupuesto.length > 0) {
+								products = dentroPresupuesto.sort((a: any, b: any) =>
+									parseFloat(a.price || '0') - parseFloat(b.price || '0')
+								);
+							}
 						}
 					}
-				}
 
-				// Conservar los productos originales (de imagen o busqueda previa)
-				// si el perfilado no encontró nada específico o ya había productos
-				const yaTieneProductos = (context?.ultimaBusqueda?.results?.length ?? 0) > 0;
-				const perfilSinTermino = !(perfilState as any).terminoOriginal;
-				const usarProductosOriginales = yaTieneProductos && perfilSinTermino;
-				context = { ...context, flujo: null, terminoBusqueda, ultimaBusqueda: usarProductosOriginales ? context?.ultimaBusqueda : products.length > 0 ? { results: products, categoria: perfilState.categoria, productoIndex: 0 } : context?.ultimaBusqueda };
-				if (perfilState.answers.presupuesto) {
-					datosPersonales.presupuesto = perfilState.answers.presupuesto;
+					const yaTieneProductos = (context?.ultimaBusqueda?.results?.length ?? 0) > 0;
+					const perfilSinTermino = !(perfilState as any).terminoOriginal;
+					const usarProductosOriginales = yaTieneProductos && perfilSinTermino;
+					context = { ...context, flujo: null, terminoBusqueda, ultimaBusqueda: usarProductosOriginales ? context?.ultimaBusqueda : products.length > 0 ? { results: products, categoria: perfilState.categoria, productoIndex: 0 } : context?.ultimaBusqueda };
+					if (perfilState.answers.presupuesto) {
+						datosPersonales.presupuesto = perfilState.answers.presupuesto;
+					}
+				} else {
+					const siguientePaso = pasos[perfilState.step - 1];
+					return {
+						response: siguientePaso.pregunta,
+						metadata: {
+							agentType: 'ventas',
+							flujo: 'perfilando',
+							perfilState,
+							ciudad: context?.ciudad,
+							ciudadValidada: true,
+							tieneCobertura: context?.tieneCobertura,
+							modalidad: context?.modalidad,
+							...datosPersonales,
+						},
+					};
 				}
-			} else {
-				const siguientePaso = pasos[perfilState.step - 1];
-				return {
-					response: siguientePaso.pregunta,
-					metadata: {
-						agentType: 'ventas',
-						flujo: 'perfilando',
-						perfilState,
-						ciudad: context?.ciudad,
-						ciudadValidada: true,
-						tieneCobertura: context?.tieneCobertura,
-						modalidad: context?.modalidad,
-						...datosPersonales,
-					},
-				};
-			}
 			}
 		}
 
