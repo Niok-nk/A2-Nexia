@@ -20,7 +20,8 @@ import {
 	resolverOpcion,
 	detectarPagoConfirmado,
 	clasificarIntencionConIA,
-	sanitizarURLs
+	sanitizarURLs,
+	CATEGORY_WORDS,
 } from './helpers.js';
 import { generateResponse } from '../utils/gemini.js';
 import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
@@ -2017,8 +2018,8 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 			// salir del perfilado y dejar que la IA maneje la corrección
 			const catPerfil = perfilState.categoria;
 			if (catPerfil) {
-				const catWords = catPerfil === 'televisor' ? ['televisor', 'tv'] : [catPerfil];
-				const esNegacionPerfil = new RegExp(`\\bno\\s+(?:es\\s+(?:un|una)?\\s*|busco\\s+(?:un|una)?\\s*|quiero\\s+(?:un|una)?\\s*)?(?:${catWords.join('|')})\\b`, 'i').test(message);
+				const palabras = CATEGORY_WORDS[catPerfil] || [catPerfil];
+				const esNegacionPerfil = new RegExp(`\\bno\\s+(?:es\\s+(?:un|una)?\\s*|busco\\s+(?:un|una)?\\s*|quiero\\s+(?:un|una)?\\s*)?(?:${palabras.join('|')})\\b`, 'i').test(message);
 				if (esNegacionPerfil) {
 					context.flujo = null;
 				}
@@ -2123,8 +2124,8 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		// Si el usuario está negando la categoría detectada ("no es un televisor"),
 		// anular la detección para no iniciar perfilado con la categoría incorrecta
 		if (catDetectada) {
-			const catWords = catDetectada === 'televisor' ? ['televisor', 'tv'] : [catDetectada];
-			const esNegacion = new RegExp(`\\bno\\s+(?:es\\s+(?:un|una)?\\s*|busco\\s+(?:un|una)?\\s*|quiero\\s+(?:un|una)?\\s*|necesito\\s+(?:un|una)?\\s*)?(?:${catWords.join('|')})\\b`, 'i').test(message);
+			const palabras = CATEGORY_WORDS[catDetectada] || [catDetectada];
+			const esNegacion = new RegExp(`\\bno\\s+(?:es\\s+(?:un|una)?\\s*|busco\\s+(?:un|una)?\\s*|quiero\\s+(?:un|una)?\\s*|necesito\\s+(?:un|una)?\\s*)?(?:${palabras.join('|')})\\b`, 'i').test(message);
 			if (esNegacion) {
 				catDetectada = null;
 			}

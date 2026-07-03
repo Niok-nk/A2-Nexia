@@ -225,6 +225,20 @@ function detectarCategoriaFuzzy(lower: string): string | null {
 	return bestMatch?.cat || null;
 }
 
+// Palabras clave por categoría (para detectar negación: "no es un televisor")
+export const CATEGORY_WORDS: Record<string, string[]> = {
+	lavadora: ['lavadora', 'lavadoras', 'secadora', 'secadoras'],
+	televisor: ['televisor', 'televisores', 'tv', 'pantalla', 'smart tv', 'smart'],
+	nevera: ['nevera', 'neveras', 'nevecon', 'nevecones', 'refrigerador', 'refrigeradores'],
+	ventilador: ['ventilador', 'ventiladores', 'acondicionado', 'aire acondicionado', 'clima', 'climatización'],
+	congelador: ['congelador', 'congeladores'],
+	vitrina: ['vitrina', 'vitrinas'],
+	exhibidor: ['exhibidor', 'exhibidores'],
+	minibar: ['minibar', 'mini bar'],
+	audio: ['parlante', 'parlantes', 'torre de sonido', 'sonido', 'audio', 'bafle', 'bocina', 'cabina', 'cabinas'],
+	cocina: ['cafetera', 'cafeteras', 'freidora', 'freidoras', 'hervidor', 'hervidores', 'horno', 'hornos', 'licuadora', 'licuadoras', 'olla', 'ollas', 'arrocera', 'exprimidor'],
+};
+
 export function detectarCategoria(msg: string): string | null {
 	const lower = msg.toLowerCase();
 	if (/\blavadora\b|\blavadoras\b|\bsecadora\b|\blavar\b/i.test(lower)) return 'lavadora';
