@@ -10,7 +10,7 @@ import {
 	PagosAgent,
 } from './agents.js';
 import { generateResponse, generateMultimodalResponse } from '../utils/gemini.js';
-import { cleanResponse, getSaludo } from './helpers.js';
+import { cleanResponse } from './helpers.js';
 import { wooCommerceService } from '../woocommerce/woocommerce.service.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -559,6 +559,20 @@ Responde corto.`;
 		let response = result.response;
 		let metadata = result.metadata || {};
 
+		// Si el mensaje combinado (debounce multi-línea) empieza con un saludo
+		// y no hay historial, anteponer la bienvenida real del agente de bienvenida
+		if (!hasHistory && intent !== 'bienvenida' && message.includes('\n')) {
+			const primeraLinea = message.split('\n')[0].trim().toLowerCase();
+			const esSaludo = /^(?:hola[\s\S]*|buenos?\s+(?:d[ií]as|tardes|noches)|buen\s+dia|buen\s+d[ií]a|que\s+tal|qu[eé]\s+tal|hey|hello|hi)\b/.test(primeraLinea)
+				|| ['hola', 'holaa', 'holaaa', 'holi', 'oli', 'ola', 'hello', 'hi', 'hey',
+					'buenas', 'buenos dias', 'buenos días', 'buen dia', 'buen día',
+					'buenas tardes', 'buenas noches', 'que tal', 'qué tal'].includes(primeraLinea.replace(/[.,!?¡¿…]+$/g, '').trim());
+			if (esSaludo) {
+				const bienvenidaResult = await this.agents.bienvenida.handle(primeraLinea, context);
+				response = `${bienvenidaResult.response}\n\n${response}`;
+			}
+		}
+
 		// Si fue interrumpido, ofrecer retomar el flujo anterior y guardarlo como pausado
 		// Solo si el agente NO inició un flujo nuevo (no pisa metadata.flujo)
 		// flujo: null significa que el agente finalizó el flujo intencionalmente, también es cambio
@@ -628,41 +642,12 @@ Responde corto.`;
 		// respetar ese handoff en lugar del intent original.
 		const agentTypeFinal = (metadata?.agentType && metadata.agentType !== intent) ? metadata.agentType : intent;
 
-		// Si el mensaje combinado (debounce) empieza con un saludo y no hay historial,
-		// anteponer el saludo de bienvenida a la respuesta del agente
-		if (!hasHistory && agentTypeFinal !== 'bienvenida') {
-			const primeraLinea = message.split('\n')[0].trim();
-			if (esSaludoInicial(primeraLinea)) {
-				const saludo = getSaludo();
-				const welcome = `¡${saludo}! Soy Sara, de JLC Electronics, la marca de los colombianos; cuéntame, ¿qué estabas buscando hoy? 😊✨💙\n\n`;
-				response = welcome + response;
-			}
-		}
-
 		return {
 			agentType: agentTypeFinal,
 			response,
 			metadata,
 		};
 	}
-}
-
-/**
- * Detecta si la primera línea de un mensaje combinado es un saludo inicial
- * (para anteponer la bienvenida cuando el usuario envía "hola" + mensaje juntos)
- */
-function esSaludoInicial(linea: string): boolean {
-	const m = linea.toLowerCase().normalize('NFC').trim();
-	const cleaned = m.replace(/[.,!?¡¿…]+$/g, '').trim();
-	const greetings = [
-		'hola', 'holaa', 'holaaa', 'holi', 'oli', 'ola', 'hello', 'hi', 'hey',
-		'buenas', 'buenos dias', 'buenos días', 'buen dia', 'buen día',
-		'buenas tardes', 'buenas noches', 'que tal', 'qué tal',
-	];
-	if (greetings.includes(cleaned)) return true;
-	const firstWord = cleaned.split(/[\s,]+/)[0];
-	if (greetings.includes(firstWord)) return true;
-	return false;
 }
 
 /**
