@@ -173,7 +173,7 @@ const { id } = Astro.params;
           <div style="padding:1rem 1.25rem;border-bottom:1px solid var(--color-border);font-size:0.75rem;font-weight:600;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.06em;">
             Historial de mensajes (${messages.length})
           </div>
-          <div class="msg-list" style="max-height:600px;overflow-y:auto;">
+          <div class="msg-list" id="msg-list" style="max-height:600px;overflow-y:auto;">
             ${(() => {
               let prevStage = '';
               return messages.length ? messages.map((m) => {
@@ -265,7 +265,14 @@ const { id } = Astro.params;
       if (!res.ok) { container.innerHTML = '<div class="text-muted">Contacto no encontrado.</div>'; return; }
       currentContact = await res.json();
       currentSessionIdx = currentContact.leads ? currentContact.leads.length - 1 : 0;
+      const msgCountBefore = document.querySelectorAll('.msg-item').length;
       renderContact();
+      const msgCountAfter = document.querySelectorAll('.msg-item').length;
+      // Auto-scroll al último mensaje si hay mensajes nuevos
+      if (msgCountAfter > msgCountBefore) {
+        const msgList = document.getElementById('msg-list');
+        if (msgList) msgList.scrollTop = msgList.scrollHeight;
+      }
       window.addNote = addNote;
       window.sendManualMsg = sendManualMsg;
       window.setSession = setSession;
@@ -300,4 +307,6 @@ const { id } = Astro.params;
   }
 
   loadContact();
+  // Polling cada 5s para mensajes en tiempo real
+  setInterval(loadContact, 5000);
 </script>
