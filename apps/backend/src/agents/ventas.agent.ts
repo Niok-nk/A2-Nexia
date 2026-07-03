@@ -2013,10 +2013,21 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		const perfilState = context?.perfilState as { categoria: string; step: number; answers: Record<string, string> } | undefined;
 
 		if (context?.flujo === 'perfilando' && perfilState) {
+			// Si el usuario está negando la categoría del perfil ("no es un televisor"),
+			// salir del perfilado y dejar que la IA maneje la corrección
+			const catPerfil = perfilState.categoria;
+			if (catPerfil) {
+				const catWords = catPerfil === 'televisor' ? ['televisor', 'tv'] : [catPerfil];
+				const esNegacionPerfil = new RegExp(`\\bno\\s+(?:es\\s+(?:un|una)?\\s*|busco\\s+(?:un|una)?\\s*|quiero\\s+(?:un|una)?\\s*)?(?:${catWords.join('|')})\\b`, 'i').test(message);
+				if (esNegacionPerfil) {
+					context.flujo = null;
+				}
+			}
 			// Si pregunta algo en vez de responder perfil, salir del flujo
 			if (/[¿?]/.test(message)) {
 				context.flujo = null;
-			} else {
+			}
+			if (context?.flujo === 'perfilando') {
 				const pasos = PROFILING_STEPS[perfilState.categoria] || PROFILING_STEPS.otra;
 				const pasoActual = pasos[perfilState.step - 1];
 				if (pasoActual) {
@@ -2108,6 +2119,15 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		if (!catDetectada && esPreguntaEspecificacion(message)) {
 			const textoAnterior = context?.pendingMessage || context?.userData?.productoSolicitado || '';
 			if (textoAnterior) catDetectada = detectarCategoria(textoAnterior);
+		}
+		// Si el usuario está negando la categoría detectada ("no es un televisor"),
+		// anular la detección para no iniciar perfilado con la categoría incorrecta
+		if (catDetectada) {
+			const catWords = catDetectada === 'televisor' ? ['televisor', 'tv'] : [catDetectada];
+			const esNegacion = new RegExp(`\\bno\\s+(?:es\\s+(?:un|una)?\\s*|busco\\s+(?:un|una)?\\s*|quiero\\s+(?:un|una)?\\s*|necesito\\s+(?:un|una)?\\s*)?(?:${catWords.join('|')})\\b`, 'i').test(message);
+			if (esNegacion) {
+				catDetectada = null;
+			}
 		}
 		// Si el mensaje es una pregunta general (?, cuánto, qué, tiene, son de, etc.)
 		// sobre un producto, NO iniciar perfilación — es una consulta de especificación.

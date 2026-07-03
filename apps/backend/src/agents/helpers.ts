@@ -917,13 +917,18 @@ export async function extraerCiudadDelMensaje(mensaje: string): Promise<string |
 	const lower = mensaje.toLowerCase();
 
 	const patronesPrefijo = [
-		/(?:soy de|estoy en|vivo en|escribo desde|desde|ciudad[:\s]+|ubicado en|me encuentro en)\s+([a-záéíóúñü\s]{3,30})/i,
+		/(?:soy de|estoy en(?!\s*busca\s*de)|vivo en|escribo desde|desde|ciudad[:\s]+|ubicado en|me encuentro en)\s+([a-záéíóúñü\s]{3,30})/i,
 	];
 
 	for (const patron of patronesPrefijo) {
 		const match = mensaje.match(patron);
 		if (match) {
-			return match[1].trim().toLowerCase();
+			const texto = match[1].trim().toLowerCase();
+			const esPlausible = texto.length >= 3 && texto.length <= 30
+				&& /^[a-záéíóúñü\s]+$/i.test(texto)
+				&& !/\b(busca|busco|tv|televisor|nevera|lavadora|parlante|guddi|quiero|necesito|comprar|estoy|hola|control)\b/i.test(texto);
+			if (!esPlausible) return null;
+			return texto;
 		}
 	}
 
