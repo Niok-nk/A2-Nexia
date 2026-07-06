@@ -169,7 +169,21 @@ import Layout from '../layouts/Layout.astro';
       const data = await res.json();
       if (res.ok) {
         statusEl.innerHTML = '<span style="color:var(--color-wa);">Reconectando. Espera el QR...</span>';
-        setTimeout(refreshStatus, 3000);
+        // Poll for QR status every 3s up to 30s
+        let attempts = 0;
+        const maxAttempts = 10;
+        const pollInterval = setInterval(async () => {
+          attempts++;
+          await refreshStatus();
+          const statusEl2 = document.getElementById('reconnect-status');
+          if (document.querySelector('.wa-dot.qr_pending') || document.querySelector('.wa-dot.connected')) {
+            clearInterval(pollInterval);
+            if (statusEl2) statusEl2.innerHTML = '';
+          } else if (attempts >= maxAttempts) {
+            clearInterval(pollInterval);
+            if (statusEl2) statusEl2.innerHTML = '<span style="color:var(--color-orange);">Tiempo de espera agotado. Intenta de nuevo.</span>';
+          }
+        }, 3000);
       } else {
         statusEl.innerHTML = `<span style="color:var(--color-red);">${data.error || 'Error al reconectar'}</span>`;
       }
@@ -186,4 +200,5 @@ import Layout from '../layouts/Layout.astro';
   refreshStatus();
   loadRecentMessages();
   setInterval(loadRecentMessages, 15000);
+  setInterval(refreshStatus, 10000);
 </script>

@@ -1,0 +1,9 @@
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - '@whiskeysockets/baileys'
+  - esbuild
+  - msgpackr-extract
+  - prisma
+  - protobufjs
+  - sharp

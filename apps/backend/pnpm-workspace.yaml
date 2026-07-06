@@ -3,12 +3,24 @@ allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
   '@whiskeysockets/baileys': true
-  cloudflared: set this to true or false
+  cloudflared: true
   esbuild: true
   msgpackr-extract: true
   prisma: true
   protobufjs: true
   puppeteer: true
   sharp: true
-  unix-dgram: set this to true or false
-onlyBuiltDependencies: '["@open-wa/wa-automate","cloudflared","unix-dgram"]'
+  unix-dgram: true
+onlyBuiltDependencies:
+  - '@open-wa/wa-automate'
+  - '@prisma/client'
+  - '@prisma/engines'
+  - '@whiskeysockets/baileys'
+  - cloudflared
+  - esbuild
+  - msgpackr-extract
+  - prisma
+  - protobufjs
+  - puppeteer
+  - sharp
+  - unix-dgram

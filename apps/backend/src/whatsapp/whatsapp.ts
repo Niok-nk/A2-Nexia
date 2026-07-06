@@ -92,10 +92,10 @@ export const resolvePhoneFromJid = async (jid: string): Promise<string> => {
 		}
 		
 		// 2. Intentar con el auth-key-store usando la clave '{lid}_reverse' (formato real de Baileys)
-		if (sock?.authState?.keys) {
+		if ((sock as any)?.authState?.keys) {
 			try {
 				const reverseKey = `${cleanLid}_reverse`;
-				const results = await sock.authState.keys.get('lid-mapping', [reverseKey, cleanLid]);
+				const results = await (sock as any).authState.keys.get('lid-mapping', [reverseKey, cleanLid]);
 				const raw = results?.[reverseKey] ?? results?.[cleanLid];
 				if (raw) {
 					const cleanPn = String(raw).replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '').trim();
@@ -155,10 +155,10 @@ export const backfillLidMappings = async (): Promise<void> => {
 
 			// 2. Consultar auth-key-store con clave '{lid}_reverse' (formato correcto de Baileys)
 			let resolved = false;
-			if (sock?.authState?.keys) {
+			if ((sock as any)?.authState?.keys) {
 				try {
 					const reverseKey = `${lid}_reverse`;
-					const results = await sock.authState.keys.get('lid-mapping', [reverseKey, lid]);
+					const results = await (sock as any).authState.keys.get('lid-mapping', [reverseKey, lid]);
 					const raw = results?.[reverseKey] ?? results?.[lid];
 					if (raw) {
 						const cleanPn = String(raw).replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '').trim();
@@ -230,10 +230,10 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 
 		const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
-		// Obtener la versión de WhatsApp Web más reciente para evitar fallos de inicio de sesión ("no se pudo iniciar sesión")
-		let version: [number, number, number] = [2, 3000, 1039904970];
+		// Obtener la versión de WhatsApp Web más reciente
+		let version: [number, number, number] = [2, 2413, 51];
 		try {
-			const { version: latestVersion, isLatest } = await fetchLatestWaWebVersion();
+			const { version: latestVersion, isLatest } = await fetchLatestWaWebVersion({});
 			logger.info({ latestVersion, isLatest }, 'Fetched latest WhatsApp Web version from WaWeb');
 			version = latestVersion;
 		} catch (err) {
@@ -241,28 +241,28 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 		}
 
 		const baileysLogger = logger.child({ module: 'baileys' });
-		baileysLogger.level = 'warn';
+		baileysLogger.level = 'info';
 
 		const client = makeWASocket({
 			auth: state,
 			version,
-			printQRInTerminal: true,
+			printQRInTerminal: false,
 			logger: baileysLogger as any,
-			browser: Browsers.macOS('Desktop'),
+			browser: Browsers.windows('Desktop'),
 		});
 
 		sock = client;
 
 		client.ev.on('creds.update', saveCreds);
 
-		// Eventos de mapeo LID a número de teléfono (PN)
-		client.ev.on('lid-mapping.update', (mapping) => {
+		// Eventos de mapeo LID a número de teléfono (PN) — con type casts para compatibilidad v6/v7
+		(client.ev as any).on('lid-mapping.update', (mapping: any) => {
 			if (mapping) {
 				registerLidMapping(mapping.lid, mapping.pn);
 			}
 		});
 
-		client.ev.on('messaging-history.set', async (history) => {
+		client.ev.on('messaging-history.set', async (history: any) => {
 			if (history.lidPnMappings) {
 				for (const mapping of history.lidPnMappings) {
 					registerLidMapping(mapping.lid, mapping.pn);
@@ -281,7 +281,7 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 			setTimeout(() => backfillLidMappings().catch((e) => logger.warn({ e }, 'backfill error after history.set')), 2000);
 		});
 
-		client.ev.on('contacts.upsert', (contacts) => {
+		client.ev.on('contacts.upsert', (contacts: any) => {
 			for (const c of contacts) {
 				if (c.lid && c.phoneNumber) {
 					registerLidMapping(c.lid, c.phoneNumber);
@@ -291,7 +291,7 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 			}
 		});
 
-		client.ev.on('contacts.update', (updates) => {
+		client.ev.on('contacts.update', (updates: any) => {
 			for (const u of updates) {
 				if (u.lid && u.phoneNumber) {
 					registerLidMapping(u.lid, u.phoneNumber);
@@ -305,9 +305,9 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 			const { connection, lastDisconnect, qr } = update;
 			
 			if (qr) {
-				logger.info('QR Code received. Scan with WhatsApp.');
 				currentQR = qr;
 				isReady = false;
+				logger.info('QR Code received. Scan with WhatsApp.');
 			}
 
 			if (connection === 'close') {
@@ -315,9 +315,10 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 				currentQR = null;
 				
 				const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+				const errorMessage = (lastDisconnect?.error as Boom)?.message || (lastDisconnect?.error as any)?.message;
 				const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== DisconnectReason.badSession;
 				
-				logger.info({ shouldReconnect, statusCode, error: lastDisconnect?.error }, 'Connection closed');
+				logger.error({ shouldReconnect, statusCode, errorMessage, error: lastDisconnect?.error?.stack || lastDisconnect?.error }, 'Connection closed');
 				
 				if (shouldReconnect) {
 					logger.info('Attempting reconnect due to connection drop...');
@@ -332,6 +333,8 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 				currentQR = null;
 				// Intentar rellenar realPhone para contactos con LID sin resolver
 				setTimeout(() => backfillLidMappings().catch((e) => logger.warn({ e }, 'backfill error')), 5000);
+			} else if (connection === 'connecting') {
+				logger.info('WhatsApp connecting...');
 			}
 		});
 
@@ -410,9 +413,12 @@ export const sendMessage = async (to: string, message: string): Promise<void> =>
 };
 
 export const reconnectWhatsApp = async (forceNewSession = true): Promise<boolean> => {
-	if (isReconnecting) {
+	if (isReconnecting && !forceNewSession) {
 		logger.info('Reconnection already in progress, skipping duplicate call...');
 		return false;
+	}
+	if (forceNewSession && isReconnecting) {
+		logger.info('User-triggered reconnect detected, forcing new session...');
 	}
 	isReconnecting = true;
 
