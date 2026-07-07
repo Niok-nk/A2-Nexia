@@ -39,15 +39,19 @@ export const registerLidMapping = async (lid: string, pn: string) => {
 			
 			// Actualizar en segundo plano en la BD de Prisma
 			try {
-				const contact = await (prisma.contact as any).findUnique({
-					where: { phone: cleanLid }
-				});
-				if (contact && !(contact as any).realPhone) {
-					await (prisma.contact as any).update({
-						where: { phone: cleanLid },
-						data: { realPhone: cleanPn }
+				// Solo actualizar si el phone parece un LID (15+ dígitos) para evitar
+				// pisar realPhone con un mapeo incorrecto para números regulares
+				if (cleanLid.length >= 15) {
+					const contact = await (prisma.contact as any).findUnique({
+						where: { phone: cleanLid }
 					});
-					logger.info({ lid: cleanLid, realPhone: cleanPn }, 'Updated contact realPhone in DB');
+					if (contact && !(contact as any).realPhone) {
+						await (prisma.contact as any).update({
+							where: { phone: cleanLid },
+							data: { realPhone: cleanPn }
+						});
+						logger.info({ lid: cleanLid, realPhone: cleanPn }, 'Updated contact realPhone in DB');
+					}
 				}
 			} catch (err) {
 				logger.error({ err, lid: cleanLid }, 'Failed to update contact realPhone in DB');
@@ -138,7 +142,8 @@ export const backfillLidMappings = async (): Promise<void> => {
 			select: { phone: true },
 		});
 
-		const candidates = contacts.map((c: any) => c.phone).filter((p: any) => /^\d{9,20}$/.test(p));
+		// Solo tratar como LID los números de 15+ dígitos (los teléfonos reales son <=13)
+		const candidates = contacts.map((c: any) => c.phone).filter((p: any) => /^\d{15,}$/.test(p));
 
 		if (candidates.length === 0) return;
 
@@ -248,7 +253,7 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 			version,
 			printQRInTerminal: false,
 			logger: baileysLogger as any,
-			browser: Browsers.windows('Desktop'),
+			browser: Browsers.macOS('Desktop'),
 		});
 
 		sock = client;
