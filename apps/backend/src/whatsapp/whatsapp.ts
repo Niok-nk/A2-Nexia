@@ -4,7 +4,9 @@ import makeWASocket, {
 	WASocket,
 	fetchLatestWaWebVersion,
 	Browsers,
-	isLidUser
+	isLidUser,
+	USyncQuery,
+	USyncUser
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import fs from 'fs/promises';
@@ -121,8 +123,30 @@ export const resolvePhoneFromJid = async (jid: string): Promise<string> => {
 			logger.info({ jid, resolved: filePhone, source: 'file' }, 'Resolved LID to PN from file');
 			return filePhone;
 		}
+
+		// 4. Consultar al servidor de WhatsApp vía USyncQuery con LID protocol
+		if (sock) {
+			try {
+				const query = new USyncQuery()
+					.withContactProtocol()
+					.withLIDProtocol()
+					.withUser(new USyncUser().withLid(`${cleanLid}@lid`));
+				const result = await (sock as any).executeUSyncQuery(query);
+				const entry = result?.list?.find((a: any) => a.id?.includes('@s.whatsapp.net') && !a.id?.includes('@lid'));
+				if (entry?.id) {
+					const queryPn = entry.id.replace(/@s\.whatsapp\.net|@c\.us/g, '').trim();
+					if (queryPn && queryPn !== cleanLid) {
+						await registerLidMapping(cleanLid, queryPn);
+						logger.info({ jid, resolved: queryPn, source: 'query' }, 'Resolved LID to PN via server query');
+						return queryPn;
+					}
+				}
+			} catch (err) {
+				logger.warn({ err, jid }, 'Failed to query LID via USyncQuery');
+			}
+		}
 		
-		// 4. Fallback: retornar el LID crudo
+		// 5. Fallback: retornar el LID crudo
 		logger.warn({ jid }, 'LID could not be resolved to phone number, returning raw LID');
 		return cleanLid;
 	}
@@ -179,7 +203,30 @@ export const backfillLidMappings = async (): Promise<void> => {
 				}
 			}
 
-			// 3. Fallback: leer directamente el archivo del disco
+			// 3. Consultar al servidor de WhatsApp vía USyncQuery
+			if (!resolved && sock) {
+				try {
+					const query = new USyncQuery()
+						.withContactProtocol()
+						.withLIDProtocol()
+						.withUser(new USyncUser().withLid(`${lid}@lid`));
+					const result = await (sock as any).executeUSyncQuery(query);
+					const entry = result?.list?.find((a: any) => a.id?.includes('@s.whatsapp.net') && !a.id?.includes('@lid'));
+					if (entry?.id) {
+						const queryPn = entry.id.replace(/@s\.whatsapp\.net|@c\.us/g, '').trim();
+						if (queryPn && queryPn !== lid) {
+							lidToPhone.set(lid, queryPn);
+							await (prisma.contact as any).update({ where: { phone: lid }, data: { realPhone: queryPn } });
+							logger.info({ lid, realPhone: queryPn }, 'Backfill: realPhone set from server query');
+							resolved = true;
+						}
+					}
+				} catch (err) {
+					logger.warn({ err, lid }, 'Backfill: failed to query LID via USyncQuery');
+				}
+			}
+
+			// 4. Fallback: leer directamente el archivo del disco
 			if (!resolved) {
 				const filePhone = await readLidFromFile(lid);
 				if (filePhone) {
