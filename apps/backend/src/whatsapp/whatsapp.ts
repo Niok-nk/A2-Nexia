@@ -275,10 +275,11 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 			}
 			if (history.contacts) {
 				for (const c of history.contacts) {
-					if (c.lid && c.phoneNumber) {
-						registerLidMapping(c.lid, c.phoneNumber);
-					} else if (c.id && isLidUser(c.id) && c.phoneNumber) {
-						registerLidMapping(c.id, c.phoneNumber);
+					const pn = c.phoneNumber || (c.id?.replace(/@s\.whatsapp\.net|@c\.us/g, ''));
+					if (c.lid && pn) {
+						registerLidMapping(c.lid, pn);
+					} else if (c.id && isLidUser(c.id) && pn) {
+						registerLidMapping(c.id, pn);
 					}
 				}
 			}
@@ -288,20 +289,22 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 
 		client.ev.on('contacts.upsert', (contacts: any) => {
 			for (const c of contacts) {
-				if (c.lid && c.phoneNumber) {
-					registerLidMapping(c.lid, c.phoneNumber);
-				} else if (c.id && isLidUser(c.id) && c.phoneNumber) {
-					registerLidMapping(c.id, c.phoneNumber);
+				const pn = c.phoneNumber || (c.id?.replace(/@s\.whatsapp\.net|@c\.us/g, ''));
+				if (c.lid && pn) {
+					registerLidMapping(c.lid, pn);
+				} else if (c.id && isLidUser(c.id) && pn) {
+					registerLidMapping(c.id, pn);
 				}
 			}
 		});
 
 		client.ev.on('contacts.update', (updates: any) => {
 			for (const u of updates) {
-				if (u.lid && u.phoneNumber) {
-					registerLidMapping(u.lid, u.phoneNumber);
-				} else if (u.id && isLidUser(u.id) && u.phoneNumber) {
-					registerLidMapping(u.id, u.phoneNumber);
+				const pn = u.phoneNumber || (u.id?.replace(/@s\.whatsapp\.net|@c\.us/g, ''));
+				if (u.lid && pn) {
+					registerLidMapping(u.lid, pn);
+				} else if (u.id && isLidUser(u.id) && pn) {
+					registerLidMapping(u.id, pn);
 				}
 			}
 		});

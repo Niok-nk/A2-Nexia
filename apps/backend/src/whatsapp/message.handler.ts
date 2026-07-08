@@ -1,4 +1,4 @@
-import { WAMessage } from '@whiskeysockets/baileys';
+import { WAMessage, isLidUser } from '@whiskeysockets/baileys';
 import prisma from '../db/index.js';
 import { orchestrator } from '../agents/orchestrator.js';
 import { extractAndSaveData } from '../agents/data-extractor.js';
@@ -126,7 +126,13 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 	}
 
 	// 2. Intentar resolver el número de teléfono real
-	const realPhone = await resolvePhoneFromJid(remoteJid);
+	let realPhone = await resolvePhoneFromJid(remoteJid);
+	// Si no se pudo resolver (ej: LID sin mapeo aún), reintentar tras breve espera
+	// para dar tiempo a que llegue el evento contacts.upsert con el mapeo
+	if (isLidUser(remoteJid) && (realPhone === phone || !realPhone)) {
+		await sleep(3000);
+		realPhone = await resolvePhoneFromJid(remoteJid);
+	}
 
 	// Extraer el texto del mensaje admitiendo diferentes formatos de mensaje de Baileys
 	let body = (
@@ -181,7 +187,7 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 			},
 			create: {
 				phone,
-				realPhone: realPhone !== phone ? realPhone : (phone.startsWith('158') && phone.length >= 14 ? null : phone)
+				realPhone: realPhone !== phone ? realPhone : (phone.length >= 14 ? null : phone)
 			},
 		});
 
@@ -287,7 +293,7 @@ export async function processIncomingMessage(
 			},
 			create: { 
 				phone,
-				realPhone: realPhone !== phone ? realPhone : (phone.startsWith('158') && phone.length >= 14 ? null : phone)
+				realPhone: realPhone !== phone ? realPhone : (phone.length >= 14 ? null : phone)
 			},
 		});
 
