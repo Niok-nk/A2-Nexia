@@ -602,10 +602,7 @@ tbody tr:hover { background: var(--color-bg-hover); }
   text-align: center;
   margin-bottom: var(--space-8);
 }
-.login-logo-img {
-  width: 140px;
-  color: var(--color-primary);
-}
+
 .form-group {
   margin-bottom: var(--space-4);
 }

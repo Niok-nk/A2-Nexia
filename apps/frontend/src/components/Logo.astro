@@ -1,9 +1,18 @@
 ---
-const { class: className, width = 140, height } = Astro.props;
+interface Props {
+  class?: string;
+  width?: number;
+  height?: number;
+  color?: string;
+}
+
+const { class: className, width = 140, height, color } = Astro.props;
+const style = color ? `color: ${color}` : undefined;
 ---
 
 <svg
   class={className}
+  style={style}
   xmlns="http://www.w3.org/2000/svg"
   viewBox="0 0 98.29 78.99"
   width={width}
