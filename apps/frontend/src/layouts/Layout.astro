@@ -1,6 +1,7 @@
 ---
 import '../styles/global.css';
 import AIChat from '../components/AIChat.astro';
+import Logo from '../components/Logo.astro';
 
 interface Props {
   title?: string;
@@ -33,9 +34,7 @@ const navItems = [
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-logo">
-        <div class="logo-icon">
-          <img src="/nexia-b.svg" alt="Nexia" class="logo-svg" />
-        </div>
+        <Logo width={36} color="var(--color-primary)" />
         <div>
           <div class="logo-text">JLC Electronics</div>
           <div class="logo-sub">WhatsApp Bot IA</div>
