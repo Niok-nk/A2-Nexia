@@ -1,13 +1,12 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import Logo from '../components/Logo.astro';
 ---
 <Layout showSidebar={false} title="Login">
   <div class="login-page">
     <div class="login-card">
       <div class="login-logo">
-        <div class="icon">CRM</div>
-        <h1>CRM IA WhatsApp</h1>
-        <p>Ingresa tus credenciales para continuar</p>
+        <Logo class="login-logo-img" />
       </div>
 
       <div id="login-error" class="login-error" style="display:none;"></div>
