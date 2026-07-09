@@ -32,7 +32,7 @@ const lidToPhone = new Map<string, string>();
 export const registerLidMapping = async (lid: string, pn: string) => {
 	if (!lid || !pn) return;
 	const cleanLid = lid.replace('@lid', '').trim();
-	const cleanPn = pn.replace('@s.whatsapp.net', '').replace('@c.us', '').trim();
+	const cleanPn = pn.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '').trim();
 	if (cleanLid && cleanPn) {
 		const existing = lidToPhone.get(cleanLid);
 		if (existing !== cleanPn) {
@@ -125,20 +125,30 @@ export const resolvePhoneFromJid = async (jid: string): Promise<string> => {
 		}
 
 		// 4. Consultar al servidor de WhatsApp vía USyncQuery con LID protocol
+		// Usamos withId con el JID del LID para que el servidor pueda resolverlo
 		if (sock) {
 			try {
 				const query = new USyncQuery()
 					.withContactProtocol()
 					.withLIDProtocol()
-					.withUser(new USyncUser().withLid(`${cleanLid}@lid`));
+					.withUser(new USyncUser().withId(`${cleanLid}@lid`));
 				const result = await (sock as any).executeUSyncQuery(query);
-				const entry = result?.list?.find((a: any) => a.id?.includes('@s.whatsapp.net') && !a.id?.includes('@lid'));
-				if (entry?.id) {
-					const queryPn = entry.id.replace(/@s\.whatsapp\.net|@c\.us/g, '').trim();
-					if (queryPn && queryPn !== cleanLid) {
-						await registerLidMapping(cleanLid, queryPn);
-						logger.info({ jid, resolved: queryPn, source: 'query' }, 'Resolved LID to PN via server query');
-						return queryPn;
+				// El servidor puede responder con id = phone JID o id = LID JID
+				// Buscamos cualquier entry que tenga contact:true y cuyo id o lid resuelva a un PN distinto
+				const entry = result?.list?.find((a: any) => {
+					if (!a.contact) return false;
+					const eid = a.id?.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '');
+					const elid = a.lid?.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '');
+					// Si el id o lid del response es distinto al LID que consultamos, es un PN real
+					return (eid && eid !== cleanLid) || (elid && elid !== cleanLid);
+				});
+				if (entry) {
+					// Si el id del entry parece un PN (no es el mismo LID), usarlo
+					const eid = entry.id?.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '');
+					if (eid && eid !== cleanLid) {
+						await registerLidMapping(cleanLid, eid);
+						logger.info({ jid, resolved: eid, source: 'query' }, 'Resolved LID to PN via server query');
+						return eid;
 					}
 				}
 			} catch (err) {
@@ -209,15 +219,20 @@ export const backfillLidMappings = async (): Promise<void> => {
 					const query = new USyncQuery()
 						.withContactProtocol()
 						.withLIDProtocol()
-						.withUser(new USyncUser().withLid(`${lid}@lid`));
+						.withUser(new USyncUser().withId(`${lid}@lid`));
 					const result = await (sock as any).executeUSyncQuery(query);
-					const entry = result?.list?.find((a: any) => a.id?.includes('@s.whatsapp.net') && !a.id?.includes('@lid'));
-					if (entry?.id) {
-						const queryPn = entry.id.replace(/@s\.whatsapp\.net|@c\.us/g, '').trim();
-						if (queryPn && queryPn !== lid) {
-							lidToPhone.set(lid, queryPn);
-							await (prisma.contact as any).update({ where: { phone: lid }, data: { realPhone: queryPn } });
-							logger.info({ lid, realPhone: queryPn }, 'Backfill: realPhone set from server query');
+					const entry = result?.list?.find((a: any) => {
+						if (!a.contact) return false;
+						const eid = a.id?.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '');
+						const elid = a.lid?.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '');
+						return (eid && eid !== lid) || (elid && elid !== lid);
+					});
+					if (entry) {
+						const eid = entry.id?.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '');
+						if (eid && eid !== lid) {
+							lidToPhone.set(lid, eid);
+							await (prisma.contact as any).update({ where: { phone: lid }, data: { realPhone: eid } });
+							logger.info({ lid, realPhone: eid }, 'Backfill: realPhone set from server query');
 							resolved = true;
 						}
 					}
@@ -322,7 +337,7 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 			}
 			if (history.contacts) {
 				for (const c of history.contacts) {
-					const pn = c.phoneNumber || (c.id?.replace(/@s\.whatsapp\.net|@c\.us/g, ''));
+					const pn = c.phoneNumber || (c.id?.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, ''));
 					if (c.lid && pn) {
 						registerLidMapping(c.lid, pn);
 					} else if (c.id && isLidUser(c.id) && pn) {
@@ -336,7 +351,7 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 
 		client.ev.on('contacts.upsert', (contacts: any) => {
 			for (const c of contacts) {
-				const pn = c.phoneNumber || (c.id?.replace(/@s\.whatsapp\.net|@c\.us/g, ''));
+				const pn = c.phoneNumber || (c.id?.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, ''));
 				if (c.lid && pn) {
 					registerLidMapping(c.lid, pn);
 				} else if (c.id && isLidUser(c.id) && pn) {
@@ -347,7 +362,7 @@ export const initWhatsApp = async (forceNewSession = false, isInternalReconnect 
 
 		client.ev.on('contacts.update', (updates: any) => {
 			for (const u of updates) {
-				const pn = u.phoneNumber || (u.id?.replace(/@s\.whatsapp\.net|@c\.us/g, ''));
+				const pn = u.phoneNumber || (u.id?.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, ''));
 				if (u.lid && pn) {
 					registerLidMapping(u.lid, pn);
 				} else if (u.id && isLidUser(u.id) && pn) {
