@@ -464,12 +464,24 @@ export const sendMessage = async (to: string, message: string): Promise<void> =>
 	const cleanTo = to.replace('@lid', '').replace('@s.whatsapp.net', '').replace('@c.us', '').trim();
 	
 	// Determinar si el destinatario es un LID (ej. cuenta nueva sin número de teléfono resuelto aún)
-	const isLid = to.includes('@lid') || (cleanTo.startsWith('158') && cleanTo.length >= 14);
+	const isLid = to.includes('@lid') || (cleanTo.length >= 15 && /^\d+$/.test(cleanTo));
 
 	if (isLid) {
-		const jid = `${cleanTo}@lid`;
-		logger.info({ originalTo: to, jid }, 'Sending WhatsApp message to LID');
-		await sock.sendMessage(jid, { text: message });
+		// Intentar resolver el LID a número de teléfono para evitar errores de sesión de cifrado
+		const resolvedPhone = await resolvePhoneFromJid(cleanTo + '@lid');
+		if (resolvedPhone && resolvedPhone !== cleanTo) {
+			let phone = resolvedPhone.replace(/@s\.whatsapp\.net|@c\.us|@lid/g, '').trim();
+			if (phone.length === 10) {
+				phone = '57' + phone;
+			}
+			const jid = `${phone}@s.whatsapp.net`;
+			logger.info({ originalTo: to, resolvedPhone: phone, jid }, 'Sending WhatsApp message (LID resolved to phone)');
+			await sock.sendMessage(jid, { text: message });
+		} else {
+			const jid = `${cleanTo}@lid`;
+			logger.info({ originalTo: to, jid }, 'Sending WhatsApp message to LID (fallback)');
+			await sock.sendMessage(jid, { text: message });
+		}
 	} else {
 		let phone = cleanTo;
 		if (phone.length === 10) {
