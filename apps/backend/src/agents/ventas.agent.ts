@@ -220,6 +220,28 @@ export async function buscarProductoInteligente(
 		} catch { /* continuar */ }
 	}
 
+	// ── Estrategia 9: IA extrae producto y busca en la categoría detectada ──
+	if (categoria) {
+		try {
+			const terminoIA = await extraerProductoConIA(mensaje);
+			if (terminoIA && terminoIA.length >= 2) {
+				const query = `${categoria} ${terminoIA}`;
+				const resultsIA = await wooCommerceService.searchProducts(query, 20);
+				if (resultsIA?.length > 0) return { products: resultsIA, estrategia: 'ia_categoria' };
+				const resultsSolo = await wooCommerceService.searchProducts(terminoIA, 20);
+				if (resultsSolo?.length > 0) return { products: resultsSolo, estrategia: 'ia_solo' };
+			}
+		} catch { /* continuar */ }
+	} else {
+		try {
+			const terminoIA = await extraerProductoConIA(mensaje);
+			if (terminoIA && terminoIA.length >= 2) {
+				const resultsIA = await wooCommerceService.searchProducts(terminoIA, 20);
+				if (resultsIA?.length > 0) return { products: resultsIA, estrategia: 'ia_sin_categoria' };
+			}
+		} catch { /* continuar */ }
+	}
+
 	return { products: [], estrategia: 'sin_resultados', sku: sku || undefined };
 }
 
@@ -2145,6 +2167,14 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 					if (productosDisponibles.length === 0) {
 						productosDisponibles = await wooCommerceService.searchProducts(cat, 20);
 						estrategiaBusqueda = 'categoria';
+					}
+					if (productosDisponibles.length === 0) {
+						const terminoIA = await extraerProductoConIA(terminoParaBuscar || message);
+						if (terminoIA) {
+							const query = `${cat} ${terminoIA}`;
+							productosDisponibles = await wooCommerceService.searchProducts(query, 20);
+							if (productosDisponibles.length > 0) estrategiaBusqueda = 'ia_categoria_fallback';
+						}
 					}
 				} catch { /* continuar sin productos */ }
 
