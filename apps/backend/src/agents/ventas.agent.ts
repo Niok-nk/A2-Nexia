@@ -2720,12 +2720,12 @@ ${context?.tieneCobertura
 REGLAS DE CATÁLOGO:
 - Muestra SOLO 1 producto a la vez. Elige el mejor candidato según lo que sepas del cliente. Si el cliente pide "ver opciones", no le muestres todo el catálogo — elige UN producto y preséntalo, luego pregunta algo para seguir perfilando (uso, capacidad que necesita, etc.).
 - NO preguntes por presupuesto si el cliente ya te dio el dato, ya viste el precio del producto o ya mostraste el precio. Si el cliente ya sabe qué producto quiere y su precio, ofrécele las opciones de pago directamente para cerrar la venta.
-- Siempre incluye el enlace del producto al presentarlo, pero SOLO si tienes el enlace real del catálogo (campo "Enlace:" de los datos del producto). NUNCA inventes, generes ni construyas URLs. Si el producto no tiene enlace real, no compartas ningún link. Nunca preguntes si quiere el enlace.
+- SIEMPRE incluye el enlace del producto al presentarlo (campo "Enlace:" del catálogo). NUNCA menciones un producto si no aparece en el catálogo con su enlace real. NUNCA inventes, generes ni construyas URLs. Si el producto no tiene enlace en el catálogo, no lo menciones. Nunca preguntes si quiere el enlace.
 - Si el cliente pregunta detalles/especificaciones de un producto del catálogo, responde usando su información de "Detalles".
 - Si el cliente pide "más información" de un producto que YA fue identificado y mostrado, dale los detalles disponibles y OFRÉCELE ir al pago. No preguntes presupuesto ni entres en perfilado.
 - Si el cliente ya identificó un producto (por nombre, número o SKU), concéntrate en ese producto.
-- Si el catálogo está vacío o dice "No se encontraron productos", sé honesta: "En este momento no tengo disponibilidad de [producto que busca el cliente]." Pregunta si busca otra cosa. NUNCA inventes productos, marcas, modelos, categorías ("ollas a presión", "licuadoras", etc.) ni menciones lo que SÍ tienes si el catálogo está vacío. Si no hay nada, no digas que tienes otra cosa.
-- Si el cliente pide una opción más económica o más barata, preséntale el producto más económico disponible en el catálogo. No digas que es el "único" modelo disponible ni que no hay más opciones. Si solo hay un producto en el catálogo, preséntalo como la mejor opción disponible.
+- Si el catálogo está vacío o dice "No se encontraron productos", sé honesta: "En este momento no tengo disponibilidad de [producto que busca el cliente]." Pregunta si busca otra cosa. NUNCA inventes productos, marcas, modelos, especificaciones técnicas, precios ni categorías. Si no hay nada en el catálogo, no digas que tienes otra cosa ni inventes productos similares. Solo lo que está en el catálogo existe.
+- Si el cliente pide una opción más económica o más barata, preséntale el producto más económico disponible en el catálogo con su enlace. No digas que es el "único" modelo disponible ni que no hay más opciones. Si solo hay un producto en el catálogo, preséntalo como la mejor opción disponible con su enlace.
 - Si el cliente es de Crédito, NUNCA mostrar precios de productos.
 - Si el cliente pide un producto nuevo o diferente, ayúdale con eso.
 - Si menciona un SKU o referencia que SÍ está en el catálogo, confírmaselo y dale el enlace.
@@ -2765,6 +2765,17 @@ REGLAS DE CATÁLOGO:
 		let response = cleanResponse(raw);
 		response = sanitizarNumerosVentas(response);
 		response = sanitizarURLs(response, products);
+
+		// Si hay productos en el catálogo pero la respuesta no incluye ningún enlace real,
+		// forzar la inclusión del primer producto para evitar que la IA invente productos sin respaldo
+		if (hayProductos && products.length > 0 && productoIndex < products.length) {
+			const primerProducto = products[productoIndex];
+			const linkReal = primerProducto?.permalink;
+			if (linkReal && !response.includes(linkReal.replace(/\/+$/, ''))) {
+				const precio = primerProducto.price ? `$${Number(primerProducto.price).toLocaleString('es-CO')}` : '';
+				response += `\n\n${primerProducto.name} - ${precio}\n${linkReal}`;
+			}
+		}
 
 		return {
 			response,
