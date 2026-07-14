@@ -2796,14 +2796,22 @@ REGLAS DE CATÁLOGO:
 		response = sanitizarNumerosVentas(response);
 		response = sanitizarURLs(response, products);
 
-		// Si hay productos en el catálogo pero la respuesta no incluye ningún enlace real,
-		// forzar la inclusión del primer producto para evitar que la IA invente productos sin respaldo
-		if (hayProductos && products.length > 0 && productoIndex < products.length) {
-			const primerProducto = products[productoIndex];
-			const linkReal = primerProducto?.permalink;
-			if (linkReal && !response.includes(linkReal.replace(/\/+$/, ''))) {
-				const precio = primerProducto.price ? `$${Number(primerProducto.price).toLocaleString('es-CO')}` : '';
-				response += `\n\n${primerProducto.name} - ${precio}\n${linkReal}`;
+		// Si hay productos en el catálogo pero la respuesta no incluye NINGÚN enlace real del catálogo,
+		// forzar la inclusión del primer producto para evitar que la IA invente productos sin respaldo.
+		// Se valida contra TODOS los productos del array, no solo contra productoIndex,
+		// porque la IA pudo haber mostrado un producto distinto al primero del índice.
+		if (hayProductos && products.length > 0) {
+			const tieneAlgunLinkReal = products.some((p: any) => {
+				const l = p?.permalink?.replace(/\/+$/, '');
+				return l && response.includes(l);
+			});
+			if (!tieneAlgunLinkReal) {
+				const target = products[productoIndex] || products[0];
+				const linkReal = target?.permalink;
+				if (linkReal) {
+					const precio = target.price ? `$${Number(target.price).toLocaleString('es-CO')}` : '';
+					response += `\n\n${target.name} - ${precio}\n${linkReal}`;
+				}
 			}
 		}
 
