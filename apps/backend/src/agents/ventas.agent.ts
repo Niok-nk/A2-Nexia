@@ -826,9 +826,16 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		const pidePagar = quierePagarDirecto && !/\b(?:no\s+quiero\s+pagar|no\s+pagar|no\s+voy\s+a\s+pagar|sin\s+pagar|c[oó]mo\s+pago\s+(?:en|con|la|el|las|los))\b/i.test(message);
 
 		if (pidePagar && !context?.flujo) {
-			// Prioridad: productoSeleccionado > match por nombre/SKU > productoCompra > único resultado
+			// Prioridad: productoSeleccionado > confirmación afirmativa + ultimoProductoMostrado > match por nombre/SKU > productoCompra > único resultado
 			const candidatos = context?.ultimaBusqueda?.results ?? [];
 			let tieneProd = context?.productoSeleccionado ?? null;
+
+			// Confirmación afirmativa sin nombre de producto: si el cliente dice "está perfecto",
+			// "dale", "sí", y el bot acaba de mostrar UN producto, ese es el producto
+			const esConfirmacionAfirmativa = !tieneProd && /\b(?:est[aá]\s+perfecto|perfecto|dale|listo|s[ií]\s*$|s[ií]\s+quiero|s[ií]\s+me|correcto|as[ií]\s+es|ese\s+mismo|ese\s+es|justo\s+ese|esa\s+misma)\b/i.test(message);
+			if (esConfirmacionAfirmativa) {
+				tieneProd = context?.ultimoProductoMostrado ?? null;
+			}
 
 			if (!tieneProd && context?.productoCompra) {
 				tieneProd = candidatos.find((p: any) => p.name === context?.productoCompra) ?? null;
@@ -2491,9 +2498,15 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		}
 
 		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago' && !resetFlujo && (!esPreguntaActiva || esPreguntaPago)) {
-			// Prioridad: productoSeleccionado > match por nombre/SKU > precio > único resultado
+			// Prioridad: productoSeleccionado > confirmación afirmativa + ultimoProductoMostrado > match por nombre/SKU > precio > único resultado
 			const ultimosProductos = context?.ultimaBusqueda?.results ?? [];
 			let prod = context?.productoSeleccionado ?? null;
+
+			// Confirmación afirmativa sin nombre de producto
+			if (!prod) {
+				const esConfirmacionAfirmativa = /\b(?:est[aá]\s+perfecto|perfecto|dale|listo|s[ií]\s*$|s[ií]\s+quiero|s[ií]\s+me|correcto|as[ií]\s+es|ese\s+mismo|ese\s+es|justo\s+ese|esa\s+misma)\b/i.test(message);
+				if (esConfirmacionAfirmativa) prod = context?.ultimoProductoMostrado ?? null;
+			}
 
 			// Si no hay selección explícita, buscar match por nombre/SKU mencionado en el mensaje
 			if (!prod) {
@@ -2886,6 +2899,28 @@ REGALS DE CATÁLOGO:
 		response = sanitizarNumerosVentas(response);
 		response = sanitizarURLs(response, products);
 
+		// ── Extraer cuál producto mostró Gemini en la respuesta ──────────────
+		// Buscar qué producto del catálogo aparece primero en la respuesta
+		// (por nombre o SKU). Esto desconecta ultimoProductoMostrado del array
+		// de búsqueda genérica y lo vincula a lo que el cliente realmente vio.
+		let ultimoProductoMostrado: any = null;
+		const responseLower = response.toLowerCase();
+		if (products.length > 0) {
+			for (const p of products) {
+				const nombre = (p.name || '').toLowerCase();
+				const sku = (p.sku || '').toLowerCase();
+				if ((nombre.length > 4 && responseLower.includes(nombre.slice(0, Math.min(nombre.length, 25))))
+					|| (sku.length > 3 && responseLower.includes(sku))) {
+					ultimoProductoMostrado = p;
+					break;
+				}
+			}
+			// Fallback: el más barato si Gemini no mostró ninguno (no debería pasar con productos)
+			if (!ultimoProductoMostrado && products.length === 1) {
+				ultimoProductoMostrado = products[0];
+			}
+		}
+
 		// Si hay productos en el catálogo pero la respuesta no incluye NINGÚN enlace real del catálogo,
 		// forzar la inclusión del primer producto para evitar que la IA invente productos sin respaldo.
 		// Se valida contra TODOS los productos del array, no solo contra productoIndex,
@@ -2916,6 +2951,7 @@ REGALS DE CATÁLOGO:
 				modalidad: context?.modalidad,
 				tieneCobertura: context?.tieneCobertura,
 				flujo: null,
+				...(ultimoProductoMostrado ? { ultimoProductoMostrado, productoCompra: ultimoProductoMostrado.name } : {}),
 				...(productoBuscado.length < 30 && productoBuscado.split(/\s+/).length <= 5 && !/[?¿]/.test(productoBuscado) ? { productoSolicitado: productoBuscado } : {}),
 			ultimaBusqueda: products.length > 0
 				? { results: products.slice(productoIndex, productoIndex + 10), productoIndex, categoria: detectarCategoria(terminoBusqueda) || undefined }
