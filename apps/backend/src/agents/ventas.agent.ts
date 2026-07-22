@@ -820,6 +820,39 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 			};
 		}
 
+		// ── Intención explícita de pago (sin depender de Gemini) ─────────────
+		// "quiero pagar", "si quiero pagar", "cómo pago", "ya voy a pagar", etc.
+		const quierePagarDirecto = /\b(?:s[ií]\s+quiero\s+pagar|quiero\s+pagar|quiero\s+hacer\s+el\s+pago|voy\s+a\s+pagar|ya\s+voy\s+a\s+pagar|quiero\s+proceder\s+(?:al|con\s+el)\s+pago|quiero\s+pagar(?:lo|la)|hacer\s+pago|realizar\s+(?:el\s+)?pago|(?:como|como\s+hago|como\s+puedo)\s+pagar|puedo\s+pagar|necesito\s+pagar|deseo\s+pagar|listo\s+(?:para\s+)?pagar|continuar\s+(?:con\s+el\s+)?pago|proceder\s+(?:al|con\s+el)\s+pago|c[oó]mo\s+(?:es|ser[ií]a)\s+(?:el|para)\s+pago|me\s+(?:puedes|puede|ayuda)\s+(?:ayudar\s+(?:a|con\s+el)\s+pago|con\s+el\s+pago|a\s+pagar))\b/i.test(message);
+		const pidePagar = quierePagarDirecto && !/\b(?:no\s+quiero\s+pagar|no\s+pagar|no\s+voy\s+a\s+pagar|sin\s+pagar|c[oó]mo\s+pago\s+(?:en|con|la|el|las|los))\b/i.test(message);
+
+		if (pidePagar && !context?.flujo) {
+			const tieneProd = context?.ultimaBusqueda?.results?.[0];
+			if (tieneProd) {
+				const ref = tieneProd.sku ? ` (ref. ${tieneProd.sku})` : '';
+				const productoURL = tieneProd.permalink || context?.productoURL;
+				return {
+					response: `¡Con gusto! Te ayudo con el pago de ${tieneProd.name}${ref} 😊 ¿Cómo prefieres pagar?\n\n1️⃣ Por transferencia bancaria (medios autorizados)\nhttps://jlc-electronics.com/wp-content/uploads/2026/05/Medios_de_pago.jpeg\n\n2️⃣ Pagar directamente en la página web (PSE, Tarjeta, Nequi)${context?.tieneCobertura ? '\n3️⃣ Pagar en un punto físico' : ''}`,
+					nextStage: 'PROPOSAL',
+					metadata: {
+						agentType: 'ventas',
+						flujo: 'seleccion_pago',
+						ciudad: context?.ciudad,
+						ciudadValidada: true,
+						tieneCobertura: context?.tieneCobertura,
+						productoURL,
+						productoCompra: tieneProd.name,
+						ultimaBusqueda: context?.ultimaBusqueda,
+					},
+				};
+			} else if (context?.productoSolicitado) {
+				return {
+					response: `Claro, para ayudarte con el pago necesito confirmarte el producto. ¿Es ${context.productoSolicitado} lo que quieres pagar? 😊`,
+					metadata: { agentType: 'ventas', flujo: null, ciudad: context?.ciudad, ciudadValidada: true },
+				};
+			}
+			// Sin producto en contexto → seguir el flujo normal, Gemini responderá
+		}
+
 		// ── Flujo de esperando_ciudad o esperando_modalidad pausado ──────────
 		if (context?.flujo === 'esperando_ciudad_pausado') {
 			const quiereContinuar = /\bs[ií]\b|\bdale\b|\bok\b|\bbueno\b|\bclaro\b|por favor|\bseguir\b|\bcontinuar\b/i.test(lower) || aiClasificacion?.quiereContinuar === true;
@@ -2736,9 +2769,11 @@ ${context?.tieneCobertura
 - Si preguntan por garantía del producto, responde brevemente que tienen 1 año de garantía cubriendo defectos de fábrica, y que la factura de compra es el respaldo. No deriven a servicio técnico ni des números de contacto. La venta la gestionas tú.
 - Si preguntan por la calidad de un producto, responde con honestidad destacando sus ventajas. No preguntes presupuesto ni desvíes la pregunta.
 - Si el cliente confirma que quiere un producto ("me gusta", "lo quiero", "dále", etc.), ofrécele las opciones de pago directamente. No preguntes cuál ni vuelvas a listar productos.
+- MÁXIMO UN llamado a la acción por mensaje. Solo ofrece pago/reserva cuando el cliente ya mostró intención clara sobre un producto específico — no en cada turno de la conversación. Si ya preguntaste "¿te gustaría que te guíe con el pago?" y el cliente no respondió o cambió de tema, NO lo repitas.
+- MANEJO DE INTENCIÓN DE PAGO: cuando el cliente escriba cualquier variante de "quiero pagar", "cómo pago", "si quiero pagar", "ya voy a pagar", "deseo pagar": responde SIEMPRE con los pasos concretos del pago (1️⃣ transferencia, 2️⃣ web, 3️⃣ punto físico) y el enlace de medios de pago. NUNCA respondas con "¿te gustaría que te guíe con el pago?" cuando el cliente YA dijo que sí quiere pagar. Eso genera un loop infinito.
 - NUNCA preguntes "¿Seguimos buscando?" ni "¿Seguimos buscando el producto ideal para ti?". Cuando el cliente muestre interés, ofrécele ir al pago. Si el cliente pide otra opción, muestra un producto diferente. Siempre busca cerrar la venta, no alargar la búsqueda.
-- Si preguntan por opciones de pago o formas de pago, responde y TERMINA preguntando si quiere que lo ayudes con el proceso de pago ("¿Te gustaría que te guíe con el paso a paso? Es súper fácil 😊"). No termines la conversación sin ofrecer ayuda.
-- Después de responder cualquier duda sobre pagos (contraentrega, transferencia, etc.), siempre ofrece ayuda con el proceso de pago de forma natural.
+- Si preguntan por opciones de pago o formas de pago, responde y TERMINA preguntando si quiere que lo ayudes con el proceso de pago UNA SOLA VEZ. Si el cliente ya confirmó que quiere ayuda o dijo "sí", no vuelvas a preguntar — procede con los pasos.
+- Después de responder cualquier duda sobre pagos (contraentrega, transferencia, etc.), ofrece ayuda con el proceso de pago solo si es la primera vez que se menciona el tema.
 - Si el cliente dice que no necesita ayuda o que ya sabe, responde cordialmente que quedo atenta.
 - Si necesitan ayuda para pagar, ofrécete a escalar al equipo de soporte. Si el cliente insiste en un contacto, entrega el número +573187408190.
 - NUNCA menciones "cartera" ni "WhatsApp de cartera" NI números de cartera (314 422 9949, 315 721 2367). Tampoco redirijas al cliente a cartera desde ventas. Si el cliente pide cartera explícitamente o escalar para envío/despacho, entrega únicamente +573187408190.
@@ -2747,9 +2782,10 @@ ${context?.tieneCobertura
 - No compartas direcciones de agencias físicas.
 - Si el cliente dice "no me gusta esa marca" o algo similar, explícale que todos los electrodomésticos son JLC, marca propia colombiana, y ofrécele mostrarle otros modelos del mismo tipo (nunca sugerir otras marcas ni saltar a pago).
  
-REGLAS DE CATÁLOGO:
-- Muestra SOLO 1 producto a la vez. Elige el mejor candidato según lo que sepas del cliente. Si el cliente pide "ver opciones", no le muestres todo el catálogo — elige UN producto y preséntalo, luego pregunta algo para seguir perfilando (uso, capacidad que necesita, etc.).
-- NO preguntes por presupuesto si el cliente ya te dio el dato, ya viste el precio del producto o ya mostraste el precio. Si el cliente ya sabe qué producto quiere y su precio, ofrécele las opciones de pago directamente para cerrar la venta.
+REGALS DE CATÁLOGO:
+- CALIFICA ANTES DE RECOMENDAR. Antes de sugerir ningún producto, confirma al menos 2 de estos 3: (a) uso (hogar/negocio, cuántas personas/volumen), (b) rango de presupuesto, (c) preferencia si la tiene. NO muestres productos hasta tener esta info. La única excepción es si el cliente YA dio estos datos o YA identificó un producto específico.
+- Muestra SOLO 1 producto a la vez. Si el cliente pide "ver opciones" o "asesórame", ofrece 2-3 alternativas escalonadas (nivel medio, alto, premium) con precio de cada una. Si responde "asesórame" a la pregunta de presupuesto, pregúntale ofreciendo 3 rangos: económico/gama media/premium según el catálogo.
+- NUNCA agregues un producto adicional al final de la respuesta que no esté relacionado con lo que el cliente está pidiendo en ese momento. Si la respuesta ya presentó un producto, no repitas ni agregues otro diferente en el mismo mensaje.
 - SIEMPRE incluye el enlace del producto al presentarlo (campo "Enlace:" del catálogo). NUNCA menciones un producto si no aparece en el catálogo con su enlace real. NUNCA inventes, generes ni construyas URLs. Si el producto no tiene enlace en el catálogo, no lo menciones. Nunca preguntes si quiere el enlace.
 - Si el cliente pregunta detalles/especificaciones de un producto del catálogo, responde usando su información de "Detalles".
 - Si el cliente pide "más información" de un producto que YA fue identificado y mostrado, dale los detalles disponibles y OFRÉCELE ir al pago. No preguntes presupuesto ni entres en perfilado.

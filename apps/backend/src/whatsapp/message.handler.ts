@@ -213,7 +213,7 @@ export async function handleIncomingMessage(msg: WAMessage): Promise<void> {
 			})
 			.catch((err) => logger.error({ error: err, phone }, 'bufferForDebounce failed'));
 	} catch (error) {
-		logger.error({ error, phone }, 'Error handling incoming message');
+		logger.error({ errorMessage: (error as Error).message, errorStack: (error as Error).stack, phone }, 'Error handling incoming message');
 	}
 }
 
@@ -230,6 +230,14 @@ export function bufferForDebounce(
 ): Promise<{ response: string; agentType: string }> {
 	const existing = debounceBatch.get(phone);
 	if (existing) {
+		// DEDUPE: si el mismo mensaje ya está en el batch, no duplicarlo
+		const normalizedBody = body.toLowerCase().trim();
+		const isDuplicate = existing.entries.some(e => e.body.toLowerCase().trim() === normalizedBody);
+		if (isDuplicate) {
+			logger.info({ phone, body: body.slice(0, 40) }, '→ bufferForDebounce: duplicate skipped');
+			return Promise.resolve({ response: '', agentType: 'BUFFERED_DUPE' });
+		}
+
 		clearTimeout(existing.timer);
 		existing.entries.push({ body, mediaInfo });
 		existing.timer = setTimeout(() => flushDebounceBatch(phone), DEBOUNCE_MS);
@@ -270,7 +278,7 @@ async function flushDebounceBatch(phone: string): Promise<void> {
 		batch.resolveFirst(result);
 		logger.info({ phone, agentType: result.agentType, batchedCount: batch.entries.length }, 'Debounced batch completed');
 	} catch (error) {
-		logger.error({ error, phone }, 'Error flushing debounce batch');
+		logger.error({ errorMessage: (error as Error).message, errorStack: (error as Error).stack, phone }, 'Error flushing debounce batch');
 		batch.resolveFirst({ response: '', agentType: 'SYSTEM' });
 	}
 }
@@ -731,7 +739,8 @@ export async function processIncomingMessage(
 
 	return { response, agentType, contactId: contact.id, leadId: lead?.id };
 	} catch (error) {
-		logger.error({ error, phone, body: body.slice(0, 80) }, 'processIncomingMessage error');
+		const err = error as Error;
+		logger.error({ errorMessage: err.message, errorStack: err.stack, errorName: err.name, phone, body: body.slice(0, 80) }, 'processIncomingMessage error');
 		return { response: '', agentType: 'SYSTEM' };
 	}
 }
