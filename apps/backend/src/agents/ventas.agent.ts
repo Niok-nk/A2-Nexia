@@ -826,7 +826,27 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		const pidePagar = quierePagarDirecto && !/\b(?:no\s+quiero\s+pagar|no\s+pagar|no\s+voy\s+a\s+pagar|sin\s+pagar|c[oó]mo\s+pago\s+(?:en|con|la|el|las|los))\b/i.test(message);
 
 		if (pidePagar && !context?.flujo) {
-			const tieneProd = context?.ultimaBusqueda?.results?.[0];
+			// Prioridad: productoSeleccionado > match por nombre/SKU > productoCompra > único resultado
+			const candidatos = context?.ultimaBusqueda?.results ?? [];
+			let tieneProd = context?.productoSeleccionado ?? null;
+
+			if (!tieneProd && context?.productoCompra) {
+				tieneProd = candidatos.find((p: any) => p.name === context?.productoCompra) ?? null;
+			}
+
+			if (!tieneProd && candidatos.length === 1) tieneProd = candidatos[0];
+
+			// Si hay múltiples opciones y no hay match claro, preguntar en vez de adivinar
+			if (!tieneProd && candidatos.length > 1) {
+				const nombres = candidatos.slice(0, 4).map((p: any) => p.name).join(', ');
+				return {
+					response: `¡Claro! Para confirmar tu pago, ¿de cuál de estas opciones se trata: ${nombres}? 😊`,
+					metadata: { agentType: 'ventas', flujo: null, ciudad: context?.ciudad, ciudadValidada: true, ultimaBusqueda: context?.ultimaBusqueda },
+				};
+			}
+
+			if (!tieneProd) tieneProd = candidatos[0]; // fallback absoluto
+
 			if (tieneProd) {
 				const ref = tieneProd.sku ? ` (ref. ${tieneProd.sku})` : '';
 				const productoURL = tieneProd.permalink || context?.productoURL;
@@ -841,6 +861,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 						tieneCobertura: context?.tieneCobertura,
 						productoURL,
 						productoCompra: tieneProd.name,
+						productoSeleccionado: tieneProd,
 						ultimaBusqueda: context?.ultimaBusqueda,
 					},
 				};
@@ -1020,6 +1041,7 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 						tieneCobertura: context?.tieneCobertura,
 						productoCompra: selected.name,
 						productoURL: selected.permalink,
+						productoSeleccionado: selected,
 						ultimaBusqueda: context?.ultimaBusqueda,
 					},
 				};
@@ -2469,7 +2491,37 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 		}
 
 		if (tieneProductos && compraIntencion && context?.flujo !== 'seleccion_pago' && !resetFlujo && (!esPreguntaActiva || esPreguntaPago)) {
-			const prod = productoPorPrecio || context?.ultimaBusqueda?.results?.[0];
+			// Prioridad: productoSeleccionado > match por nombre/SKU > precio > único resultado
+			const ultimosProductos = context?.ultimaBusqueda?.results ?? [];
+			let prod = context?.productoSeleccionado ?? null;
+
+			// Si no hay selección explícita, buscar match por nombre/SKU mencionado en el mensaje
+			if (!prod) {
+				const msgNorm = message.toLowerCase().trim();
+				prod = ultimosProductos.find((p: any) => {
+					const nombre = (p.name || '').toLowerCase();
+					const sku = (p.sku || '').toLowerCase();
+					return nombre.length > 3 && msgNorm.includes(nombre.slice(0, Math.min(nombre.length, 20)))
+						|| (sku.length > 3 && msgNorm.includes(sku));
+				}) ?? null;
+			}
+
+			if (!prod) prod = productoPorPrecio ?? null;
+
+			// Solo usar results[0] como último recurso si hay exactamente 1 producto
+			if (!prod && ultimosProductos.length === 1) prod = ultimosProductos[0];
+
+			// Red de seguridad: si hay múltiples opciones y no hay match, preguntar
+			if (!prod && ultimosProductos.length > 1) {
+				const nombres = ultimosProductos.slice(0, 4).map((p: any) => p.name).join(', ');
+				return {
+					response: `¡Claro! Para confirmar tu pago, ¿de cuál de estas opciones se trata: ${nombres}? 😊`,
+					metadata: { agentType: 'ventas', flujo: null, ciudad: context?.ciudad, ciudadValidada: true, ultimaBusqueda: context?.ultimaBusqueda },
+				};
+			}
+
+			if (!prod) prod = ultimosProductos[0]; // fallback absoluto (no debería llegar aquí)
+
 			const productoURL = prod?.permalink || context?.productoURL;
 			const nombreProducto = prod?.name || context?.ultimaBusqueda?.categoria || context?.terminoBusqueda || 'producto';
 			const ref = prod?.sku ? ` (ref. ${prod.sku})` : '';
@@ -2483,7 +2535,9 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 					ciudadValidada: true,
 					tieneCobertura: context?.tieneCobertura,
 					productoURL,
+					productoCompra: nombreProducto,
 					productoSolicitado: nombreProducto,
+					productoSeleccionado: prod,
 					ultimaBusqueda: context?.ultimaBusqueda,
 					...datosPersonales,
 				},
