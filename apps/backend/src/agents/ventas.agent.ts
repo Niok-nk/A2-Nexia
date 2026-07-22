@@ -852,7 +852,24 @@ Responde de forma personalizada y natural (máximo 2 frases, 1 emoji) indicándo
 				};
 			}
 
-			if (!tieneProd) tieneProd = candidatos[0]; // fallback absoluto
+			// Fallback a DB: si el contexto se perdió pero la DB tiene el producto guardado
+			const dbProducto = context?.userData?.productoSolicitado;
+			if (!tieneProd && dbProducto) {
+				tieneProd = candidatos.find((p: any) => {
+					const n = (p.name || '').toLowerCase();
+					const d = dbProducto.toLowerCase();
+					return n.includes(d.slice(0, 15)) || d.includes(n.slice(0, 15));
+				}) ?? null;
+				// Si no está en candidates, usar el nombre de la DB para confirmar
+				if (!tieneProd) {
+					return {
+						response: `Claro, para ayudarte con el pago necesito confirmarte. ¿Es el *${dbProducto}* el que quieres pagar? 😊`,
+						metadata: { agentType: 'ventas', flujo: null, ciudad: context?.ciudad, ciudadValidada: true },
+					};
+				}
+			}
+
+			if (!tieneProd) tieneProd = candidatos[0]; // último recurso (solo se llega sin DB ni candidatos)
 
 			if (tieneProd) {
 				const ref = tieneProd.sku ? ` (ref. ${tieneProd.sku})` : '';
@@ -2925,7 +2942,8 @@ REGALS DE CATÁLOGO:
 		// forzar la inclusión del primer producto para evitar que la IA invente productos sin respaldo.
 		// Se valida contra TODOS los productos del array, no solo contra productoIndex,
 		// porque la IA pudo haber mostrado un producto distinto al primero del índice.
-		if (hayProductos && products.length > 0) {
+		// Si Gemini ya mencionó un producto (ultimoProductoMostrado), no duplicar.
+		if (hayProductos && products.length > 0 && !ultimoProductoMostrado) {
 			const tieneAlgunLinkReal = products.some((p: any) => {
 				const l = p?.permalink?.replace(/\/+$/, '');
 				return l && response.includes(l);
